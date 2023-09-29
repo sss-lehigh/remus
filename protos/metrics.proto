@@ -1,0 +1,39 @@
+syntax = "proto2";
+
+package rome.metrics;
+
+message MetricProto {
+  optional string name = 1;
+  oneof metric {
+    CounterProto counter = 2;
+    StopwatchProto stopwatch = 3;
+    SummaryProto summary = 4;
+  }
+};
+
+message CounterProto {
+  optional uint64 count = 1;
+};
+
+message StopwatchProto {
+  optional uint64 runtime_ns = 1;
+};
+
+message SummaryProto {
+  // Measurement units
+  optional string units = 1;
+
+  // Summary statistics
+  optional double mean = 2;
+  optional double stddev = 3;
+  optional double min = 4;
+  optional double p50 = 6;
+  optional double p90 = 7;
+  optional double p95 = 8;
+  optional double p99 = 9;
+  optional double p999 = 10;
+  optional double max = 11;
+
+  // Total number of samples collected.
+  optional uint64 count = 12;
+};

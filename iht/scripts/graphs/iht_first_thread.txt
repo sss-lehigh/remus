@@ -1,0 +1,7 @@
+IHT Client Throughput Graph
+(r320 [mlnx-4], 3 clients, 100ns think-time,
+0-100000 key range, 60 seconds runtime)
+Thread Amount
+Total Throughput (ops/second)
+['1 threads', '2 threads', '3 threads', '4 threads', '5 threads']
+[106891.45887402748, 76294.78929704105, 65195.01180292303, 55165.274025214356, 38521.85633056734]

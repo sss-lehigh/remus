@@ -1,0 +1,7 @@
+Hashtable Client Throughput Graph
+(r320 [mlnx-4], 1 thread, 100ns think-time,
+0-100000 key range, 60 seconds runtime)
+Client Amount
+Total Throughput (ops/second)
+['1 clients', '2 clients', '3 clients', '4 clients', '5 clients', '6 clients', '7 clients', '8 clients', '9 clients', '10 clients']
+[50681.17391453196, 98763.30173925245, 126909.12911981525, 150952.4166351293, 200252.71469700045, 227504.49977849526, 263319.385770007, 291899.57105154527, 303166.30744616257, 363967.7820119252]

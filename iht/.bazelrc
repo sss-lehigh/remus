@@ -1,0 +1,33 @@
+# Use our custom-configured c++ toolchain.
+build:clang --crosstool_top=@rome//:clang_suite
+build:gcc --crosstool_top=@rome//:gcc_suite
+
+# Use the default Bazel C++ toolchain to build the tools used during the
+# build.
+build:clang --host_crosstool_top=@bazel_tools//tools/cpp:toolchain
+build:gcc --host_crosstool_top=@bazel_tools//tools/cpp:toolchain
+
+build:asan --crosstool_top=@rome//:clang_suite
+build:asan --host_crosstool_top=@bazel_tools//tools/cpp:toolchain
+build:asan -c dbg
+build:asan --copt=-fsanitize=address
+build:asan --copt=-fno-sanitize-blacklist
+build:asan --linkopt=-fsanitize=address
+
+build:tsan --crosstool_top=@rome//:clang_suite
+build:tsan --host_crosstool_top=@bazel_tools//tools/cpp:toolchain
+build:tsan -c dbg
+build:tsan --copt=-fsanitize=thread
+build:tsan --copt=-fno-sanitize-blacklist
+build:tsan --test_env="TSAN_OPTIONS=report_atomic_races=0"
+build:tsan --linkopt=-fsanitize=thread
+
+build:xray --crosstool_top=@rome//:clang_suite
+build:xray --host_crosstool_top=@bazel_tools//tools/cpp:toolchain
+build:xray --copt=-fxray-instrument
+build:xray --linkopt=-fxray-instrument
+
+build --config=clang
+
+build --flag_alias=log_level=@rome//rome/logging:log_level
+build --flag_alias=lock_type=//qplock/benchmark:lock_type

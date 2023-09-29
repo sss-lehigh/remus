@@ -1,0 +1,7 @@
+logs
+setup/third_party
+setup/.romerc
+bazel-*
+compile_commands.json
+junkdrawer
+romekv/experiments/ycsb/results

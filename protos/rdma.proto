@@ -1,0 +1,21 @@
+syntax = "proto2";
+
+package rome.rdma;
+
+// Represents a remotely accessible memory region. Used to convey the necessary information for remote nodes to interact with this memory, assuming that they have access to a QP that is connected to it.
+message RemoteObjectProto {
+  // An string identifier for this object. Must be unique among remote objects.
+  optional string id = 1;
+
+  // Address of first byte in the memory region.
+  optional uint64 raddr = 2;
+
+  // Size of the memory region
+  optional uint32 size = 3;
+
+  // Local access key.
+  optional uint32 lkey = 4;
+
+  // Remote access key.
+  optional uint32 rkey = 5;
+}

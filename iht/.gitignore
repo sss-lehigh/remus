@@ -1,0 +1,50 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Results should be ignored
+results/
+
+# Mac DS store
+.DS_Store
+
+# Temporarirly silence my experiment.proto file
+proto/experiment_pb2.py
+proto/experiment.pb.*
+protos/experiment.pb.*
+protos/experiment_pb2.py
+protos/__pycache__
+
+bazel-bin
+bazel-out
+bazel-rdma_iht
+bazel-testlogs

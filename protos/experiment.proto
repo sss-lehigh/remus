@@ -1,0 +1,68 @@
+syntax = "proto2";
+
+message AckProto {};
+
+message ExperimentParams {
+    required int32 think_time = 1 [default = 0];
+    required int32 qps_sample_rate = 2 [default = 10];
+    required int32 max_qps_second = 3 [default = -1];
+    required int32 runtime = 4 [default = 10];
+    required bool unlimited_stream = 5 [default = false];
+    required int32 op_count = 6 [default = 10000];
+    required int32 contains = 7 [default = 80];
+    required int32 insert = 8 [default = 10];
+    required int32 remove = 9 [default = 10];
+    required int32 key_lb = 10 [default = 0];
+    required int32 key_ub = 11 [default = 1000000];
+    required int32 region_size = 12 [default = 22];
+    required int32 thread_count = 13 [default = 1];
+    required int32 node_count = 14 [default = 0];
+}
+
+message ResultProto {
+    optional ExperimentParams params = 1;
+    repeated IHTWorkloadDriverProto driver = 2; 
+}
+
+message IHTWorkloadDriverProto {
+    optional MetricProto ops = 2;
+    optional MetricProto runtime = 3;
+    optional MetricProto qps = 4;
+    optional MetricProto latency = 5;
+};
+
+message MetricProto {
+    optional string name = 1;
+    oneof metric {
+      CounterProto counter = 2;
+      StopwatchProto stopwatch = 3;
+      SummaryProto summary = 4;
+    }
+  };
+  
+  message CounterProto {
+    optional uint64 count = 1;
+  };
+  
+  message StopwatchProto {
+    optional uint64 runtime_ns = 1;
+  };
+  
+  message SummaryProto {
+    // Measurement units
+    optional string units = 1;
+  
+    // Summary statistics
+    optional double mean = 2;
+    optional double stddev = 3;
+    optional double min = 4;
+    optional double p50 = 6;
+    optional double p90 = 7;
+    optional double p95 = 8;
+    optional double p99 = 9;
+    optional double p999 = 10;
+    optional double max = 11;
+  
+    // Total number of samples collected.
+    optional uint64 count = 12;
+  };
