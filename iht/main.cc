@@ -7,18 +7,17 @@
 #include <thread>
 #include <unistd.h>
 
-// View c++ version __cplusplus
-#define version_info __cplusplus
+#include <absl/flags/flag.h>
+#include <absl/flags/parse.h>
+#include <google/protobuf/text_format.h>
 
-#include "absl/flags/flag.h"
-#include "absl/flags/parse.h"
-// #include "absl/status/status.h"
 #include "../logging/logging.h"
 #include "../rdma/connection_manager/connection_manager.h"
 #include "../rdma/memory_pool/memory_pool.h"
-#include "../util/proto_util.h"
-#include "google/protobuf/text_format.h"
+// #include "../util/proto_util.h"
+
 #include "protos/experiment.pb.h"
+
 #include "role_client.h"
 #include "role_server.h"
 
@@ -41,6 +40,7 @@ using cm_type = MemoryPool::cm_type;
 
 int main(int argc, char **argv) {
   ROME_INIT_LOG();
+
   absl::ParseCommandLine(argc, argv);
   bool bulk_operations = absl::GetFlag(FLAGS_send_bulk);
   bool test_operations = absl::GetFlag(FLAGS_send_test);
