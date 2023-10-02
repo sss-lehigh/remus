@@ -8,7 +8,7 @@
 #include <ostream>
 #include <type_traits>
 
-#include "../../vendor/fmt-10.1.0/format.h"
+#include <spdlog/fmt/fmt.h> // [mfs] For now, use spdlog's vendored fmt...
 
 namespace rome::rdma {
 
