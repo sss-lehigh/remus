@@ -8,8 +8,12 @@
 #include <ostream>
 #include <sstream>
 #include <streambuf>
+#include <string_view>
 
 #include "../logging/logging.h"
+
+// [mfs] These assembly instructions are becoming full function calls.  Consider
+// consolidating into the .h file?
 
 namespace rome::metrics {
 

@@ -6,9 +6,8 @@
 #include <thread>
 #include <utility>
 
-#include "../util/thread_util.h"
-#include "absl/base/thread_annotations.h"
-#include "absl/status/status.h"
+#include "../vendor/sss/status.h"
+#include "thread_util.h"
 
 namespace util {
 
@@ -19,7 +18,7 @@ public:
   ~ThreadPool();
   ThreadPool();
 
-  absl::Status Enqueue(Task task) LOCKS_EXCLUDED(mu_);
+  sss::Status Enqueue(Task task) /*LOCKS_EXCLUDED(mu_)*/;
 
   void Stop();
   void Drain();
@@ -34,7 +33,7 @@ private:
 
   // TODO: Replace with lockfree queue.
   std::mutex mu_;
-  std::deque<Task> tasks_ GUARDED_BY(mu_);
+  std::deque<Task> tasks_ /*GUARDED_BY(mu_)*/;
 };
 
 } // namespace util

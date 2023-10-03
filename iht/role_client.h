@@ -23,8 +23,6 @@ using ::rome::WorkloadDriver;
 using ::rome::WorkloadDriverProto;
 using ::rome::rdma::MemoryPool;
 
-// typedef RdmaIHT<int, int, CNF_ELIST_SIZE, CNF_PLIST_SIZE> IHT;
-// typedef Hashtable<int, int, CNF_PLIST_SIZE> IHT;
 typedef TestMap<int, int> IHT;
 
 std::string fromStateValue(state_value value) {
@@ -69,7 +67,7 @@ public:
   /// @param frac if 0, won't populate. Otherwise, will do this fraction of the
   /// population
   /// @return the resultproto
-  static absl::StatusOr<WorkloadDriverProto>
+  static sss::StatusVal<WorkloadDriverProto>
   Run(std::unique_ptr<Client> client, volatile bool *done, double frac) {
     if (client->master_client_) {
       int key_lb = client->params_.key_lb(), key_ub = client->params_.key_ub();
@@ -149,7 +147,7 @@ public:
     auto driver = rome::WorkloadDriver<Operation>::Create(
         std::move(client), std::move(workload_stream), qps_controller.get(),
         std::chrono::milliseconds(qps_sample_rate));
-    ROME_ASSERT_OK(driver->Start());
+    OK_OR_FAIL(driver->Start());
     std::this_thread::sleep_for(std::chrono::seconds(runtime));
     ROME_INFO("Done here, stop sequence");
     // Wait for all the clients to stop. Then set the done to true to release
@@ -159,23 +157,23 @@ public:
         barr->arrive_and_wait();
     }
     *done = true;
-    ROME_ASSERT_OK(driver->Stop());
+    OK_OR_FAIL(driver->Stop());
     ROME_INFO("CLIENT :: Driver generated {}", driver->ToString());
-    return driver->ToProto();
+    return {sss::Status::Ok(), driver->ToProto()};
   }
 
   // Start the client
-  absl::Status Start() override {
+  sss::Status Start() override {
     ROME_INFO("CLIENT :: Starting client...");
     // Conditional to allow us to bypass the barrier for certain client types
     // We want to start at the same time
     if (barrier_ != nullptr)
       barrier_->arrive_and_wait();
-    return absl::OkStatus();
+    return sss::Status::Ok();
   }
 
   // Runs the next operation
-  absl::Status Apply(const Operation &op) override {
+  sss::Status Apply(const Operation &op) override {
     count++;
     HT_Res<int> res = HT_Res<int>(FALSE_STATE, 0);
     switch (op.op_type) {
@@ -218,13 +216,13 @@ public:
              std::chrono::nanoseconds(params_.think_time()))
         ;
     }
-    return absl::OkStatus();
+    return sss::Status::Ok();
   }
 
   /// @brief Runs single-client silent-server test cases on the iht
   /// @param at_scale is true for testing at scale (+10,000 operations)
   /// @return OkStatus if everything worked. Otherwise will shutdown the client.
-  absl::Status Operations(bool at_scale) {
+  sss::Status Operations(bool at_scale) {
     if (at_scale) {
       int scale_size = (CNF_PLIST_SIZE * CNF_ELIST_SIZE) * 8;
       bool show_passing = false;
@@ -287,47 +285,45 @@ public:
                   "Contains 4");
       ROME_INFO("All cases finished");
     }
-    absl::Status stop_status = Stop();
-    ROME_ASSERT_OK(stop_status);
-    return absl::OkStatus();
+    auto stop_status = Stop();
+    OK_OR_FAIL(stop_status);
+    return sss::Status::Ok();
   }
 
   // A function for communicating with the server that we are done. Will wait
   // until server says it is ok to shut down
-  absl::Status Stop() override {
+  sss::Status Stop() override {
     ROME_INFO("CLIENT :: Stopping client...");
     if (!master_client_) {
       // if we aren't the master client we don't need to do the stop sequence.
       // Just arrive at the barrier
       if (barrier_ != nullptr)
         barrier_->arrive_and_wait();
-      return absl::OkStatus();
+      return sss::Status::Ok();
     }
     if (host_.id == self_.id)
-      return absl::OkStatus(); // if we are the host, we don't need to do the
-                               // stop sequence
+      return sss::Status::Ok(); // if we are the host, we don't need to do the
+                                // stop sequence
     auto conn = iht_->pool_->connection_manager()->GetConnection(host_.id);
-    ROME_CHECK_OK(ROME_RETURN(util::InternalErrorBuilder()
-                              << "Failed to retrieve server connection"),
-                  conn);
+    if (conn.status.t != sss::Ok) {
+      return {sss::InternalError, "Failed to retrieve server connection"};
+    }
+    // send the ack to let the server know that we are done
     AckProto e;
-    auto sent = conn.value()->channel()->Send(
-        e); // send the ack to let the server know that we are done
-
+    auto sent = conn.val.value()->channel()->Send(e);
     ROME_INFO("CLIENT :: Sent Ack");
 
     // Wait to receive an ack back. Letting us know that the other clients are
     // done.
-    auto msg = conn.value()->channel()->TryDeliver<AckProto>();
-    while (
-        (!msg.ok() && msg.status().code() == absl::StatusCode::kUnavailable)) {
-      msg = conn.value()->channel()->TryDeliver<AckProto>();
+    auto msg = conn.val.value()->channel()->TryDeliver<AckProto>();
+    while ((msg.status.t != sss::Ok && msg.status.t == sss::Unavailable)) {
+      msg = conn.val.value()->channel()->TryDeliver<AckProto>();
     }
 
     ROME_INFO("CLIENT :: Received Ack");
 
     // Return ok status
-    return absl::OkStatus();
+    return sss::Status::Ok();
   }
 
 private:

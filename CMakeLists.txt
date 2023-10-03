@@ -11,8 +11,6 @@ set(CXX_STANDARD 23 CACHE STRING "Uses C++20 or 23")
 
 ### Make sure we have the required packages
 
-find_package(absl 20210324 REQUIRED)
-message(STATUS "Using absl version ${absl_VERSION}")
 find_package(Protobuf REQUIRED)
 message(STATUS "Using protobuf version ${Protobuf_VERSION}")
 # NB: Our custom rule for finding ibverbs and rdmacm prints a message.  It's in
@@ -60,7 +58,6 @@ target_include_directories(rome PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_
 target_compile_definitions(rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
 # NB: `protos` is a library we make by recursing into the `protos` subfolder
 target_link_libraries(rome PUBLIC protos rdma::ibverbs rdma::cm)
-target_link_libraries(rome PUBLIC absl::flags absl::status absl::statusor absl::synchronization absl::flags_parse)
 
 ### Declare the subfolders to recurse into
 

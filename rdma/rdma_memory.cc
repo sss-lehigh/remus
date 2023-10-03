@@ -9,34 +9,31 @@
 
 #include "../logging/logging.h"
 #include "../util/status_util.h"
-#include "absl/status/statusor.h"
+#include "../vendor/sss/status.h"
 
 namespace rome::rdma {
-
-using ::util::AlreadyExistsErrorBuilder;
-using ::util::FailedPreconditionErrorBuilder;
-using ::util::NotFoundErrorBuilder;
-using ::util::UnknownErrorBuilder;
 
 namespace {
 
 // Tries to read the number of available hugepages from the system. This is only
 // implemented for Linux-based operating systems.
-absl::StatusOr<int> GetNumHugepages(std::string_view path) {
+sss::StatusVal<int> GetNumHugepages(std::string_view path) {
   // Try to open file.
   // [mfs] I had to explicitly convert to string?
   std::ifstream file(std::string(path).data());
   if (!file.is_open()) {
-    return UnknownErrorBuilder() << "Failed to open file: " << path;
+    sss::Status err = {sss::Unknown, "Failed to open file: "};
+    err << path;
+    return {err, {}};
   }
 
   // Read file.
   int nr_hugepages;
   file >> nr_hugepages;
   if (!file.fail()) {
-    return nr_hugepages;
+    return {sss::Status::Ok(), nr_hugepages};
   } else {
-    return absl::UnknownError("Failed to read nr_hugepages");
+    return {{sss::Unknown, "Failed to read nr_hugepages"}, {}};
   }
 }
 
@@ -50,7 +47,7 @@ RdmaMemory::RdmaMemory(uint64_t capacity, std::optional<std::string_view> path,
   bool use_hugepages = false;
   if (path.has_value()) {
     auto nr_hugepages = GetNumHugepages(path.value());
-    if (nr_hugepages.ok() && nr_hugepages.value() > 0) {
+    if (nr_hugepages.status.t == sss::Ok && nr_hugepages.val.value() > 0) {
       use_hugepages = true;
     }
   }
@@ -69,7 +66,7 @@ RdmaMemory::RdmaMemory(uint64_t capacity, std::optional<std::string_view> path,
     ROME_ASSERT(reinterpret_cast<void *>(std::get<1>(raw_).get()) != MAP_FAILED,
                 "mmap failed.");
   }
-  ROME_ASSERT_OK(RegisterMemoryRegion(kDefaultId, pd, 0, capacity_));
+  OK_OR_FAIL(RegisterMemoryRegion(kDefaultId, pd, 0, capacity_));
 }
 
 inline bool RdmaMemory::ValidateRegion(int offset, int length) {
@@ -80,48 +77,54 @@ inline bool RdmaMemory::ValidateRegion(int offset, int length) {
   return true;
 }
 
-absl::Status RdmaMemory::RegisterMemoryRegion(std::string_view id, int offset,
-                                              int length) {
+sss::Status RdmaMemory::RegisterMemoryRegion(std::string_view id, int offset,
+                                             int length) {
   return RegisterMemoryRegion(id, GetDefaultMemoryRegion()->pd, offset, length);
 }
 
-absl::Status RdmaMemory::RegisterMemoryRegion(std::string_view id,
-                                              ibv_pd *const pd, int offset,
-                                              int length) {
+sss::Status RdmaMemory::RegisterMemoryRegion(std::string_view id,
+                                             ibv_pd *const pd, int offset,
+                                             int length) {
   if (!ValidateRegion(offset, length)) {
-    return FailedPreconditionErrorBuilder()
-           << "Requested memory region invalid: " << id;
+    sss::Status err = {sss::FailedPrecondition,
+                       "Requested memory region invalid: "};
+    err << id;
+    return err;
   }
 
   auto iter = memory_regions_.find(std::string(id));
   if (iter != memory_regions_.end()) {
-    return AlreadyExistsErrorBuilder() << "Memory region exists: {}" << id;
+    sss::Status err = {sss::AlreadyExists, "Memory region exists: {}"};
+    err << id;
+    return err;
   }
 
   auto *base = reinterpret_cast<uint8_t *>(std::visit(
                    [](const auto &raw) { return raw.get(); }, raw_)) +
                offset;
   auto mr = ibv_mr_unique_ptr(ibv_reg_mr(pd, base, length, kDefaultAccess));
-  ROME_CHECK_QUIET(
-      ROME_RETURN(absl::InternalError("Failed to register memory region")),
-      mr != nullptr);
+  if (mr == nullptr) {
+    return {sss::InternalError, "Failed to register memory region"};
+  }
   memory_regions_.emplace(id, std::move(mr));
   ROME_DEBUG("Memory region registered: {} @ {} to {} (length={})", id,
              fmt::ptr(base), fmt::ptr(base + length), length);
-  return absl::OkStatus();
+  return sss::Status::Ok();
 }
 
 ibv_mr *RdmaMemory::GetDefaultMemoryRegion() const {
   return memory_regions_.find(kDefaultId)->second.get();
 }
 
-absl::StatusOr<ibv_mr *>
+sss::StatusVal<ibv_mr *>
 RdmaMemory::GetMemoryRegion(std::string_view id) const {
   auto iter = memory_regions_.find(std::string(id));
   if (iter == memory_regions_.end()) {
-    return NotFoundErrorBuilder() << "Memory region not found: {}" << id;
+    sss::Status err = {sss::NotFound, "Memory region not found: {}"};
+    err << id;
+    return {err, {}};
   }
-  return iter->second.get();
+  return {sss::Status::Ok(), iter->second.get()};
 }
 
 } // namespace rome::rdma

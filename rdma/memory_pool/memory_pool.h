@@ -14,6 +14,7 @@
 
 #include "../../metrics/summary.h"
 #include "../../util/thread_util.h"
+#include "../../vendor/sss/status.h"
 #include "../channel/twosided_messenger.h"
 #include "../connection_manager/connection.h"
 #include "../connection_manager/connection_manager.h"
@@ -177,7 +178,7 @@ public:
   }
   conn_info_t conn_info(uint16_t id) const { return conn_info_.at(id); }
 
-  inline absl::Status Init(uint32_t capacity, const std::vector<Peer> &peers);
+  inline sss::Status Init(uint32_t capacity, const std::vector<Peer> &peers);
 
   template <typename T> remote_ptr<T> Allocate(size_t size = 1);
 

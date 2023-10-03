@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "../../util/macros.h"
-#include "absl/status/statusor.h"
 #include "metadata.h"
 #include "value.h"
 #include "visitor.h"
@@ -25,7 +24,7 @@
 //
 // is just a set while
 //
-//    ATree<int, EmptyValue, int, CountTraversalsVisistor<NodeType>>
+//    ATree<int, EmptyValue, int, CountTraversalsVisitor<NodeType>>
 //
 // augments the datastructure so that it counts the number of times a node is
 // traversed.
@@ -168,14 +167,13 @@ public:
   ~ATree();
   ATree() : size_(0), root_(Key(), V(), M()) {}
   typedef ATreeNode<Key, V, M> node_type;
-  absl::StatusOr<node_type *> Find(const Key &key);
+  std::optional<node_type *> Find(const Key &key);
 
-  absl::Status Insert(const Key &key, const V &value, const M &metadata);
+  bool Insert(const Key &key, const V &value, const M &metadata);
 
-  absl::Status InsertOrUpdate(const Key &key, const V &value,
-                              const M &metadata);
+  void InsertOrUpdate(const Key &key, const V &value, const M &metadata);
 
-  absl::Status Remove(const Key &key);
+  bool Remove(const Key &key);
 
   void Clear();
 
@@ -247,13 +245,13 @@ ATree<K, V, M, Visitor, Accessor>::FindInternal(
 }
 
 template <class K, class V, class M, class Visitor, class Accessor>
-absl::StatusOr<ATreeNode<K, V, M> *>
+std::optional<ATreeNode<K, V, M> *>
 ATree<K, V, M, Visitor, Accessor>::Find(const K &key) {
   auto found = FindInternal(key, std::nullopt);
   if (found.second != nullptr && found.second->key() == key) {
-    return found.second;
+    return {found.second};
   } else {
-    return absl::NotFoundError("Key not found");
+    return {};
   }
 }
 
@@ -275,13 +273,12 @@ ATree<K, V, M, Visitor, Accessor>::InsertInternal(const K &key, const V &value,
 }
 
 template <class K, class V, class M, class Visitor, class Accessor>
-absl::Status ATree<K, V, M, Visitor, Accessor>::Insert(const K &key,
-                                                       const V &value,
-                                                       const M &metadata) {
+bool ATree<K, V, M, Visitor, Accessor>::Insert(const K &key, const V &value,
+                                               const M &metadata) {
   std::deque<node_type *> stack;
   auto found = FindInternal(key, &stack);
   if (found.second != nullptr && found.second->key() == key) {
-    return absl::AlreadyExistsError("Key already exists");
+    return false;
   } else {
     auto *new_node = InsertInternal(key, value, metadata, found.first);
     visitor_.OnInsert(new_node);
@@ -289,14 +286,14 @@ absl::Status ATree<K, V, M, Visitor, Accessor>::Insert(const K &key,
       visitor_.OnInsert(stack.back());
       stack.pop_back();
     }
-    return absl::OkStatus();
+    return true;
   }
 }
 
 template <class K, class V, class M, class Visitor, class Accessor>
-absl::Status
-ATree<K, V, M, Visitor, Accessor>::InsertOrUpdate(const K &key, const V &value,
-                                                  const M &metadata) {
+void ATree<K, V, M, Visitor, Accessor>::InsertOrUpdate(const K &key,
+                                                       const V &value,
+                                                       const M &metadata) {
   std::deque<node_type *> stack;
   auto found = FindInternal(key, &stack);
   if (found.second != nullptr && found.second->key() == key) {
@@ -313,7 +310,6 @@ ATree<K, V, M, Visitor, Accessor>::InsertOrUpdate(const K &key, const V &value,
       stack.pop_back();
     }
   }
-  return absl::OkStatus();
 }
 
 namespace internal {
@@ -347,11 +343,11 @@ ATree<K, V, M, Visitor, Accessor>::FindSuccessors(ATreeNode<K, V, M> *curr) {
 }
 
 template <class K, class V, class M, class Visitor, class Accessor>
-absl::Status ATree<K, V, M, Visitor, Accessor>::Remove(const K &key) {
+bool ATree<K, V, M, Visitor, Accessor>::Remove(const K &key) {
   std::deque<node_type *> stack;
   auto found = FindInternal(key, &stack);
   if (found.second == nullptr) {
-    return absl::NotFoundError("Key not found");
+    return false;
   } else {
     auto successors = FindSuccessors(found.second);
     if (successors.second == nullptr) {
@@ -378,7 +374,7 @@ absl::Status ATree<K, V, M, Visitor, Accessor>::Remove(const K &key) {
     }
     --size_;
     delete found.second;
-    return absl::OkStatus();
+    return true;
   }
 }
 

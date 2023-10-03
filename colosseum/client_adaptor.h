@@ -1,5 +1,8 @@
 #pragma once
-#include "absl/status/status.h"
+
+// [mfs] This file should use the US spelling (adapter), not the UK spelling
+
+#include "../vendor/sss/status.h"
 
 namespace rome {
 
@@ -12,13 +15,12 @@ namespace rome {
 // As an example, consider a data structure with a simple set API (i.e., Set,
 // Get, and Delete). An operation in this scenario would be some struct defining
 // the operation type and the target key.
-template <typename T>
-class ClientAdaptor {
- public:
+template <typename T> class ClientAdaptor {
+public:
   virtual ~ClientAdaptor() = default;
-  virtual absl::Status Start() = 0;
-  virtual absl::Status Apply(const T &op) = 0;
-  virtual absl::Status Stop() = 0;
+  virtual sss::Status Start() = 0;
+  virtual sss::Status Apply(const T &op) = 0;
+  virtual sss::Status Stop() = 0;
 };
 
-}  // namespace rome
+} // namespace rome

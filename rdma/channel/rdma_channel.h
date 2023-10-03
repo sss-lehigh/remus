@@ -10,8 +10,8 @@
 #include <type_traits>
 
 #include "../../util/status_util.h"
+#include "../../vendor/sss/status.h"
 #include "../rdma_memory.h"
-#include "absl/status/status.h"
 #include "rdma_messenger.h"
 
 namespace rome::rdma {
@@ -29,33 +29,34 @@ public:
   // Getters.
   rdma_cm_id *id() const { return id_; }
 
-  template <typename ProtoType> absl::Status Send(const ProtoType &proto) {
+  template <typename ProtoType> sss::Status Send(const ProtoType &proto) {
     Message msg{std::make_unique<uint8_t[]>(proto.ByteSizeLong()),
                 proto.ByteSizeLong()};
     proto.SerializeToArray(msg.buffer.get(), msg.length);
     return this->SendMessage(msg);
   }
 
-  template <typename ProtoType> absl::StatusOr<ProtoType> TryDeliver() {
-    absl::StatusOr<Message> msg_or = this->TryDeliverMessage();
-    if (msg_or.ok()) {
+  template <typename ProtoType> sss::StatusVal<ProtoType> TryDeliver() {
+    auto msg_or = this->TryDeliverMessage();
+    if (msg_or.status.t == sss::Ok) {
       ProtoType proto;
-      proto.ParseFromArray(msg_or->buffer.get(), msg_or->length);
-      return proto;
+      proto.ParseFromArray(msg_or.val.value().buffer.get(),
+                           msg_or.val.value().length);
+      return {sss::Status::Ok(), proto};
     } else {
-      return msg_or.status();
+      return {msg_or.status, {}};
     }
   }
 
-  template <typename ProtoType> absl::StatusOr<ProtoType> Deliver() {
+  template <typename ProtoType> sss::StatusVal<ProtoType> Deliver() {
     auto p = this->TryDeliver<ProtoType>();
-    while (p.status().code() == absl::StatusCode::kUnavailable) {
+    while (p.status.t == sss::Unavailable) {
       p = this->TryDeliver<ProtoType>();
     }
     return p;
   }
 
-  absl::Status Post(ibv_send_wr *wr, ibv_send_wr **bad) {
+  sss::Status Post(ibv_send_wr *wr, ibv_send_wr **bad) {
     return this->PostInternal(wr, bad);
   }
 

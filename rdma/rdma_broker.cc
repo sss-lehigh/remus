@@ -33,7 +33,6 @@
 #include "../logging/logging.h"
 #include "../util/coroutine.h"
 #include "../util/status_util.h"
-#include "absl/status/status.h"
 #include "rdma_device.h"
 #include "rdma_receiver.h"
 #include "rdma_util.h"
@@ -41,8 +40,6 @@
 namespace rome::rdma {
 
 using ::util::Coro;
-using ::util::InternalErrorBuilder;
-using ::util::NotFoundErrorBuilder;
 
 RdmaBroker ::~RdmaBroker() {
   [[maybe_unused]] auto s = Stop();
@@ -58,24 +55,25 @@ RdmaBroker::Create(std::optional<std::string_view> address,
                    RdmaReceiverInterface *receiver) {
   auto *broker = new RdmaBroker(receiver);
   auto status = broker->Init(address, port);
-  if (status.ok()) {
+  if (status.t == sss::Ok) {
     return std::unique_ptr<RdmaBroker>(broker);
   } else {
-    ROME_ERROR("{}: {}:{}", status.ToString(), address.value_or(""),
+    ROME_ERROR("{}: {}:{}", status.message.value(), address.value_or(""),
                port.value_or(-1));
     return nullptr;
   }
 }
 
 RdmaBroker::RdmaBroker(RdmaReceiverInterface *receiver)
-    : terminate_(false), status_(absl::OkStatus()), listen_channel_(nullptr),
+    : terminate_(false), status_(sss::Status::Ok()), listen_channel_(nullptr),
       listen_id_(nullptr), num_connections_(0), receiver_(receiver) {}
 
-absl::Status RdmaBroker::Init(std::optional<std::string_view> address,
-                              std::optional<uint16_t> port) {
+sss::Status RdmaBroker::Init(std::optional<std::string_view> address,
+                             std::optional<uint16_t> port) {
   // Check that devices exist before trying to set things up.
   auto devices = RdmaDevice::GetAvailableDevices();
-  ROME_CHECK_QUIET(ROME_RETURN(devices.status()), devices.ok());
+  if (devices.status.t != sss::Ok)
+    return devices.status;
 
   rdma_addrinfo hints, *resolved;
 
@@ -88,9 +86,11 @@ absl::Status RdmaBroker::Init(std::optional<std::string_view> address,
   int gai_ret =
       rdma_getaddrinfo(address.has_value() ? address.value().data() : nullptr,
                        port_str.data(), &hints, &resolved);
-  ROME_CHECK_QUIET(ROME_RETURN(InternalErrorBuilder() << "rdma_getaddrinfo(): "
-                                                      << gai_strerror(gai_ret)),
-                   gai_ret == 0);
+  if (gai_ret != 0) {
+    sss::Status err = {sss::InternalError, "rdma_getaddrinfo(): "};
+    err << gai_strerror(gai_ret);
+    return err;
+  }
 
   // Create an endpoint to receive incoming requests on.
   ibv_qp_init_attr init_attr;
@@ -102,7 +102,9 @@ absl::Status RdmaBroker::Init(std::optional<std::string_view> address,
   auto err = rdma_create_ep(&listen_id_, resolved, nullptr, &init_attr);
   rdma_freeaddrinfo(resolved);
   if (err) {
-    return InternalErrorBuilder() << "rdma_create_ep(): " << strerror(errno);
+    sss::Status err = {sss::InternalError, "rdma_create_ep(): "};
+    err << strerror(errno);
+    return err;
   }
 
   // Migrate the new endpoint to an async channel
@@ -123,12 +125,12 @@ absl::Status RdmaBroker::Init(std::optional<std::string_view> address,
 
   runner_.reset(new std::thread([&]() { this->Run(); }));
 
-  return absl::OkStatus();
+  return sss::Status::Ok();
 }
 
 // When shutting down the broker we must be careful. First, we signal to the
 // connection request handler that we are not accepting new requests.
-absl::Status RdmaBroker::Stop() {
+sss::Status RdmaBroker::Stop() {
   terminate_ = true;
   runner_.reset();
   return status_;
@@ -148,8 +150,8 @@ Coro RdmaBroker::HandleConnectionRequests() {
       // Attempt to read from `listen_channel_`
       ret = rdma_get_cm_event(listen_channel_, &event);
       if (ret != 0 && errno != EAGAIN) {
-        status_ = InternalErrorBuilder()
-                  << "rdma_get_cm_event(): " << strerror(errno);
+        status_ = {sss::InternalError, "rdma_get_cm_event(): "};
+        status_ << strerror(errno);
         co_return;
       }
       co_await std::suspend_always{};
@@ -211,7 +213,8 @@ Coro RdmaBroker::HandleConnectionRequests() {
 void RdmaBroker::Run() {
   scheduler_.Schedule(HandleConnectionRequests());
   scheduler_.Run();
-  ROME_TRACE("Finished: {}", status_.ok() ? "Ok" : status_.message());
+  ROME_TRACE("Finished: {}",
+             (status_.t == sss::Ok) ? "Ok" : status_.message.value());
 }
 
 } // namespace rome::rdma

@@ -12,19 +12,19 @@
 
 namespace rome::rdma {
 
-using ::util::InternalErrorBuilder;
-using ::util::ResourceExhaustedErrorBuilder;
-
 template <uint32_t kCapacity, uint32_t kRecvMaxBytes>
 TwoSidedRdmaMessenger<kCapacity, kRecvMaxBytes>::TwoSidedRdmaMessenger(
     rdma_cm_id *id)
     : rm_(kCapacity, id->pd), id_(id), send_capacity_(kCapacity / 2),
       send_total_(0), recv_capacity_(kCapacity / 2), recv_total_(0) {
-  ROME_ASSERT_OK(rm_.RegisterMemoryRegion(kSendId, 0, send_capacity_));
-  ROME_ASSERT_OK(
-      rm_.RegisterMemoryRegion(kRecvId, send_capacity_, recv_capacity_));
-  send_mr_ = VALUE_OR_DIE(rm_.GetMemoryRegion(kSendId));
-  recv_mr_ = VALUE_OR_DIE(rm_.GetMemoryRegion(kRecvId));
+  OK_OR_FAIL(rm_.RegisterMemoryRegion(kSendId, 0, send_capacity_));
+  OK_OR_FAIL(rm_.RegisterMemoryRegion(kRecvId, send_capacity_, recv_capacity_));
+  auto t1 = rm_.GetMemoryRegion(kSendId);
+  STATUSVAL_OR_DIE(t1);
+  send_mr_ = t1.val.value();
+  auto t2 = rm_.GetMemoryRegion(kRecvId);
+  STATUSVAL_OR_DIE(t2);
+  recv_mr_ = t2.val.value();
   send_base_ = reinterpret_cast<uint8_t *>(send_mr_->addr);
   send_next_ = send_base_;
   recv_base_ = reinterpret_cast<uint8_t *>(recv_mr_->addr);
@@ -33,15 +33,17 @@ TwoSidedRdmaMessenger<kCapacity, kRecvMaxBytes>::TwoSidedRdmaMessenger(
 }
 
 template <uint32_t kCapacity, uint32_t kRecvMaxBytes>
-absl::Status TwoSidedRdmaMessenger<kCapacity, kRecvMaxBytes>::SendMessage(
+sss::Status TwoSidedRdmaMessenger<kCapacity, kRecvMaxBytes>::SendMessage(
     const Message &msg) {
   // The proto we send may not be larger than the maximum size received at the
   // peer. We assume that everyone uses the same value, so we check what we
   // know locally instead of doing something fancy to ask the remote node.
-  ROME_CHECK_QUIET(ROME_RETURN(ResourceExhaustedErrorBuilder()
-                               << "Message too large: expected<="
-                               << kRecvMaxBytes << ", actual=" << msg.length),
-                   msg.length < kRecvMaxBytes);
+  if (msg.length >= kRecvMaxBytes) {
+    sss::Status err = {sss::ResourceExhausted, ""};
+    err << "Message too large: expected<=" << kRecvMaxBytes
+        << ", actual=" << msg.length;
+    return err;
+  }
 
   // If the new message will not fit in remaining memory, then we reset the
   // head pointer to the beginning.
@@ -70,7 +72,14 @@ absl::Status TwoSidedRdmaMessenger<kCapacity, kRecvMaxBytes>::SendMessage(
   wr.wr_id = send_total_++;
 
   ibv_send_wr *bad_wr;
-  RDMA_CM_CHECK(ibv_post_send, id_->qp, &wr, &bad_wr);
+  {
+    int ret = ibv_post_send(id_->qp, &wr, &bad_wr);
+    if (ret != 0) {
+      sss::Status err = {sss::InternalError, ""};
+      err << "ibv_post_send(): " << strerror(errno);
+      return err;
+    }
+  }
 
   // Assumes that the CQ associated with the SQ is synchronous.
   ibv_wc wc;
@@ -80,39 +89,42 @@ absl::Status TwoSidedRdmaMessenger<kCapacity, kRecvMaxBytes>::SendMessage(
   }
 
   if (comps < 0) {
-    return util::InternalErrorBuilder()
-           << "rdma_get_send_comp: {}" << strerror(errno);
+    sss::Status e = {sss::InternalError, {}};
+    e << "rdma_get_send_comp: {}" << strerror(errno);
+    return e;
   } else if (wc.status != IBV_WC_SUCCESS) {
-    return util::InternalErrorBuilder()
-           << "rdma_get_send_comp(): " << ibv_wc_status_str(wc.status);
+    sss::Status e = {sss::InternalError, {}};
+    e << "rdma_get_send_comp(): " << ibv_wc_status_str(wc.status);
+    return e;
   }
 
   send_next_ += msg.length;
-  return absl::OkStatus();
+  return sss::Status::Ok();
 }
 
 // Attempts to deliver a sent message by checking for completed receives and
 // then returning a `Message` containing a copy of the received buffer.
 template <uint32_t kCapacity, uint32_t kRecvMaxBytes>
-absl::StatusOr<Message>
+sss::StatusVal<Message>
 TwoSidedRdmaMessenger<kCapacity, kRecvMaxBytes>::TryDeliverMessage() {
   ibv_wc wc;
   auto ret = rdma_get_recv_comp(id_, &wc);
   if (ret < 0 && errno != EAGAIN) {
-    return util::InternalErrorBuilder()
-           << "rdma_get_recv_comp: " << strerror(errno);
+    sss::Status e = {sss::InternalError, {}};
+    e << "rdma_get_recv_comp: " << strerror(errno);
+    return {e, {}};
   } else if (ret < 0 && errno == EAGAIN) {
-    return absl::UnavailableError("Retry");
+    return {{sss::Unavailable, "Retry"}, {}};
   } else {
     switch (wc.status) {
     case IBV_WC_WR_FLUSH_ERR:
-      return absl::AbortedError("QP in error state");
+      return {{sss::Aborted, "QP in error state"}, {}};
     case IBV_WC_SUCCESS: {
       // Prepare the response.
-      Message msg;
-      msg.buffer = std::make_unique<uint8_t[]>(wc.byte_len);
-      std::memcpy(msg.buffer.get(), recv_next_, wc.byte_len);
-      msg.length = wc.byte_len;
+      sss::StatusVal<Message> res = {sss::Status::Ok(), {}};
+      res.val->buffer = std::make_unique<uint8_t[]>(wc.byte_len);
+      std::memcpy(res.val->buffer.get(), recv_next_, wc.byte_len);
+      res.val->length = wc.byte_len;
 
       // If the tail reached the end of the receive buffer then all posted
       // wrs have been consumed and we can post new ones.
@@ -123,11 +135,13 @@ TwoSidedRdmaMessenger<kCapacity, kRecvMaxBytes>::TryDeliverMessage() {
       if (recv_next_ > recv_base_ + (recv_capacity_ - kRecvMaxBytes)) {
         PrepareRecvBuffer();
       }
-      return msg;
+      return res;
     }
-    default:
-      return InternalErrorBuilder()
-             << "rdma_get_recv_comp(): " << ibv_wc_status_str(wc.status);
+    default: {
+      sss::Status err = {sss::InternalError, {}};
+      err << "rdma_get_recv_comp(): " << ibv_wc_status_str(wc.status);
+      return {err, {}};
+    }
     }
   }
 }

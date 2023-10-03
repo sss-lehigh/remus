@@ -129,46 +129,49 @@ MemoryPool::MemoryPool(
     : self_(self), connection_manager_(std::move(connection_manager)),
       rdma_per_read_("rdma_per_read", "ops", 10000) {}
 
-absl::Status MemoryPool::Init(uint32_t capacity,
-                              const std::vector<Peer> &peers) {
+sss::Status MemoryPool::Init(uint32_t capacity,
+                             const std::vector<Peer> &peers) {
   auto status = connection_manager_->Start(self_.address, self_.port);
-  ROME_CHECK_OK(ROME_RETURN(status), status);
+  RETURN_STATUS_ON_ERROR(status);
   rdma_memory_ = std::make_unique<rdma_memory_resource>(
       capacity + sizeof(uint64_t), connection_manager_->pd());
   mr_ = rdma_memory_->mr();
 
   for (const auto &p : peers) {
     auto connected = connection_manager_->Connect(p.id, p.address, p.port);
-    while (absl::IsUnavailable(connected.status())) {
+    while (connected.status.t == sss::Unavailable) {
       connected = connection_manager_->Connect(p.id, p.address, p.port);
     }
-    ROME_CHECK_OK(ROME_RETURN(connected.status()), connected);
+    RETURN_STATUSVAL_ON_ERROR(connected);
   }
 
   RemoteObjectProto rm_proto;
   rm_proto.set_rkey(mr_->rkey);
   rm_proto.set_raddr(reinterpret_cast<uint64_t>(mr_->addr));
   for (const auto &p : peers) {
-    auto conn = VALUE_OR_DIE(connection_manager_->GetConnection(p.id));
-    status = conn->channel()->Send(rm_proto);
-    ROME_CHECK_OK(ROME_RETURN(status), status);
+    auto conn = connection_manager_->GetConnection(p.id);
+    STATUSVAL_OR_DIE(conn);
+    status = conn.val.value()->channel()->Send(rm_proto);
+    RETURN_STATUS_ON_ERROR(status);
   }
 
   for (const auto &p : peers) {
-    auto conn = VALUE_OR_DIE(connection_manager_->GetConnection(p.id));
-    auto got = conn->channel()->TryDeliver<RemoteObjectProto>();
-    while (!got.ok() && got.status().code() == absl::StatusCode::kUnavailable) {
-      got = conn->channel()->TryDeliver<RemoteObjectProto>();
+    auto conn = connection_manager_->GetConnection(p.id);
+    STATUSVAL_OR_DIE(conn);
+    auto got = conn.val.value()->channel()->TryDeliver<RemoteObjectProto>();
+    while (!(got.status.t == sss::Ok) && got.status.t == sss::Unavailable) {
+      got = conn.val.value()->channel()->TryDeliver<RemoteObjectProto>();
     }
-    ROME_CHECK_OK(ROME_RETURN(got.status()), got);
-    conn_info_.emplace(p.id, conn_info_t{conn, got->rkey(), mr_->lkey});
+    RETURN_STATUSVAL_ON_ERROR(got);
+    conn_info_.emplace(
+        p.id, conn_info_t{conn.val.value(), got.val.value().rkey(), mr_->lkey});
   }
 
   std::thread t = std::thread([this] {
     WorkerThread();
   }); // TODO: Can I lower/raise the priority of this thread?
   t.detach();
-  return absl::OkStatus();
+  return {sss::Ok, {}};
 }
 
 void MemoryPool::KillWorkerThread() {

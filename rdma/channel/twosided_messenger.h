@@ -10,9 +10,6 @@
 
 namespace rome::rdma {
 
-using ::util::InternalErrorBuilder;
-using ::util::ResourceExhaustedErrorBuilder;
-
 template <uint32_t kCapacity = 1ul << 12, uint32_t kRecvMaxBytes = 1ul << 8>
 class TwoSidedRdmaMessenger : public RdmaMessenger {
   static_assert(kCapacity % 2 == 0, "Capacity must be divisible by two.");
@@ -20,11 +17,11 @@ class TwoSidedRdmaMessenger : public RdmaMessenger {
 public:
   explicit TwoSidedRdmaMessenger(rdma_cm_id *id);
 
-  absl::Status SendMessage(const Message &msg) override;
+  sss::Status SendMessage(const Message &msg) override;
 
   // Attempts to deliver a sent message by checking for completed receives and
   // then returning a `Message` containing a copy of the received buffer.
-  absl::StatusOr<Message> TryDeliverMessage() override;
+  sss::StatusVal<Message> TryDeliverMessage() override;
 
 private:
   // Memorry region IDs.

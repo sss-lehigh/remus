@@ -2,8 +2,7 @@
 
 #include <rdma/rdma_cma.h>
 
-#include "absl/status/status.h"
-#include "absl/status/statusor.h"
+#include "../../vendor/sss/status.h"
 
 namespace rome::rdma {
 
@@ -15,22 +14,22 @@ struct Message {
 };
 
 class RdmaMessenger {
- public:
+public:
   virtual ~RdmaMessenger() = default;
-  virtual absl::Status SendMessage(const Message& msg) = 0;
-  virtual absl::StatusOr<Message> TryDeliverMessage() = 0;
+  virtual sss::Status SendMessage(const Message &msg) = 0;
+  virtual sss::StatusVal<Message> TryDeliverMessage() = 0;
 };
 
 class EmptyRdmaMessenger : public RdmaMessenger {
- public:
+public:
   ~EmptyRdmaMessenger() = default;
-  explicit EmptyRdmaMessenger(rdma_cm_id* id) {}
-  absl::Status SendMessage(const Message& msg) override {
-    return absl::OkStatus();
+  explicit EmptyRdmaMessenger(rdma_cm_id *id) {}
+  sss::Status SendMessage(const Message &msg) override {
+    return sss::Status::Ok();
   }
-  absl::StatusOr<Message> TryDeliverMessage() override {
-    return Message{nullptr, 0};
+  sss::StatusVal<Message> TryDeliverMessage() override {
+    return {{sss::Ok, {}}, Message{nullptr, 0}};
   }
 };
 
-}  // namespace rome
+} // namespace rome::rdma

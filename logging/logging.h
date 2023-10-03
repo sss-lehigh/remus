@@ -13,7 +13,8 @@
 //! Must be set before including `spdlog/spdlog.h`
 #define SPDLOG_ACTIVE_LEVEL ROME_LOG_LEVEL
 
-#include "../testutil/status_matcher.h"
+// #include "../testutil/status_matcher.h"
+
 #include <spdlog/async.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -95,52 +96,38 @@ inline void __rome_init_log__() {
   abort();
 #endif
 
-#define ROME_RETURN(x) [&]() { return x; }
-#define ROME_RETURN_FALSE []() { return false; }
-#define ROME_RETURN_TRUE []() { return true; }
-#define ROME_NOOP []() {}
-#define ROME_ABORT []() { abort(); }
-
-// General checks
-#define ROME_CHECK_QUIET(ret_func, check)                                      \
-  if (!(check)) [[unlikely]] {                                                 \
-    return ret_func();                                                         \
-  }
-#define ROME_CHECK(ret_func, check, ...)                                       \
-  if (!(check)) [[unlikely]] {                                                 \
-    SPDLOG_ERROR(__VA_ARGS__);                                                 \
-    return ret_func();                                                         \
-  }
-#define ROME_CHECK_OK(ret_func, status)                                        \
-  if (!(status.ok())) [[unlikely]] {                                           \
-    SPDLOG_ERROR(::testutil::GetStatus(status).ToString());                    \
-    return ret_func();                                                         \
-  }
 #define ROME_ASSERT(check, ...)                                                \
   if (!(check)) [[unlikely]] {                                                 \
     SPDLOG_CRITICAL(__VA_ARGS__);                                              \
     abort();                                                                   \
   }
-#define ROME_ASSERT_OK(status)                                                 \
-  if (auto __s = status; !(__s.ok())) [[unlikely]] {                           \
-    SPDLOG_CRITICAL(::testutil::GetStatus(__s).ToString());                    \
+
+#define OK_OR_FAIL(status)                                                     \
+  if (auto __s = status; !(__s.t == sss::Ok)) [[unlikely]] {                   \
+    SPDLOG_CRITICAL(__s.message.value());                                      \
     abort();                                                                   \
+  }
+
+#define RETURN_STATUS_ON_ERROR(status)                                         \
+  if (!(status.t == sss::Ok)) [[unlikely]] {                                   \
+    SPDLOG_ERROR(status.message.value());                                      \
+    return status;                                                             \
+  }
+
+#define RETURN_STATUSVAL_ON_ERROR(sv)                                          \
+  if (!(sv.status.t == sss::Ok)) [[unlikely]] {                                \
+    SPDLOG_ERROR(sv.status.message.value());                                   \
+    return sv.status;                                                          \
   }
 
 // Specific checks for debugging. Can be turned off by commenting out
 // `ROME_DO_DEBUG_CHECKS` in config.h
 #ifndef ROME_NDEBUG
-#define ROME_CHECK_DEBUG(ret_func, check, ...)                                 \
-  if (!(check)) [[unlikely]] {                                                 \
-    SPDLOG_ERROR(__VA_ARGS__);                                                 \
-    return ret_func();                                                         \
-  }
 #define ROME_ASSERT_DEBUG(func, ...)                                           \
   if (!(func)) [[unlikely]] {                                                  \
     SPDLOG_ERROR(__VA_ARGS__);                                                 \
     abort();                                                                   \
   }
 #else
-#define ROME_CHECK_DEBUG(...) ((void)0)
 #define ROME_ASSERT_DEBUG(...) ((void)0)
 #endif

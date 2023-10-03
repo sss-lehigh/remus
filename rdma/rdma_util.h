@@ -8,13 +8,26 @@
 
 #include "../logging/logging.h"
 #include "../util/status_util.h"
+#include "../vendor/sss/status.h"
 
 #define RDMA_CM_CHECK(func, ...)                                               \
   {                                                                            \
     int ret = func(__VA_ARGS__);                                               \
-    ROME_CHECK_QUIET(ROME_RETURN(::util::InternalErrorBuilder()                \
-                                 << #func << "(): " << strerror(errno)),       \
-                     ret == 0)                                                 \
+    if (ret != 0) {                                                            \
+      sss::Status err = {sss::InternalError, ""};                              \
+      err << #func << "(): " << strerror(errno);                               \
+      return err;                                                              \
+    }                                                                          \
+  }
+
+#define RDMA_CM_CHECK_TOVAL(func, ...)                                         \
+  {                                                                            \
+    int ret = func(__VA_ARGS__);                                               \
+    if (ret != 0) {                                                            \
+      sss::Status err = {sss::InternalError, ""};                              \
+      err << #func << "(): " << strerror(errno);                               \
+      return {err, {}};                                                        \
+    }                                                                          \
   }
 
 #define RDMA_CM_ASSERT(func, ...)                                              \
@@ -45,7 +58,11 @@ struct ibv_mr_deleter {
 };
 using ibv_mr_unique_ptr = std::unique_ptr<ibv_mr, ibv_mr_deleter>;
 
-inline absl::StatusOr<std::string> ibdev2netip(std::string_view ib_dev) {
+// [mfs]  C++ regexes are *very slow*.  Consider refactor?
+//
+// [mfs]  If this is on the critical path, the lambdas are going to be a source
+//        of latency.
+inline sss::StatusVal<std::string> ibdev2netip(std::string_view ib_dev) {
   auto Call = [](std::string cmd) {
     std::array<char, 1024> buffer;
     std::string result;
@@ -69,18 +86,18 @@ inline absl::StatusOr<std::string> ibdev2netip(std::string_view ib_dev) {
     return tokens;
   };
 
-  auto ExtractIp = [](const std::string &str) -> absl::StatusOr<std::string> {
+  auto ExtractIp = [](const std::string &str) -> sss::StatusVal<std::string> {
     const std::regex r("^\\s*inet\\s+((\\d{1,3}\\.){3}\\d{1,3}).*\n$");
     std::smatch m;
     if (str.empty() || !std::regex_match(str, m, r)) {
       ROME_DEBUG("Match: {}", m[0].str());
-      return util::NotFoundErrorBuilder()
-             << "No IP address found for netdev: " << str;
+      sss::Status err = {sss::NotFound, "No IP address found for netdev: "};
+      err << str;
+      return {err, {}};
     }
-    return m[1].str();
+    return {sss::Status::Ok(), m[1].str()};
   };
 
-  absl::Status status;
   auto result = Call("ibdev2netdev");
   if (!result.empty()) {
     auto lines = Split(result, '\n');
@@ -94,5 +111,7 @@ inline absl::StatusOr<std::string> ibdev2netip(std::string_view ib_dev) {
       }
     }
   }
-  return util::NotFoundErrorBuilder() << "Device address not found: " << ib_dev;
+  sss::Status err = {sss::NotFound, "Device address not found: "};
+  err << ib_dev;
+  return {err, {}};
 }

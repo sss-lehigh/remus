@@ -1,5 +1,6 @@
 #pragma once
 
+// [mfs] This is only included in one place... consolidate?
 #if defined(__clang__)
 #include <experimental/memory_resource>
 namespace util {

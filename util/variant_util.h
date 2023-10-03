@@ -1,5 +1,8 @@
 #pragma once
 
+// [mfs] This is not in use
+#if 0
+
 #include <exception>
 #include <functional>
 #include <memory>
@@ -92,3 +95,5 @@ inline constexpr bool is_visitable_v = (std::is_invocable_v<Visitors, Value> or
                                         ...);
 
 }  // namespace rome
+
+#endif

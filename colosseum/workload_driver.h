@@ -44,12 +44,12 @@ public:
   // returning its error if there is one. Operations are then pulled from
   // `stream_` and passed to `client_`'s `Apply` method. The client will handle
   // operations until either the given stream is exhausted or `Stop` is called.
-  absl::Status Start();
+  sss::Status Start();
 
   // Stops the workload driver so no new requests are passed to the client.
   // Then, the client's `Stop` method is called so that any pending operations
   // can be finalized.
-  absl::Status Stop();
+  sss::Status Stop();
 
   metrics::Stopwatch *GetStopwatch() { return stopwatch_.get(); }
 
@@ -72,7 +72,7 @@ public:
   }
 
 private:
-  absl::Status Run();
+  sss::Status Run();
 
   WorkloadDriver(std::unique_ptr<ClientAdaptor<OpType>> client,
                  std::unique_ptr<Stream<OpType>> stream,
@@ -104,7 +104,7 @@ private:
   std::chrono::milliseconds lat_sampling_rate_;
   metrics::Summary<double> lat_summary_;
 
-  std::future<absl::Status> run_status_;
+  std::future<sss::Status> run_status_;
   std::unique_ptr<std::thread> run_thread_;
 };
 
@@ -117,25 +117,24 @@ template <typename OpType> WorkloadDriver<OpType>::~WorkloadDriver() {
   run_thread_->join();
 }
 
-template <typename OpType> absl::Status WorkloadDriver<OpType>::Start() {
+template <typename OpType> sss::Status WorkloadDriver<OpType>::Start() {
   if (terminated_) {
-    return absl::UnavailableError(
-        "Cannot restart a terminated workload driver.");
+    return {sss::Unavailable, "Cannot restart a terminated workload driver."};
   }
 
   auto task =
-      std::packaged_task<absl::Status()>(std::bind(&WorkloadDriver::Run, this));
+      std::packaged_task<sss::Status()>(std::bind(&WorkloadDriver::Run, this));
   run_status_ = task.get_future();
   run_thread_ = std::make_unique<std::thread>(std::move(task));
   while (!running_)
     ;
-  return absl::OkStatus();
+  return sss::Status::Ok();
 }
 
-template <typename OpType> absl::Status WorkloadDriver<OpType>::Stop() {
+template <typename OpType> sss::Status WorkloadDriver<OpType>::Stop() {
   ROME_INFO("Stopping Workload Driver...");
   if (terminated_) {
-    return absl::UnavailableError("Workload driver was already terminated");
+    return {sss::Unavailable, "Workload driver was already terminated"};
   }
 
   // Signal `run_thread_` to stop. After joining the thread, it is guaranteed
@@ -143,14 +142,14 @@ template <typename OpType> absl::Status WorkloadDriver<OpType>::Stop() {
   terminated_ = true;
   run_status_.wait();
 
-  if (!run_status_.get().ok())
+  if (run_status_.get().t != sss::Ok)
     return run_status_.get();
-  return absl::OkStatus();
+  return sss::Status::Ok();
 }
 
-template <typename OpType> absl::Status WorkloadDriver<OpType>::Run() {
+template <typename OpType> sss::Status WorkloadDriver<OpType>::Run() {
   auto status = client_->Start();
-  if (!status.ok())
+  if (status.t != sss::Ok)
     return status;
   stopwatch_ = metrics::Stopwatch::Create("driver_stopwatch");
   running_ = true;
@@ -161,9 +160,9 @@ template <typename OpType> absl::Status WorkloadDriver<OpType>::Run() {
     }
 
     auto next_op = stream_->Next();
-    if (!next_op.ok()) {
-      if (!IsStreamTerminated(next_op.status())) {
-        status = next_op.status();
+    if (next_op.status.t != sss::Ok) {
+      if (!IsStreamTerminated(next_op.status)) {
+        status = next_op.status;
       }
       break;
     }
@@ -172,14 +171,14 @@ template <typename OpType> absl::Status WorkloadDriver<OpType>::Run() {
     auto curr_lap_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         curr_lap.GetRuntimeNanoseconds());
 
-    auto client_status = client_->Apply(next_op.value());
+    auto client_status = client_->Apply(next_op.val.value());
     if (curr_lap_ms > lat_sampling_rate_) {
       lat_summary_
           << (stopwatch_->GetLapSplit().GetRuntimeNanoseconds().count() -
               curr_lap.GetRuntimeNanoseconds().count());
     }
 
-    if (!client_status.ok()) {
+    if (client_status.t != sss::Ok) {
       status = client_status;
       break;
     }

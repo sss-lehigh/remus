@@ -1,8 +1,8 @@
-#include "thread_pool.h"
-
 #include <chrono>
 
 #include "../logging/logging.h"
+
+#include "thread_pool.h"
 
 namespace util {
 
@@ -25,13 +25,13 @@ ThreadPool::ThreadPool() : drain_(false), stopped_(false) {
   }
 }
 
-absl::Status ThreadPool::Enqueue(Task task) LOCKS_EXCLUDED(mu_) {
+sss::Status ThreadPool::Enqueue(Task task) /*LOCKS_EXCLUDED(mu_)*/ {
   if (drain_) {
-    return absl::UnavailableError("Thread pool is draining");
+    return {sss::Unavailable, "Thread pool is draining"};
   }
   std::lock_guard<std::mutex> lock(mu_);
   tasks_.push_back(task);
-  return absl::OkStatus();
+  return sss::Status::Ok();
 }
 
 void ThreadPool::Stop() {
@@ -45,7 +45,7 @@ void ThreadPool::Drain() {
   Stop();
 }
 
-void ThreadPool::RunThread() LOCKS_EXCLUDED(mu_) {
+void ThreadPool::RunThread() /*LOCKS_EXCLUDED(mu_)*/ {
   auto backoff = kInitialBackoff;
   bool tasks_empty;
   Task task;

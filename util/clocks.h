@@ -1,7 +1,8 @@
 #pragma once
+
 #include <chrono>
 
-#include "../testutil/fake_clock.h"
+// [mfs] This seems like not enough code to justify a file
 
 namespace util {
 

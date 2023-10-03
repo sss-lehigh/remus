@@ -1,4 +1,5 @@
 #pragma once
+
 #include <chrono>
 #include <cstdint>
 #include <ctime>
@@ -8,8 +9,6 @@
 
 #include "../util/clocks.h"
 #include "../util/duration_util.h"
-#include "absl/base/thread_annotations.h"
-#include "absl/synchronization/mutex.h"
 
 namespace rome {
 
@@ -32,8 +31,8 @@ public:
         new LeakyTokenBucketQpsController(max_qps));
   }
 
-  void Wait() LOCKS_EXCLUDED(mu_) override {
-    absl::MutexLock lock(&mu_);
+  void Wait() /*LOCKS_EXCLUDED(mu_)*/ override {
+    std::lock_guard<std::mutex> lock(mu_);
     do {
       TryRefreshTokens();
     } while (tokens_ == 0);
@@ -47,7 +46,7 @@ protected:
     last_refill_ = Clock::now();
   }
 
-  void TryRefreshTokens() EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+  void TryRefreshTokens() /*EXCLUSIVE_LOCKS_REQUIRED(mu_)*/ {
     auto now = Clock::now();
     int64_t deposit =
         std::chrono::duration_cast<std::chrono::seconds>(now - last_refill_)
@@ -59,18 +58,18 @@ protected:
     }
   }
 
-  absl::Mutex mu_;
-  int64_t max_qps_ GUARDED_BY(mu_);
-  int64_t tokens_ GUARDED_BY(mu_);
-  std::chrono::time_point<Clock> last_refill_ GUARDED_BY(mu_);
+  std::mutex mu_;
+  int64_t max_qps_ /*GUARDED_BY(mu_)*/;
+  int64_t tokens_ /*GUARDED_BY(mu_)*/;
+  std::chrono::time_point<Clock> last_refill_ /*GUARDED_BY(mu_)*/;
 };
 
 template <typename Clock>
 class CyclingLeakyTokenBucketQpsController
     : public LeakyTokenBucketQpsController<Clock> {
 public:
-  void Wait() override EXCLUSIVE_LOCKS_REQUIRED(this->mu_) {
-    absl::MutexLock lock(&this->mu_);
+  void Wait() override /*EXCLUSIVE_LOCKS_REQUIRED(this->mu_)*/ {
+    std::lock_guard<std::mutex> lock(this->mu_);
     do {
       TryUpdateQps();
       this->TryRefreshTokens();

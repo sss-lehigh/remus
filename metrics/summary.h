@@ -58,7 +58,7 @@ public:
 
   Summary &operator<<(const T &value);
 
-  absl::Status Accumulate(const absl::StatusOr<Summary<T>> &other) override;
+  sss::Status Accumulate(const sss::StatusVal<Summary<T>> &other) override;
 
   std::string ToString() override;
 
@@ -101,7 +101,7 @@ private:
   class PercentileAccessor {
   public:
     template <typename ATreeType>
-    absl::StatusOr<typename ATreeType::node_type *>
+    sss::StatusVal<typename ATreeType::node_type *>
     FindNthPercentile(const ATreeType &tree, double n);
 
     template <typename ATreeType> int GetSize(const ATreeType &tree);
@@ -151,13 +151,13 @@ template <typename T> void Summary<T>::UpdatePercentilesAndClearSamples() {
   if (accessor.GetSize(samples_) == 0)
     return;
   if (!initialized_) {
-    min_ = accessor.FindNthPercentile(samples_, 0.0).value()->key();
-    p50_ = accessor.FindNthPercentile(samples_, 50.0).value()->key();
-    p90_ = accessor.FindNthPercentile(samples_, 90.0).value()->key();
-    p95_ = accessor.FindNthPercentile(samples_, 95.0).value()->key();
-    p99_ = accessor.FindNthPercentile(samples_, 99.0).value()->key();
-    p999_ = accessor.FindNthPercentile(samples_, 99.9).value()->key();
-    max_ = accessor.FindNthPercentile(samples_, 100.0).value()->key();
+    min_ = accessor.FindNthPercentile(samples_, 0.0).val.value()->key();
+    p50_ = accessor.FindNthPercentile(samples_, 50.0).val.value()->key();
+    p90_ = accessor.FindNthPercentile(samples_, 90.0).val.value()->key();
+    p95_ = accessor.FindNthPercentile(samples_, 95.0).val.value()->key();
+    p99_ = accessor.FindNthPercentile(samples_, 99.0).val.value()->key();
+    p999_ = accessor.FindNthPercentile(samples_, 99.9).val.value()->key();
+    max_ = accessor.FindNthPercentile(samples_, 100.0).val.value()->key();
     initialized_ = true;
   } else {
     UpdatePercentile(0.0);
@@ -174,9 +174,9 @@ template <typename T> void Summary<T>::UpdatePercentilesAndClearSamples() {
 template <typename T> void Summary<T>::UpdatePercentile(double p) {
   PercentileAccessor accessor;
   auto node_or = accessor.FindNthPercentile(samples_, p);
-  if (!node_or.ok())
+  if (node_or.status.t != sss::Ok)
     exit(1);
-  auto value = double(node_or.value()->key());
+  auto value = double(node_or.val.value()->key());
   if (p == 0.0) {
     min_ = std::min(min_, value);
   } else if (p == 50.0) {
@@ -208,8 +208,7 @@ template <typename T> Summary<T> &Summary<T>::operator<<(const T &value) {
     // update the internal metrics and reset the samples.
     UpdatePercentilesAndClearSamples();
   }
-  if (!samples_.InsertOrUpdate(value, 1, 1).ok())
-    exit(1);
+  samples_.InsertOrUpdate(value, 1, 1);
   ++total_samples_;
 
   // Compute the running mean and variance.
@@ -243,11 +242,11 @@ template <typename T> double Summary<T>::GetPercentileInternal(double p) {
 
 template <typename T>
 template <typename ATreeType>
-absl::StatusOr<typename ATreeType::node_type *>
+sss::StatusVal<typename ATreeType::node_type *>
 Summary<T>::PercentileAccessor::FindNthPercentile(const ATreeType &tree,
                                                   double percentile) {
   if (percentile > 100.0 || percentile < 0.0) {
-    // return absl::FailedPreconditionError("Unexpected value for n");
+    // return FailedPrecondition ("Unexpected value for n");
     std::cerr << percentile << std::endl;
     exit(1);
   }
@@ -269,7 +268,7 @@ Summary<T>::PercentileAccessor::FindNthPercentile(const ATreeType &tree,
         (left != nullptr ? left->metadata() : 0) < rank) {
       // If the rank lies somewhere excluding the right subtree, and does not
       // include the left subtree then it must be this node.
-      return curr;
+      return {sss::Status::Ok(), curr};
     } else if (left != nullptr && left->metadata() >= rank) {
       // If there are `rank` nodes smaller than this node, the n-th node must be
       // in the left subtree.
@@ -286,7 +285,7 @@ Summary<T>::PercentileAccessor::FindNthPercentile(const ATreeType &tree,
     right = curr->right();
   }
   assert(curr->metadata() >= rank);
-  return curr;
+  return {sss::Status::Ok(), curr};
 }
 
 template <typename T>
@@ -300,13 +299,13 @@ int Summary<T>::PercentileAccessor::GetSize(const ATreeType &tree) {
 }
 
 template <typename T>
-absl::Status Summary<T>::Accumulate(const absl::StatusOr<Summary<T>> &other) {
-  if (!other.ok())
-    return other.status();
+sss::Status Summary<T>::Accumulate(const sss::StatusVal<Summary<T>> &other) {
+  if (other.status.t != sss::Ok)
+    return other.status;
 
-  auto d = other.value();
+  auto d = other.val.value();
   if (d.name_ != name_) {
-    return absl::FailedPreconditionError("Unexpected metric ID");
+    return {sss::FailedPrecondition, "Unexpected metric ID"};
   }
 
   // Compute the weighted average of the two distribution statistics.
@@ -329,7 +328,7 @@ absl::Status Summary<T>::Accumulate(const absl::StatusOr<Summary<T>> &other) {
            double(total_samples_ + d.total_samples_);
   variance_ += (d.variance_ * d.total_samples_ - variance_ * total_samples_) /
                double(total_samples_ + d.total_samples_);
-  return absl::OkStatus();
+  return sss::Status::Ok();
 }
 
 template <typename T> std::string Summary<T>::ToString() {

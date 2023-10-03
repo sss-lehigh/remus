@@ -6,8 +6,6 @@
 
 #include "../rdma/connection_manager/connection_manager.h"
 #include "../rdma/memory_pool/memory_pool.h"
-#include "absl/status/status.h"
-#include "absl/status/statusor.h"
 #include "common.h"
 #include "protos/experiment.pb.h"
 
@@ -33,8 +31,8 @@ public:
   /// @param done a bool for inter-thread communication
   /// @param runtime_s how long to wait before listening for finishing messages
   /// @return the status
-  absl::Status Launch(volatile bool *done, int runtime_s,
-                      std::function<void()> cleanup) {
+  sss::Status Launch(volatile bool *done, int runtime_s,
+                     std::function<void()> cleanup) {
     // Sleep while clients are running if there is a set runtime.
     if (runtime_s > 0) {
       ROME_INFO("SERVER :: Sleeping for {}", runtime_s);
@@ -64,13 +62,11 @@ public:
                   // server to end at the same time
       ROME_INFO("SERVER :: receiving ack from {}", p.id);
       auto conn_or = pool_->connection_manager()->GetConnection(p.id);
-      if (!conn_or.ok())
-        return conn_or.status();
+      RETURN_STATUSVAL_ON_ERROR(conn_or);
 
-      auto *conn = conn_or.value();
+      auto *conn = conn_or.val.value();
       auto msg = conn->channel()->TryDeliver<AckProto>();
-      while ((!msg.ok() &&
-              msg.status().code() == absl::StatusCode::kUnavailable)) {
+      while ((msg.status.t != sss::Ok && msg.status.t == sss::Unavailable)) {
         msg = conn->channel()->TryDeliver<AckProto>();
       }
       ROME_INFO("SERVER :: received ack");
@@ -83,16 +79,15 @@ public:
                   // server to end at the same time
       ROME_INFO("SERVER :: sending ack to {}", p.id);
       auto conn_or = pool_->connection_manager()->GetConnection(p.id);
-      if (!conn_or.ok())
-        return conn_or.status();
-      auto *conn = conn_or.value();
+      RETURN_STATUSVAL_ON_ERROR(conn_or);
+      auto *conn = conn_or.val.value();
       AckProto e;
       // Send back an ack proto let the client know that all the other clients
       // are done
       auto sent = conn->channel()->Send(e);
       ROME_INFO("SERVER :: sent ack");
     }
-    return absl::OkStatus();
+    return sss::Status::Ok();
   }
 
 private:

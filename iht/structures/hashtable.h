@@ -88,8 +88,8 @@ public:
   /// @param host the leader of the initialization
   /// @param peers all the nodes in the neighborhood
   /// @return status code for the function
-  absl::Status Init(MemoryPool::Peer host,
-                    const std::vector<MemoryPool::Peer> &peers) {
+  sss::Status Init(MemoryPool::Peer host,
+                   const std::vector<MemoryPool::Peer> &peers) {
     bool is_host_ = self_.id == host.id;
 
     if (is_host_) {
@@ -109,31 +109,32 @@ public:
 
         // Form a connection with the machine
         auto conn_or = pool_->connection_manager()->GetConnection(p->id);
-        ROME_CHECK_OK(ROME_RETURN(conn_or.status()), conn_or);
+        RETURN_STATUSVAL_ON_ERROR(conn_or);
 
         // Send the proto over
-        absl::Status status = conn_or.value()->channel()->Send(proto);
-        ROME_CHECK_OK(ROME_RETURN(status), status);
+        auto status = conn_or.val.value()->channel()->Send(proto);
+        RETURN_STATUS_ON_ERROR(status);
       }
     } else {
       // Listen for a connection
       auto conn_or = pool_->connection_manager()->GetConnection(host.id);
-      ROME_CHECK_OK(ROME_RETURN(conn_or.status()), conn_or);
+      RETURN_STATUSVAL_ON_ERROR(conn_or);
 
       // Try to get the data from the machine, repeatedly trying until
       // successful
-      auto got = conn_or.value()->channel()->TryDeliver<RemoteObjectProto>();
-      while (got.status().code() == absl::StatusCode::kUnavailable) {
-        got = conn_or.value()->channel()->TryDeliver<RemoteObjectProto>();
+      auto got =
+          conn_or.val.value()->channel()->TryDeliver<RemoteObjectProto>();
+      while (got.status.t == sss::Unavailable) {
+        got = conn_or.val.value()->channel()->TryDeliver<RemoteObjectProto>();
       }
-      ROME_CHECK_OK(ROME_RETURN(got.status()), got);
+      RETURN_STATUSVAL_ON_ERROR(got);
 
       // From there, decode the data into a value
       remote_array hashtable_root =
-          decltype(hashtable_root)(host.id, got->raddr());
+          decltype(hashtable_root)(host.id, got.val.value().raddr());
       this->root = hashtable_root;
     }
-    return absl::OkStatus();
+    return sss::Status::Ok();
   }
 
   /// @brief Gets a value at the key.

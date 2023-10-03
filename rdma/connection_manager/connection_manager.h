@@ -1,7 +1,5 @@
 #pragma once
 
-#include <absl/status/status.h>
-#include <absl/status/statusor.h>
 #include <arpa/inet.h>
 #include <asm-generic/errno.h>
 #include <atomic>
@@ -26,6 +24,7 @@
 
 #include "../../util/coroutine.h"
 #include "../../util/status_util.h"
+#include "../../vendor/sss/status.h"
 #include "../channel/rdma_accessor.h"
 #include "../channel/rdma_channel.h"
 #include "../channel/twosided_messenger.h"
@@ -49,7 +48,7 @@ public:
   ~ConnectionManager();
   explicit ConnectionManager(uint32_t my_id);
 
-  absl::Status Start(std::string_view addr, std::optional<uint16_t> port);
+  sss::Status Start(std::string_view addr, std::optional<uint16_t> port);
 
   // Getters.
   std::string address() const { return broker_->address(); }
@@ -69,10 +68,10 @@ public:
   void OnDisconnect(rdma_cm_id *id) override;
 
   // `RdmaClientInterface` implementation
-  absl::StatusOr<conn_type *> Connect(uint32_t node_id, std::string_view server,
+  sss::StatusVal<conn_type *> Connect(uint32_t node_id, std::string_view server,
                                       uint16_t port);
 
-  absl::StatusOr<conn_type *> GetConnection(uint32_t node_id);
+  sss::StatusVal<conn_type *> GetConnection(uint32_t node_id);
 
   void Shutdown();
 
@@ -155,13 +154,13 @@ private:
     return attr;
   }
 
-  absl::StatusOr<conn_type *> ConnectLoopback(rdma_cm_id *id);
+  sss::StatusVal<conn_type *> ConnectLoopback(rdma_cm_id *id);
 
   // Whether or not to stop handling requests.
   volatile bool accepting_;
 
   // Current status
-  absl::Status status_;
+  sss::Status status_;
 
   uint32_t my_id_;
   std::unique_ptr<RdmaBroker> broker_;
@@ -178,8 +177,6 @@ private:
 
   rdma_cm_id *loopback_id_ = nullptr;
 };
-
-using ::util::InternalErrorBuilder;
 
 template <typename ChannelType>
 ConnectionManager<ChannelType>::~ConnectionManager() {
@@ -235,19 +232,19 @@ ConnectionManager<ChannelType>::ConnectionManager(uint32_t my_id)
     : accepting_(false), my_id_(my_id), broker_(nullptr), mu_(-1) {}
 
 template <typename ChannelType>
-absl::Status
+sss::Status
 ConnectionManager<ChannelType>::Start(std::string_view addr,
                                       std::optional<uint16_t> port) {
   if (accepting_) {
-    return InternalErrorBuilder() << "Cannot start broker twice";
+    return {sss::InternalError, "Cannot start broker twice"};
   }
   accepting_ = true;
 
   broker_ = RdmaBroker::Create(addr, port, this);
-  ROME_CHECK_QUIET(
-      ROME_RETURN(InternalErrorBuilder() << "Failed to create broker"),
-      broker_ != nullptr)
-  return absl::OkStatus();
+  if (broker_ == nullptr) {
+    return {sss::InternalError, "Failed to create broker"};
+  }
+  return {sss::Ok, {}};
 }
 
 namespace {
@@ -297,12 +294,11 @@ void ConnectionManager<ChannelType>::OnConnectRequest(rdma_cm_id *id,
       rdma_ack_cm_event(event);
       if (peer_id != my_id_)
         Release();
-      auto status =
-          util::AlreadyExistsErrorBuilder()
-          << "[OnConnectRequest] (Node " << my_id_ << ") Connection already "
-          << (conn != established_.end() ? "established" : "requested") << ": "
-          << peer_id;
-      ROME_DEBUG(absl::Status(status).ToString());
+      std::string message = "[OnConnectRequest] (Node ";
+      message = message + std::to_string(my_id_) + ") Connection already " +
+                (conn != established_.end() ? "established" : "requested") +
+                ": " + std::to_string(peer_id);
+      ROME_DEBUG(message);
       return;
     }
 
@@ -372,7 +368,7 @@ void ConnectionManager<ChannelType>::OnDisconnect(rdma_cm_id *id) {
 }
 
 template <typename ChannelType>
-absl::StatusOr<typename ConnectionManager<ChannelType>::conn_type *>
+sss::StatusVal<typename ConnectionManager<ChannelType>::conn_type *>
 ConnectionManager<ChannelType>::ConnectLoopback(rdma_cm_id *id) {
   ROME_ASSERT_DEBUG(id->qp != nullptr, "No QP associated with endpoint");
   ROME_DEBUG("Connecting loopback...");
@@ -385,12 +381,16 @@ ConnectionManager<ChannelType>::ConnectLoopback(rdma_cm_id *id) {
   attr_mask =
       IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
   ROME_TRACE("Loopback: IBV_QPS_INIT");
-  RDMA_CM_CHECK(ibv_modify_qp, id->qp, &attr, attr_mask);
+  if (ibv_modify_qp(id->qp, &attr, attr_mask) != 0) {
+    sss::Status err = {sss::InternalError, ""};
+    err << "ibv_modify_qp(): " << strerror(errno);
+    return {err, {}};
+  }
 
   ibv_port_attr port_attr;
-  RDMA_CM_CHECK(ibv_query_port, id->verbs, LOOPBACK_PORT_NUM,
-                &port_attr); // RDMA_CM_CHECK(ibv_query_port, id->verbs,
-                             // id->port_num, &port_attr);
+  RDMA_CM_CHECK_TOVAL(ibv_query_port, id->verbs, LOOPBACK_PORT_NUM,
+                      &port_attr); // RDMA_CM_CHECK(ibv_query_port, id->verbs,
+                                   // id->port_num, &port_attr);
   attr.ah_attr.dlid = port_attr.lid;
   attr.qp_state = IBV_QPS_RTR;
   attr.dest_qp_num = id->qp->qp_num;
@@ -399,18 +399,22 @@ ConnectionManager<ChannelType>::ConnectLoopback(rdma_cm_id *id) {
       (IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
        IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
   ROME_TRACE("Loopback: IBV_QPS_RTR");
-  RDMA_CM_CHECK(ibv_modify_qp, id->qp, &attr, attr_mask);
+  if (ibv_modify_qp(id->qp, &attr, attr_mask) != 0) {
+    sss::Status err = {sss::InternalError, ""};
+    err << "ibv_modify_qp(): " << strerror(errno);
+    return {err, {}};
+  }
 
   attr.qp_state = IBV_QPS_RTS;
   attr_mask = (IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
                IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
   ROME_TRACE("Loopback: IBV_QPS_RTS");
-  RDMA_CM_CHECK(ibv_modify_qp, id->qp, &attr, attr_mask);
+  RDMA_CM_CHECK_TOVAL(ibv_modify_qp, id->qp, &attr, attr_mask);
 
-  RDMA_CM_CHECK(fcntl, id->recv_cq->channel->fd, F_SETFL,
-                fcntl(id->recv_cq->channel->fd, F_GETFL) | O_NONBLOCK);
-  RDMA_CM_CHECK(fcntl, id->send_cq->channel->fd, F_SETFL,
-                fcntl(id->send_cq->channel->fd, F_GETFL) | O_NONBLOCK);
+  RDMA_CM_CHECK_TOVAL(fcntl, id->recv_cq->channel->fd, F_SETFL,
+                      fcntl(id->recv_cq->channel->fd, F_GETFL) | O_NONBLOCK);
+  RDMA_CM_CHECK_TOVAL(fcntl, id->send_cq->channel->fd, F_SETFL,
+                      fcntl(id->send_cq->channel->fd, F_GETFL) | O_NONBLOCK);
 
   // Allocate a new control channel to be used with this connection
   auto channel = std::make_unique<ChannelType>(id);
@@ -418,11 +422,11 @@ ConnectionManager<ChannelType>::ConnectLoopback(rdma_cm_id *id) {
       my_id_, new Connection{my_id_, my_id_, std::move(channel)});
   ROME_ASSERT(iter.second, "Unexepected error");
   Release();
-  return established_[my_id_].get();
+  return {{sss::Status::Ok()}, established_[my_id_].get()};
 }
 
 template <typename ChannelType>
-absl::StatusOr<typename ConnectionManager<ChannelType>::conn_type *>
+sss::StatusVal<typename ConnectionManager<ChannelType>::conn_type *>
 ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
                                         std::string_view server,
                                         uint16_t port) {
@@ -430,7 +434,7 @@ ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
     auto conn = established_.find(peer_id);
     if (conn != established_.end()) {
       Release();
-      return conn->second.get();
+      return {sss::Status::Ok(), conn->second.get()};
     }
 
     auto port_str = std::to_string(htons(port));
@@ -455,18 +459,20 @@ ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
     // loopback connection, then we are going to
     int gai_ret =
         rdma_getaddrinfo(server.data(), port_str.data(), &hints, &resolved);
-    ROME_CHECK_QUIET(ROME_RETURN(InternalErrorBuilder()
-                                 << "rdma_getaddrinfo(): "
-                                 << gai_strerror(gai_ret)),
-                     gai_ret == 0);
+    if (gai_ret != 0) {
+      sss::Status err = {sss::InternalError, "rdma_getaddrinfo(): "};
+      err << gai_strerror(gai_ret);
+      return {err, {}};
+    }
 
     ibv_qp_init_attr init_attr = DefaultQpInitAttr();
     auto err = rdma_create_ep(&id, resolved, pd(), &init_attr);
     rdma_freeaddrinfo(resolved);
     if (err) {
       Release();
-      return util::InternalErrorBuilder()
-             << "rdma_create_ep(): " << strerror(errno) << " (" << errno << ")";
+      sss::Status ee = {sss::InternalError, "rdma_create_ep(): "};
+      ee << strerror(errno) << " (" << errno << ")";
+      return {ee, {}};
     }
     ROME_DEBUG("[Connect] (Node {}) Trying to connect to: {} (id={})", my_id_,
                peer_id, fmt::ptr(id));
@@ -475,9 +481,9 @@ ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
       return ConnectLoopback(id);
 
     auto *event_channel = rdma_create_event_channel();
-    RDMA_CM_CHECK(fcntl, event_channel->fd, F_SETFL,
-                  fcntl(event_channel->fd, F_GETFL) | O_NONBLOCK);
-    RDMA_CM_CHECK(rdma_migrate_id, id, event_channel);
+    RDMA_CM_CHECK_TOVAL(fcntl, event_channel->fd, F_SETFL,
+                        fcntl(event_channel->fd, F_GETFL) | O_NONBLOCK);
+    RDMA_CM_CHECK_TOVAL(rdma_migrate_id, id, event_channel);
 
     rdma_conn_param conn_param;
     std::memset(&conn_param, 0, sizeof(conn_param));
@@ -488,7 +494,7 @@ ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
     conn_param.responder_resources = 8;
     conn_param.initiator_depth = 8;
 
-    RDMA_CM_CHECK(rdma_connect, id, &conn_param);
+    RDMA_CM_CHECK_TOVAL(rdma_connect, id, &conn_param);
 
     // Handle events.
     while (true) {
@@ -500,10 +506,10 @@ ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
       ROME_DEBUG("[Connect] (Node {}) Got event: {} (id={})", my_id_,
                  rdma_event_str(event->event), fmt::ptr(id));
 
-      absl::StatusOr<ChannelType *> conn_or;
+      sss::StatusVal<ChannelType *> conn_or;
       switch (event->event) {
       case RDMA_CM_EVENT_ESTABLISHED: {
-        RDMA_CM_CHECK(rdma_ack_cm_event, event);
+        RDMA_CM_CHECK_TOVAL(rdma_ack_cm_event, event);
         auto conn = established_.find(peer_id);
         if (bool is_established = (conn != established_.end());
             is_established && peer_id != my_id_) {
@@ -513,24 +519,24 @@ ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
           // the event.
           ROME_DEBUG("[Connect] (Node {}) Disconnecting: (id={})", my_id_,
                      fmt::ptr(id));
-          RDMA_CM_CHECK(rdma_disconnect, id);
+          RDMA_CM_CHECK_TOVAL(rdma_disconnect, id);
           rdma_cm_event *event;
           auto result = rdma_get_cm_event(id->channel, &event);
           while (result < 0 && errno == EAGAIN) {
             result = rdma_get_cm_event(id->channel, &event);
           }
-          RDMA_CM_CHECK(rdma_ack_cm_event, event);
+          RDMA_CM_CHECK_TOVAL(rdma_ack_cm_event, event);
 
           rdma_destroy_ep(id);
           rdma_destroy_event_channel(event_channel);
 
           if (is_established) {
             ROME_DEBUG("[Connect] Already connected: {}", peer_id);
-            return conn->second.get();
+            return {sss::Status::Ok(), conn->second.get()};
           } else {
-            return util::UnavailableErrorBuilder()
-                   << "[Connect] (Node " << my_id_
-                   << ") Connection is already requested: " << peer_id;
+            sss::Status err = {sss::Unavailable, "[Connect (Node "};
+            err << my_id_ << ") Connection is already requested: " << peer_id;
+            return {err, {}};
           }
         }
 
@@ -543,12 +549,14 @@ ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
                           ->sin_addr),
             rdma_get_src_port(id));
 
-        RDMA_CM_CHECK(fcntl, event_channel->fd, F_SETFL,
-                      fcntl(event_channel->fd, F_GETFL) | O_SYNC);
-        RDMA_CM_CHECK(fcntl, id->recv_cq->channel->fd, F_SETFL,
-                      fcntl(id->recv_cq->channel->fd, F_GETFL) | O_NONBLOCK);
-        RDMA_CM_CHECK(fcntl, id->send_cq->channel->fd, F_SETFL,
-                      fcntl(id->send_cq->channel->fd, F_GETFL) | O_NONBLOCK);
+        RDMA_CM_CHECK_TOVAL(fcntl, event_channel->fd, F_SETFL,
+                            fcntl(event_channel->fd, F_GETFL) | O_SYNC);
+        RDMA_CM_CHECK_TOVAL(fcntl, id->recv_cq->channel->fd, F_SETFL,
+                            fcntl(id->recv_cq->channel->fd, F_GETFL) |
+                                O_NONBLOCK);
+        RDMA_CM_CHECK_TOVAL(fcntl, id->send_cq->channel->fd, F_SETFL,
+                            fcntl(id->send_cq->channel->fd, F_GETFL) |
+                                O_NONBLOCK);
 
         // Allocate a new control channel to be used with this connection
         auto channel = std::make_unique<ChannelType>(id);
@@ -557,15 +565,15 @@ ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
         ROME_ASSERT(iter.second, "Unexepected error");
         auto *new_conn = established_[peer_id].get();
         Release();
-        return new_conn;
+        return {sss::Status::Ok(), new_conn};
       }
       case RDMA_CM_EVENT_ADDR_RESOLVED:
         ROME_WARN("Got addr resolved...");
-        RDMA_CM_CHECK(rdma_ack_cm_event, event);
+        RDMA_CM_CHECK_TOVAL(rdma_ack_cm_event, event);
         break;
       default: {
         auto cm_event = event->event;
-        RDMA_CM_CHECK(rdma_ack_cm_event, event);
+        RDMA_CM_CHECK_TOVAL(rdma_ack_cm_event, event);
         backoff_us_ =
             backoff_us_ > 0
                 ? std::min((backoff_us_ + (100 * my_id_)) * 2, kMaxBackoffUs)
@@ -575,21 +583,21 @@ ConnectionManager<ChannelType>::Connect(uint32_t peer_id,
         rdma_destroy_event_channel(event_channel);
         if (cm_event == RDMA_CM_EVENT_REJECTED) {
           std::this_thread::sleep_for(std::chrono::microseconds(backoff_us_));
-          return util::UnavailableErrorBuilder()
-                 << "Connection request rejected";
+          return {{sss::Unavailable, "Connection request rejected"}, {}};
         }
-        return InternalErrorBuilder()
-               << "Got unexpected event: " << rdma_event_str(cm_event);
+        sss::Status err = {sss::InternalError, "Got unexpected event: "};
+        err << rdma_event_str(cm_event);
+        return {err, {}};
       }
       }
     }
   } else {
-    return util::UnavailableErrorBuilder() << "Lock acquisition failed";
+    return {{sss::Unavailable, "Lock acquisition failed"}, {}};
   }
 }
 
 template <typename ChannelType>
-absl::StatusOr<typename ConnectionManager<ChannelType>::conn_type *>
+sss::StatusVal<typename ConnectionManager<ChannelType>::conn_type *>
 ConnectionManager<ChannelType>::GetConnection(uint32_t peer_id) {
   while (!Acquire(my_id_)) {
     std::this_thread::yield();
@@ -598,10 +606,12 @@ ConnectionManager<ChannelType>::GetConnection(uint32_t peer_id) {
   if (conn != established_.end()) {
     auto result = conn->second.get();
     Release();
-    return result;
+    return {sss::Status::Ok(), result};
   } else {
     Release();
-    return util::NotFoundErrorBuilder() << "Connection not found: " << peer_id;
+    sss::Status err = {sss::NotFound, "Connection not found: "};
+    err << peer_id;
+    return {err, {}};
   }
 }
 

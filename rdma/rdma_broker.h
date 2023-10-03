@@ -31,8 +31,7 @@
 #include "../logging/logging.h"
 #include "../util/coroutine.h"
 #include "../util/status_util.h"
-#include "absl/status/status.h"
-#include "absl/status/statusor.h"
+#include "../vendor/sss/status.h"
 #include "rdma_receiver.h"
 
 namespace rome::rdma {
@@ -61,7 +60,7 @@ public:
   uint16_t port() const { return port_; }
   ibv_pd *pd() const { return listen_id_->pd; }
 
-  absl::Status Stop();
+  sss::Status Stop();
 
 private:
   static constexpr int kMaxRetries = 100;
@@ -70,8 +69,8 @@ private:
 
   // Start the broker listening on the given `device` and `port`. If `port` is
   // `nullopt`, then the first available port is used.
-  absl::Status Init(std::optional<std::string_view> addr,
-                    std::optional<uint16_t> port);
+  sss::Status Init(std::optional<std::string_view> addr,
+                   std::optional<uint16_t> port);
 
   Coro HandleConnectionRequests();
 
@@ -93,7 +92,7 @@ private:
   std::unique_ptr<std::thread, thread_deleter> runner_;
 
   // Status of the broker at any given time.
-  absl::Status status_;
+  sss::Status status_;
 
   // RDMA CM related members.
   rdma_event_channel *listen_channel_;
