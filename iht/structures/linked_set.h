@@ -1,5 +1,7 @@
 #pragma once
 
+// [mfs] I don't think this is in use, so I'm not reviewing it yet
+
 #include "../../rdma/memory_pool/memory_pool.h"
 #include "../common.h"
 

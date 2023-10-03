@@ -20,6 +20,7 @@ public:
   virtual sss::StatusVal<Message> TryDeliverMessage() = 0;
 };
 
+// [mfs] Do we ever use this?
 class EmptyRdmaMessenger : public RdmaMessenger {
 public:
   ~EmptyRdmaMessenger() = default;

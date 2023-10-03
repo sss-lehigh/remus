@@ -1,8 +1,8 @@
 syntax = "proto2";
 
-import "metrics.proto";
-
 package rome;
+
+import "metrics.proto";
 
 message WorkloadDriverProto {
   optional metrics.MetricProto ops = 2;

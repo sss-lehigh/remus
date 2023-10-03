@@ -32,7 +32,7 @@ private:
   typedef remote_ptr<Base> remote_baseptr;
   typedef remote_ptr<lock_type> remote_lock;
 
-  // ElementList stores a bunch of K/V pairs. IHT employs a "seperate
+  // ElementList stores a bunch of K/V pairs. IHT employs a "separate
   // chaining"-like approach. Rather than storing via a linked list (with easy
   // append), it uses a fixed size array
   struct alignas(64) EList : Base {
@@ -61,6 +61,11 @@ private:
   };
 
   // A pointer lock pair
+  //
+  // [mfs]  I don't understand why this has a remote_lock?  Can't the lock be
+  //        right in the plist?
+  //
+  // [mfs]  This probably needs to be aligned
   struct plist_pair_t {
     remote_baseptr base; // Pointer to base, the super class of Elist or Plist
     remote_lock lock;    // A lock to represent if the base is open or not
@@ -81,13 +86,17 @@ private:
   /// (depth - 1)) pow(2, depth)
   inline void InitPList(remote_plist p, int mult_modder) {
     for (size_t i = 0; i < PLIST_SIZE * mult_modder; i++) {
+      // [mfs]  It would definitely be better not to need to allocate locks
+      //        separate from plists
       p->buckets[i].lock = pool_->Allocate<lock_type>();
       *p->buckets[i].lock = E_UNLOCKED;
       p->buckets[i].base = remote_nullptr;
     }
   }
 
-  remote_plist root;     // Start of plist
+  remote_plist root; // Start of plist
+
+  // [mfs] This should be coupled with a "finalizing" hash of some sort.
   std::hash<K> pre_hash; // Hash function from k -> size_t [this currently does
                          // nothing as the value of the int can just be returned
                          // :: though included for templating this class]
@@ -96,6 +105,7 @@ private:
   bool acquire(remote_lock lock) {
     // Spin while trying to acquire the lock
     while (true) {
+      // Can this be a CAS on an address within a PList?
       lock_type v =
           pool_->CompareAndSwap<lock_type>(lock, E_UNLOCKED, E_LOCKED);
 
@@ -130,8 +140,11 @@ private:
   /// @param before_localized_curr the start of the bucket list (plist)
   /// @param bucket the bucket to write to
   /// @param baseptr the new pointer that bucket should point to
+  //
+  // [mfs] I don't really understand this
   inline void change_bucket_pointer(remote_plist before_localized_curr,
                                     uint64_t bucket, remote_baseptr baseptr) {
+    // [mfs] Can this address manipulation be hidden?
     uint64_t address_of_baseptr = before_localized_curr.address();
     address_of_baseptr += sizeof(plist_pair_t) * bucket;
     remote_ptr<remote_baseptr> magic_baseptr = remote_ptr<remote_baseptr>(
@@ -147,6 +160,8 @@ private:
   }
 
   // Hashing function to decide bucket size
+  //
+  // [mfs] Use mix13 or something like that to get better behavior?
   inline uint64_t level_hash(const K &key, size_t level, size_t count) {
     return (level ^ pre_hash(key)) %
            (count - 1); // we use count-1 because this prevents the collision
@@ -191,6 +206,8 @@ private:
   }
 
 public:
+  // [mfs]  Why is this a field?  Shouldn't it be a capability that gets passed
+  //        in by the calling thread on each operation?
   MemoryPool *pool_;
 
   using conn_type = MemoryPool::conn_type;
@@ -209,6 +226,10 @@ public:
   /// @param host the leader of the initialization
   /// @param peers all the nodes in the neighborhood
   /// @return status code for the function
+  //
+  // [mfs]  This "replace the innards" approach isn't really the right way to do
+  //        this... it saves one RDMA access per operation, but I don't think
+  //        it's trustable, and we could always just cache it.
   sss::Status Init(MemoryPool::Peer host,
                    const std::vector<MemoryPool::Peer> &peers) {
     bool is_host_ = self_.id == host.id;
@@ -243,8 +264,13 @@ public:
 
       // Try to get the data from the machine, repeatedly trying until
       // successful
+      //
+      // [mfs]  Since the connection is shared, I need to get a better
+      //        understanding on how this data gets into a buffer that is
+      //        allocated and owned by the current thread.
       auto got =
           conn_or.val.value()->channel()->TryDeliver<RemoteObjectProto>();
+      // TODO: use blocking Deliver()?
       while (got.status.t == sss::Unavailable) {
         got = conn_or.val.value()->channel()->TryDeliver<RemoteObjectProto>();
       }

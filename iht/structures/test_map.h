@@ -21,10 +21,13 @@ using ::rome::rdma::remote_nullptr;
 using ::rome::rdma::remote_ptr;
 using ::rome::rdma::RemoteObjectProto;
 
+// [mfs] Need documentation
 template <class K, class V> class TestMap {
 private:
+  // [mfs] I'm concerned about keeping the Peer in the map like this...
   MemoryPool::Peer self_;
 
+  // [mfs] Is this in use?
   struct alignas(64) List {
     uint64_t vals[LEN];
   };
@@ -46,6 +49,7 @@ private:
   }
 
 public:
+  // [mfs] Why is this part of the data structure?
   MemoryPool *pool_;
 
   using conn_type = MemoryPool::conn_type;
@@ -57,13 +61,23 @@ public:
   /// @param host the leader of the initialization
   /// @param peers all the nodes in the neighborhood
   /// @return status code for the function
+  //
+  // [mfs] I feel like this should be happening in main(), and distributing the
+  //       IHT, not like this.  Among other things, I think doing things this
+  //       way makes the IHT less usable in real code (e.g., does it have to be
+  //       a singleton?)
   sss::Status Init(MemoryPool::Peer host,
                    const std::vector<MemoryPool::Peer> &peers) {
     bool is_host_ = self_.id == host.id;
 
     if (is_host_) {
       // Host machine, it is my responsibility to initiate configuration
+      //
+      // [mfs]  It seems like overkill to use a ProtoBuf just to send a 64-bit
+      //        address.
       RemoteObjectProto proto;
+      // [mfs] Is this doing "list" instead of IHT?  Should the data type be a
+      // template parameter?
       remote_ptr<List> iht_root = pool_->Allocate<List>();
       // Init plist and set remote proto to communicate its value
       InitList(iht_root);
@@ -91,6 +105,10 @@ public:
 
       // Try to get the data from the machine, repeatedly trying until
       // successful
+      //
+      // [mfs]  Since the connection is shared, I need to get a better
+      //        understanding on how this data gets into a buffer that is
+      //        allocated and owned by the current thread.
       auto got =
           conn_or.val.value()->channel()->TryDeliver<RemoteObjectProto>();
       while (got.status.t == sss::Unavailable) {
@@ -112,6 +130,9 @@ public:
   /// @return if the key was found or not. The value at the key is stored in
   /// RdmaIHT::result
   HT_Res<V> contains(K key) {
+    // [mfs] I don't understand the point of prealloc here?
+    //
+    // [mfs] It looks like this code is incomplete?
     remote_ptr<List> prealloc = pool_->Allocate<List>();
     List temp = *std::to_address(prealloc);
     temp.vals[0] = 100;
@@ -148,16 +169,24 @@ public:
   /// @param key the key to insert
   /// @param value the value to associate with the key
   /// @return if the insert was successful
-  HT_Res<V> insert(K key, V value) { return HT_Res<V>(TRUE_STATE, 0); }
+  HT_Res<V> insert(K key, V value) {
+    // [mfs] Is this not actually implemented yet?
+    return HT_Res<V>(TRUE_STATE, 0);
+  }
 
   /// @brief Will remove a value at the key. Will stored the previous value in
   /// result.
   /// @param key the key to remove at
   /// @return if the remove was successful
-  HT_Res<V> remove(K key) { return HT_Res<V>(FALSE_STATE, 0); }
+  HT_Res<V> remove(K key) {
+    // [mfs] Is this not actually implemented yet?
+    return HT_Res<V>(FALSE_STATE, 0);
+  }
 
   /// Function signature added to match map interface. No intermediary cleanup
-  /// necessary so unusued
+  /// necessary so unused
+  //
+  // [mfs] I don't understand why any map interface would need this?
   void try_rehash() {
     // Unused function b/c no cleanup necessary
   }

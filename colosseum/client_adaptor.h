@@ -15,6 +15,10 @@ namespace rome {
 // As an example, consider a data structure with a simple set API (i.e., Set,
 // Get, and Delete). An operation in this scenario would be some struct defining
 // the operation type and the target key.
+//
+// [mfs]  It seems like this should be a concept, to avoid virtual dispatch
+//        overheads.  Or are there workloads with different ClientAdaptors at
+//        the same time?
 template <typename T> class ClientAdaptor {
 public:
   virtual ~ClientAdaptor() = default;

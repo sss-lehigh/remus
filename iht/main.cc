@@ -13,7 +13,7 @@
 #include "../rdma/connection_manager/connection_manager.h"
 #include "../rdma/memory_pool/memory_pool.h"
 
-#include "protos/experiment.pb.h"
+#include "protos/colosseum.pb.h"
 
 #include "role_client.h"
 #include "role_server.h"
@@ -161,6 +161,9 @@ int main(int argc, char **argv) {
   //
   // [mfs]  This should be done differently.  `iht` should be a remote pointer,
   //        distributed by the lead node.
+  //
+  // [mfs]  Right now, this is TestMap?  Switch to IHT?  Or define it in this
+  //        file...
   IHT iht = IHT(self, &pool);
   auto status_iht = iht.Init(host, peers);
   OK_OR_FAIL(status_iht);
@@ -254,7 +257,7 @@ int main(int argc, char **argv) {
   ResultProto result_proto = ResultProto();
   *result_proto.mutable_params() = params;
   for (int i = 0; i < params.thread_count(); i++) {
-    IHTWorkloadDriverProto *r = result_proto.add_driver();
+    WorkloadDriverProto *r = result_proto.add_driver();
     std::string output;
     results[i].SerializeToString(&output);
     r->MergeFromString(output);

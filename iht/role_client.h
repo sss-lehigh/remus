@@ -49,10 +49,13 @@ void test_output(bool show_passing, HT_Res<int> actual, HT_Res<int> expected,
   }
 }
 
+// [mfs] This is declared at the wrong scope?
 typedef IHT_Op<int, int> Operation;
 
 class Client : public ClientAdaptor<Operation> {
 public:
+  // [mfs]  Here and in Server, I don't understand the factory pattern.  It's
+  //        not really adding any value.
   static std::unique_ptr<Client>
   Create(const MemoryPool::Peer &self, const MemoryPool::Peer &server,
          const std::vector<MemoryPool::Peer> &peers, ExperimentParams &params,
@@ -69,6 +72,13 @@ public:
   /// @return the resultproto
   static sss::StatusVal<WorkloadDriverProto>
   Run(std::unique_ptr<Client> client, volatile bool *done, double frac) {
+    // [mfs]  I was hopeful that this code was going to actually populate the
+    //        data structure from *multiple nodes* simultaneously.  It should,
+    //        or else all of the initial elists and plists are going to be on
+    //        the same machine, which probably means all of the elists and
+    //        plists will always be on the same machine.
+    //
+    // [mfs]  This should be in another function
     if (client->master_client_) {
       int key_lb = client->params_.key_lb(), key_ub = client->params_.key_ub();
       int op_count = (key_ub - key_lb) * frac;
@@ -82,6 +92,8 @@ public:
       // client start times. Must fix this in the future to a better solution
       // The idea is even though remote nodes won't being workload at the same
       // time, at least the data structure is guaranteed to be populated
+      //
+      // [mfs] Indeed, this indicates the need for a distributed barrier
       std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
@@ -103,8 +115,16 @@ public:
     // Create a random operation generator that is
     // - evenly distributed among the key range
     // - within the specified ratios for operations
+    //
+    // [mfs]  Since we're working with ints, why not use int distributions? They
+    //        should be faster.
     std::uniform_real_distribution<double> dist =
         std::uniform_real_distribution<double>(0.0, 1.0);
+    // [mfs]  Just to be sure: will every thread, on every node, have a
+    // different
+    //        seed?  Also, is it really necessary to have a different seed for
+    //        each trial, or should the seed be a function of the node / thread,
+    //        for repeatability?
     std::default_random_engine gen((unsigned)std::time(NULL));
     int lb = client->params_.key_lb();
     int contains = client->params_.contains();
@@ -130,6 +150,11 @@ public:
           std::make_unique<rome::EndlessStream<Operation>>(generator);
     } else {
       // Deliver a workload
+      //
+      // [mfs]  This seems problematic.  Making the whole stream ahead of time
+      //        is going to increase the variance between when threads start,
+      //        and it's going to lead to bad cache behavior.  Why isn't there a
+      //        rome::FixedLengthStream?
       int WORKLOAD_AMOUNT = client->params_.op_count();
       for (int j = 0; j < WORKLOAD_AMOUNT; j++) {
         operations.push_back(generator());
@@ -144,10 +169,15 @@ public:
     int32_t qps_sample_rate = client->params_.qps_sample_rate();
     std::barrier<> *barr = client->barrier_;
     bool master_client = client->master_client_;
+    // [mfs] Again, it looks like Create() is an unnecessary factory
     auto driver = rome::WorkloadDriver<Operation>::Create(
         std::move(client), std::move(workload_stream), qps_controller.get(),
         std::chrono::milliseconds(qps_sample_rate));
+    // [mfs]  This is quite odd.  The current thread is invoking an async thread
+    //        to actually do the work, which means we have lots of extra thread
+    //        creation and joining.
     OK_OR_FAIL(driver->Start());
+    // [mfs]
     std::this_thread::sleep_for(std::chrono::seconds(runtime));
     ROME_INFO("Done here, stop sequence");
     // Wait for all the clients to stop. Then set the done to true to release
@@ -156,9 +186,17 @@ public:
       if (barr != nullptr)
         barr->arrive_and_wait();
     }
+
+    // [mfs]  These writes to done are racy... lots of threads writing here...
+    //        Also, it should be a std::atomic, no?  But who is being signalled?
+    //        Just the server thread (if there is one)?
     *done = true;
+
+    // [mfs] If we didn't use WorkloadDriver, then we wouldn't need Stop()
     OK_OR_FAIL(driver->Stop());
     ROME_INFO("CLIENT :: Driver generated {}", driver->ToString());
+    // [mfs]  It seems like these protos aren't being sent across machines.  Are
+    //        they really needed?
     return {sss::Status::Ok(), driver->ToProto()};
   }
 
@@ -167,6 +205,9 @@ public:
     ROME_INFO("CLIENT :: Starting client...");
     // Conditional to allow us to bypass the barrier for certain client types
     // We want to start at the same time
+    //
+    // [mfs]  The entire barrier infrastructure is odd.  Nobody is using it to
+    //        know when to get time, and it's completely per-node.
     if (barrier_ != nullptr)
       barrier_->arrive_and_wait();
     return sss::Status::Ok();
@@ -178,9 +219,11 @@ public:
     HT_Res<int> res = HT_Res<int>(FALSE_STATE, 0);
     switch (op.op_type) {
     case (CONTAINS):
+      // [mfs]  I don't understand the purpose of "progression".  Is it just for
+      //        getting periodic output?  If so, it's going to hurt the
+      //        experiment's latency, so it's probably a bad idea.
       if (count % progression == 0)
         ROME_INFO("Running Operation {}: contains({})", count, op.key);
-      // ROME_INFO("Running Operation {}: contains({})", count, op.key);
       res = iht_->contains(op.key);
       if (res.status == TRUE_STATE)
         ROME_ASSERT(res.result == op.key,
@@ -191,14 +234,11 @@ public:
       if (count % progression == 0)
         ROME_INFO("Running Operation {}: insert({}, {})", count, op.key,
                   op.value);
-      // ROME_INFO("Running Operation {}: insert({}, {})", count, op.key,
-      // op.value);
       res = iht_->insert(op.key, op.value);
       break;
     case (REMOVE):
       if (count % progression == 0)
         ROME_INFO("Running Operation {}: remove({})", count, op.key);
-      // ROME_INFO("Running Operation {}: remove({})", count, op.key);
       res = iht_->remove(op.key);
       if (res.status == TRUE_STATE)
         ROME_ASSERT(res.result == op.key,
@@ -210,6 +250,10 @@ public:
       break;
     }
     // Think in between operations for simulation purposes.
+    //
+    // [mfs]  This doesn't actually work.  The "simulation" doesn't impact the
+    //        cache or TLB, so it's not really representative of real work... it
+    //        just throttles throughput (or throttles contention).
     if (params_.has_think_time() && params_.think_time() != 0) {
       auto start = util::SystemClock::now();
       while (util::SystemClock::now() - start <
@@ -222,10 +266,14 @@ public:
   /// @brief Runs single-client silent-server test cases on the iht
   /// @param at_scale is true for testing at scale (+10,000 operations)
   /// @return OkStatus if everything worked. Otherwise will shutdown the client.
+  //
+  // [mfs] Why not split into two functions, instead of using "at_scale"?
   sss::Status Operations(bool at_scale) {
     if (at_scale) {
       int scale_size = (CNF_PLIST_SIZE * CNF_ELIST_SIZE) * 8;
       bool show_passing = false;
+      // [mfs]  All of this string creation and concatenation is going to take a
+      //        long time.  Is it part of the timed portion of the experiment?
       for (int i = 0; i < scale_size; i++) {
         test_output(show_passing, iht_->contains(i),
                     HT_Res<int>(FALSE_STATE, 0),
@@ -297,6 +345,9 @@ public:
     if (!master_client_) {
       // if we aren't the master client we don't need to do the stop sequence.
       // Just arrive at the barrier
+      //
+      // [mfs]  Why doesn't the master client also arrive at the barrier, before
+      //        acking to the lead node?
       if (barrier_ != nullptr)
         barrier_->arrive_and_wait();
       return sss::Status::Ok();
@@ -315,11 +366,13 @@ public:
 
     // Wait to receive an ack back. Letting us know that the other clients are
     // done.
+    //
+    // [mfs] Why not use a blocking send?
     auto msg = conn.val.value()->channel()->TryDeliver<AckProto>();
     while ((msg.status.t != sss::Ok && msg.status.t == sss::Unavailable)) {
       msg = conn.val.value()->channel()->TryDeliver<AckProto>();
     }
-
+    // [mfs] Not a helpful message...
     ROME_INFO("CLIENT :: Received Ack");
 
     // Return ok status
@@ -327,6 +380,8 @@ public:
   }
 
 private:
+  // [mfs]  This all needs to be documented
+
   Client(const MemoryPool::Peer &self, const MemoryPool::Peer &host,
          const std::vector<MemoryPool::Peer> &peers, ExperimentParams &params,
          std::barrier<> *barrier, IHT *iht, bool master_client)
@@ -348,5 +403,8 @@ private:
   IHT *iht_;
   bool master_client_;
 
+  // [mfs]  This one in particular needs more explanation.  It looks like it is
+  //        for giving some "heartbeat" output during the experiment, which
+  //        could be costly.
   int progression;
 };
