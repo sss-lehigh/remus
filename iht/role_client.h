@@ -14,16 +14,17 @@
 
 #include "common.h"
 #include "protos/experiment.pb.h"
-#include "structures/hashtable.h"
+// #include "structures/hashtable.h"
 #include "structures/iht_ds.h"
-#include "structures/test_map.h"
+// #include "structures/test_map.h"
 
 using ::rome::ClientAdaptor;
 using ::rome::WorkloadDriver;
 using ::rome::WorkloadDriverProto;
 using ::rome::rdma::MemoryPool;
 
-typedef TestMap<int, int> IHT;
+// [mfs] This should really be defined somewhere else
+typedef RdmaIHT<int, int, 16, 1024> IHT;
 
 std::string fromStateValue(state_value value) {
   if (FALSE_STATE == value) {

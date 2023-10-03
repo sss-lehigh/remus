@@ -1,8 +1,8 @@
 #include <algorithm>
 
-#include "structures/hashtable.h"
+// #include "structures/hashtable.h"
 #include "structures/iht_ds.h"
-#include "structures/test_map.h"
+// #include "structures/test_map.h"
 
 #include "../rdma/connection_manager/connection_manager.h"
 #include "../rdma/memory_pool/memory_pool.h"
@@ -12,7 +12,7 @@
 using ::rome::rdma::MemoryPool;
 
 // [mfs] This typedef is at the wrong scope
-typedef TestMap<int, int> IHT;
+typedef RdmaIHT<int, int, 16, 1024> IHT;
 
 // [mfs]  This needs documentation.  It looks like it is more of an "experiment
 //        manager" than a "server", but I'm not seeing how it manages remote
