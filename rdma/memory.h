@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <variant>
 
-#include "rdma_util.h"
+#include "util.h"
 
 namespace rome::rdma {
 

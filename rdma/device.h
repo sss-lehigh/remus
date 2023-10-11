@@ -7,7 +7,7 @@
 
 #include "../logging/logging.h"
 #include "infiniband/verbs.h"
-#include "rdma_util.h"
+#include "util.h"
 
 namespace rome::rdma {
 

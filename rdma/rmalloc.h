@@ -5,8 +5,8 @@
 #include <list>
 #include <memory>
 
-#include "../../util/memory_resource.h"
-#include "../rdma_memory.h"
+#include "../util/memory_resource.h"
+#include "memory.h"
 
 template class std::unordered_map<size_t, std::deque<void *>>;
 

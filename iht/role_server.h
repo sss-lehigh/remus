@@ -1,13 +1,10 @@
 #include <algorithm>
 
-// #include "structures/hashtable.h"
-#include "structures/iht_ds.h"
-// #include "structures/test_map.h"
+#include <protos/experiment.pb.h>
 
-#include "../rdma/connection_manager/connection_manager.h"
-#include "../rdma/memory_pool/memory_pool.h"
-#include "common.h"
-#include "protos/experiment.pb.h"
+#include "../rdma/connection_manager.h"
+#include "../rdma/memory_pool.h"
+#include "structures/iht_ds.h"
 
 using ::rome::rdma::MemoryPool;
 

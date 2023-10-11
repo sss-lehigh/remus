@@ -4,7 +4,7 @@
 #include <asm-generic/errno.h>
 #include <atomic>
 #include <chrono>
-#include <coroutine>
+#include <cstdint>
 #include <fcntl.h>
 #include <infiniband/verbs.h>
 #include <limits>
@@ -22,19 +22,59 @@
 #include <thread>
 #include <unordered_set>
 
-#include "../../util/coroutine.h"
 #include "../../util/status_util.h"
 #include "../../vendor/sss/status.h"
-#include "../channel/rdma_accessor.h"
-#include "../channel/rdma_channel.h"
-#include "../channel/twosided_messenger.h"
-#include "../rdma_broker.h"
-#include "../rdma_device.h"
-#include "../rdma_memory.h"
-#include "../rdma_receiver.h"
-#include "../rdma_util.h"
+#include "broker.h"
+#include "channel.h"
+#include "device.h"
+#include "memory.h"
+#include "messenger.h"
+#include "receiver.h"
+#include "util.h"
 
-#include "connection.h"
+namespace rome::rdma {
+
+// Contains the necessary information for communicating between nodes. This
+// class wraps a unique pointer to the `rdma_cm_id` that holds the QP used for
+// communication, along with the `RdmaChannel` that represents the memory used
+// for 2-sided message-passing.
+template <typename Channel = RdmaChannel<EmptyRdmaMessenger>> class Connection {
+public:
+  typedef Channel channel_type;
+
+  Connection()
+      : terminated_(false), src_id_(std::numeric_limits<uint32_t>::max()),
+        dst_id_(std::numeric_limits<uint32_t>::max()), channel_(nullptr) {}
+  Connection(uint32_t src_id, uint32_t dst_id,
+             std::unique_ptr<channel_type> channel)
+      : terminated_(false), src_id_(src_id), dst_id_(dst_id),
+        channel_(std::move(channel)) {}
+
+  Connection(const Connection &) = delete;
+  Connection(Connection &&c)
+      : terminated_(c.terminated_), src_id_(c.src_id_), dst_id_(c.dst_id_),
+        channel_(std::move(c.channel_)) {}
+
+  // Getters.
+  inline bool terminated() const { return terminated_; }
+  uint32_t src_id() const { return src_id_; }
+  uint32_t dst_id() const { return dst_id_; }
+  rdma_cm_id *id() const { return channel_->id(); }
+  channel_type *channel() const { return channel_.get(); }
+
+  void Terminate() { terminated_ = true; }
+
+private:
+  volatile bool terminated_;
+
+  uint32_t src_id_;
+  uint32_t dst_id_;
+
+  // Remotely accessible memory that is used for 2-sided message-passing.
+  std::unique_ptr<channel_type> channel_;
+};
+
+} // namespace rome::rdma
 
 #define LOOPBACK_PORT_NUM 1
 

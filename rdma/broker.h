@@ -32,7 +32,7 @@
 #include "../util/coroutine.h"
 #include "../util/status_util.h"
 #include "../vendor/sss/status.h"
-#include "rdma_receiver.h"
+#include "receiver.h"
 
 namespace rome::rdma {
 

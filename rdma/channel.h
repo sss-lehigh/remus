@@ -11,16 +11,15 @@
 
 #include "../../util/status_util.h"
 #include "../../vendor/sss/status.h"
-#include "../rdma_memory.h"
-#include "rdma_messenger.h"
+#include "memory.h"
+#include "messenger.h"
 
 namespace rome::rdma {
 
-template <typename Messenger, typename Accessor>
-class RdmaChannel : public Messenger, Accessor {
+template <typename Messenger> class RdmaChannel : public Messenger {
 public:
   ~RdmaChannel() {}
-  explicit RdmaChannel(rdma_cm_id *id) : Messenger(id), Accessor(id), id_(id) {}
+  explicit RdmaChannel(rdma_cm_id *id) : Messenger(id), id_(id) {}
 
   // No copy or move.
   RdmaChannel(const RdmaChannel &c) = delete;

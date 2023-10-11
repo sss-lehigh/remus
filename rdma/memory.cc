@@ -1,4 +1,4 @@
-#include "rdma_memory.h"
+#include "memory.h"
 
 #include <infiniband/verbs.h>
 #include <sys/mman.h>

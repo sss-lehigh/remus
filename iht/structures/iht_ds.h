@@ -5,18 +5,49 @@
 #include <infiniband/verbs.h>
 
 #include "../../logging/logging.h"
-#include "../../rdma/channel/sync_accessor.h"
-#include "../../rdma/connection_manager/connection.h"
-#include "../../rdma/connection_manager/connection_manager.h"
-#include "../../rdma/memory_pool/memory_pool.h"
-#include "../../rdma/rdma_memory.h"
-#include "../common.h"
+#include "../../rdma/connection_manager.h"
+#include "../../rdma/memory.h"
+#include "../../rdma/memory_pool.h"
 
 using ::rome::rdma::ConnectionManager;
 using ::rome::rdma::MemoryPool;
 using ::rome::rdma::remote_nullptr;
 using ::rome::rdma::remote_ptr;
 using ::rome::rdma::RemoteObjectProto;
+
+#define CONTAINS 0
+#define INSERT 1
+#define REMOVE 2
+#define CNF_ELIST_SIZE 7   // 7
+#define CNF_PLIST_SIZE 128 // 128
+
+/// @brief  IHT_Op is used by the Client Adapter to pass in operations to Apply,
+///         by forming a stream of IHT_Ops.
+template <typename K, typename V> struct IHT_Op {
+  int op_type;
+  K key;
+  V value;
+  IHT_Op(int op_type_, K key_, V value_)
+      : op_type(op_type_), key(key_), value(value_){};
+};
+
+// [mfs] This should be an enum, but I don't really see why it's even needed.
+typedef uint64_t state_value;
+// Value states
+// [mfs] What is "REHASH_DELETED"?
+state_value FALSE_STATE = 1, TRUE_STATE = 2, REHASH_DELETED = 3;
+
+/// @brief Output for IHT that includes a status and a value
+// [mfs] An Optional would work better here...
+template <typename T> struct HT_Res {
+  state_value status;
+  T result;
+
+  HT_Res(state_value status, T result) {
+    this->status = status;
+    this->result = result;
+  }
+};
 
 template <class K, class V, int ELIST_SIZE, int PLIST_SIZE> class RdmaIHT {
 private:

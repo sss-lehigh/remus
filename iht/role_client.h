@@ -4,15 +4,15 @@
 #include <chrono>
 #include <cstdlib>
 
+#include <protos/experiment.pb.h>
+
 #include "../colosseum/client_adapter.h"
-#include "../colosseum/streams/streams.h"
+#include "../colosseum/streams/stream.h"
 #include "../colosseum/workload_driver.h"
-#include "../rdma/connection_manager/connection_manager.h"
-#include "../rdma/memory_pool/memory_pool.h"
+#include "../rdma/connection_manager.h"
+#include "../rdma/memory_pool.h"
 #include "../util/clocks.h"
 
-#include "common.h"
-#include "protos/experiment.pb.h"
 #include "structures/iht_ds.h"
 
 using ::rome::ClientAdapter;

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <memory>
-
 #define TRACE 0
 #define DEBUG 1
 #define INFO 2
@@ -13,8 +11,7 @@
 //! Must be set before including `spdlog/spdlog.h`
 #define SPDLOG_ACTIVE_LEVEL ROME_LOG_LEVEL
 
-// #include "../testutil/status_matcher.h"
-
+#include <memory>
 #include <spdlog/async.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>

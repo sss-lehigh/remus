@@ -8,12 +8,11 @@
 #include <unistd.h>
 
 #include <google/protobuf/text_format.h>
+#include <protos/colosseum.pb.h>
 
 #include "../logging/logging.h"
-#include "../rdma/connection_manager/connection_manager.h"
-#include "../rdma/memory_pool/memory_pool.h"
-
-#include "protos/colosseum.pb.h"
+#include "../rdma/connection_manager.h"
+#include "../rdma/memory_pool.h"
 
 #include "role_client.h"
 #include "role_server.h"

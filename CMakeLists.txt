@@ -49,7 +49,7 @@ set(CMAKE_CXX_STANDARD ${CXX_STANDARD})
 
 # NB: This must come before target_compile_definitions(rome ...) and
 #     target_link_libraries(rome ...)
-add_library(rome SHARED rdma/rdma_broker.cc rdma/rdma_device.cc rdma/rdma_memory.cc )
+add_library(rome SHARED rdma/broker.cc rdma/device.cc rdma/memory.cc )
 
 ### Set up additional compiler and linker flags
 
