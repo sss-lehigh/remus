@@ -5,7 +5,6 @@
 #include <cstdlib>
 
 #include "../colosseum/client_adaptor.h"
-#include "../colosseum/qps_controller.h"
 #include "../colosseum/streams/streams.h"
 #include "../colosseum/workload_driver.h"
 #include "../rdma/connection_manager/connection_manager.h"
@@ -101,12 +100,6 @@ public:
     // TODO: Signal Handler
     // signal(SIGINT, signal_handler);
 
-    // Setup qps_controller.
-    std::unique_ptr<rome::LeakyTokenBucketQpsController<util::SystemClock>>
-        qps_controller =
-            rome::LeakyTokenBucketQpsController<util::SystemClock>::Create(
-                client->params_.max_qps_second()); // what is the value here
-
     // auto *client_ptr = client.get();
     std::vector<Operation> operations = std::vector<Operation>();
 
@@ -172,7 +165,7 @@ public:
     bool master_client = client->master_client_;
     // [mfs] Again, it looks like Create() is an unnecessary factory
     auto driver = rome::WorkloadDriver<Operation>::Create(
-        std::move(client), std::move(workload_stream), qps_controller.get(),
+        std::move(client), std::move(workload_stream),
         std::chrono::milliseconds(qps_sample_rate));
     // [mfs]  This is quite odd.  The current thread is invoking an async thread
     //        to actually do the work, which means we have lots of extra thread

@@ -13,7 +13,6 @@
 #include "../util/duration_util.h"
 #include "client_adaptor.h"
 #include "protos/colosseum.pb.h"
-#include "qps_controller.h"
 #include "streams/stream.h"
 
 namespace rome {
@@ -28,15 +27,14 @@ public:
   ~WorkloadDriver();
 
   // Creates a new `WorkloadDriver` from the constiuent client adaptor and
-  // stream. If not `nullptr`, the QPS controller is used to limit the
-  // throughput of operations fed to the client.
+  // stream
   static std::unique_ptr<WorkloadDriver>
   Create(std::unique_ptr<ClientAdaptor<OpType>> client,
-         std::unique_ptr<Stream<OpType>> stream, QpsController *qps_controller,
+         std::unique_ptr<Stream<OpType>> stream,
          std::optional<std::chrono::milliseconds> qps_sampling_rate =
              std::nullopt) {
     return std::unique_ptr<WorkloadDriver>(new WorkloadDriver(
-        std::move(client), std::move(stream), qps_controller,
+        std::move(client), std::move(stream),
         qps_sampling_rate.value_or(std::chrono::milliseconds(0))));
   }
 
@@ -76,12 +74,10 @@ private:
 
   WorkloadDriver(std::unique_ptr<ClientAdaptor<OpType>> client,
                  std::unique_ptr<Stream<OpType>> stream,
-                 QpsController *qps_controller,
                  std::chrono::milliseconds qps_sampling_rate)
       : terminated_(false), running_(false), client_(std::move(client)),
-        stream_(std::move(stream)), qps_controller_(qps_controller),
-        ops_("total_ops"), stopwatch_(nullptr), prev_ops_(0),
-        qps_sampling_rate_(qps_sampling_rate),
+        stream_(std::move(stream)), ops_("total_ops"), stopwatch_(nullptr),
+        prev_ops_(0), qps_sampling_rate_(qps_sampling_rate),
         qps_summary_("sampled_qps", "ops/s", 1000), lat_sampling_rate_(10),
         lat_summary_("sampled_lat", "ns", 1000) {}
 
@@ -90,9 +86,6 @@ private:
 
   std::unique_ptr<ClientAdaptor<OpType>> client_;
   std::unique_ptr<Stream<OpType>> stream_;
-
-  //! Not owned.
-  QpsController *qps_controller_;
 
   metrics::Counter<uint64_t> ops_;
   std::unique_ptr<metrics::Stopwatch> stopwatch_;
@@ -155,10 +148,6 @@ template <typename OpType> sss::Status WorkloadDriver<OpType>::Run() {
   running_ = true;
 
   while (!terminated_) {
-    if (qps_controller_ != nullptr) {
-      qps_controller_->Wait();
-    }
-
     auto next_op = stream_->Next();
     if (next_op.status.t != sss::Ok) {
       if (!IsStreamTerminated(next_op.status)) {
