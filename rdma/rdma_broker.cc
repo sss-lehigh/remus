@@ -44,9 +44,6 @@ using ::util::Coro;
 RdmaBroker ::~RdmaBroker() {
   [[maybe_unused]] auto s = Stop();
   rdma_destroy_ep(listen_id_);
-  // if (listen_channel_ != nullptr) {
-  //   rdma_destroy_event_channel(listen_channel_);
-  // }
 }
 
 std::unique_ptr<RdmaBroker>
@@ -136,6 +133,7 @@ sss::Status RdmaBroker::Stop() {
   return status_;
 }
 
+// NB: This is a coroutine
 Coro RdmaBroker::HandleConnectionRequests() {
   rdma_cm_event *event = nullptr;
   int ret;

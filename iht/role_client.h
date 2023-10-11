@@ -4,7 +4,7 @@
 #include <chrono>
 #include <cstdlib>
 
-#include "../colosseum/client_adaptor.h"
+#include "../colosseum/client_adapter.h"
 #include "../colosseum/streams/streams.h"
 #include "../colosseum/workload_driver.h"
 #include "../rdma/connection_manager/connection_manager.h"
@@ -13,11 +13,9 @@
 
 #include "common.h"
 #include "protos/experiment.pb.h"
-// #include "structures/hashtable.h"
 #include "structures/iht_ds.h"
-// #include "structures/test_map.h"
 
-using ::rome::ClientAdaptor;
+using ::rome::ClientAdapter;
 using ::rome::WorkloadDriver;
 using ::rome::WorkloadDriverProto;
 using ::rome::rdma::MemoryPool;
@@ -52,7 +50,7 @@ void test_output(bool show_passing, HT_Res<int> actual, HT_Res<int> expected,
 // [mfs] This is declared at the wrong scope?
 typedef IHT_Op<int, int> Operation;
 
-class Client : public ClientAdaptor<Operation> {
+class Client : public ClientAdapter<Operation> {
 public:
   // [mfs]  Here and in Server, I don't understand the factory pattern.  It's
   //        not really adding any value.

@@ -6,7 +6,7 @@
 #define CNF_ELIST_SIZE 7   // 7
 #define CNF_PLIST_SIZE 128 // 128
 
-/// @brief  IHT_Op is used by the Client Adaptor to pass in operations to Apply,
+/// @brief  IHT_Op is used by the Client Adapter to pass in operations to Apply,
 ///         by forming a stream of IHT_Ops.
 template <typename K, typename V> struct IHT_Op {
   int op_type;

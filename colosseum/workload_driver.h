@@ -11,7 +11,7 @@
 #include "../metrics/stopwatch.h"
 #include "../metrics/summary.h"
 #include "../util/duration_util.h"
-#include "client_adaptor.h"
+#include "client_adapter.h"
 #include "protos/colosseum.pb.h"
 #include "streams/stream.h"
 
@@ -19,17 +19,17 @@ namespace rome {
 
 // For reference, a `WorkloadDriver` with a simple `MappedStream` (i.e.,
 // consisting of one sub-stream) can achieve roughly 1M QPS. This was measured
-// using a client adaptor that does nothing. As the number of constituent
+// using a client adapter that does nothing. As the number of constituent
 // streams increases, we expect the maximum throughput to decrease but it is not
 // likely to be the limiting factor in performance.
 template <typename OpType> class WorkloadDriver {
 public:
   ~WorkloadDriver();
 
-  // Creates a new `WorkloadDriver` from the constiuent client adaptor and
+  // Creates a new `WorkloadDriver` from the constituent client adapter and
   // stream
   static std::unique_ptr<WorkloadDriver>
-  Create(std::unique_ptr<ClientAdaptor<OpType>> client,
+  Create(std::unique_ptr<ClientAdapter<OpType>> client,
          std::unique_ptr<Stream<OpType>> stream,
          std::optional<std::chrono::milliseconds> qps_sampling_rate =
              std::nullopt) {
@@ -72,7 +72,7 @@ public:
 private:
   sss::Status Run();
 
-  WorkloadDriver(std::unique_ptr<ClientAdaptor<OpType>> client,
+  WorkloadDriver(std::unique_ptr<ClientAdapter<OpType>> client,
                  std::unique_ptr<Stream<OpType>> stream,
                  std::chrono::milliseconds qps_sampling_rate)
       : terminated_(false), running_(false), client_(std::move(client)),
@@ -84,7 +84,7 @@ private:
   std::atomic<bool> terminated_;
   std::atomic<bool> running_;
 
-  std::unique_ptr<ClientAdaptor<OpType>> client_;
+  std::unique_ptr<ClientAdapter<OpType>> client_;
   std::unique_ptr<Stream<OpType>> stream_;
 
   metrics::Counter<uint64_t> ops_;

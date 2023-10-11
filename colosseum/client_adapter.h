@@ -1,7 +1,5 @@
 #pragma once
 
-// [mfs] This file should use the US spelling (adapter), not the UK spelling
-
 #include "../vendor/sss/status.h"
 
 namespace rome {
@@ -17,11 +15,11 @@ namespace rome {
 // the operation type and the target key.
 //
 // [mfs]  It seems like this should be a concept, to avoid virtual dispatch
-//        overheads.  Or are there workloads with different ClientAdaptors at
+//        overheads.  Or are there workloads with different ClientAdapters at
 //        the same time?
-template <typename T> class ClientAdaptor {
+template <typename T> class ClientAdapter {
 public:
-  virtual ~ClientAdaptor() = default;
+  virtual ~ClientAdapter() = default;
   virtual sss::Status Start() = 0;
   virtual sss::Status Apply(const T &op) = 0;
   virtual sss::Status Stop() = 0;
