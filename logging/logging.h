@@ -8,6 +8,17 @@
 #define CRITICAL 5
 #define OFF 6
 
+// [mfs]  This gets us a guaranteed log level, even if the build tools didn't
+//        define one.
+#ifndef ROME_LOG_LEVEL
+#warning "ROME_LOG_LEVEL is not defined... defaulting to TRACE"
+#define ROME_LOG_LEVEL TRACE
+#endif
+
+// [mfs]  The *entire* spdlog infrastructure seems to be in use only for the
+//        sake of getting coloring for messages on stdout.  I think we can
+//        remove it without really losing anything.
+
 //! Must be set before including `spdlog/spdlog.h`
 #define SPDLOG_ACTIVE_LEVEL ROME_LOG_LEVEL
 

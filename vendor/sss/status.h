@@ -17,7 +17,8 @@ enum StatusType {
   InvalidArgument,
   ResourceExhausted,
   Aborted,
-  OutOfRange
+  OutOfRange,
+  StreamTerminated
 };
 
 struct Status {

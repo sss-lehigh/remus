@@ -13,25 +13,20 @@
 #include "../logging/logging.h"
 #include "../rdma/connection_manager.h"
 #include "../rdma/memory_pool.h"
-
 #include "role_client.h"
 #include "role_server.h"
 
 #include "../vendor/sss/cli.h"
 
-auto ARGS = {
-    cli::STR_ARG_OPT("--experiment_params", "Experimental parameters", ""),
-    cli::BOOL_ARG_OPT("--send_bulk",
+/// Declare the command-line arguments for this program
+const auto ARGS = {
+    sss::STR_ARG_OPT("--experiment_params", "Experimental parameters", ""),
+    sss::BOOL_ARG_OPT("--send_bulk",
                       "If to run bulk operations. (More for benchmarking)"),
-    cli::BOOL_ARG_OPT("--send_test",
+    sss::BOOL_ARG_OPT("--send_test",
                       "If to test the functionality of the methods."),
-    cli::BOOL_ARG_OPT("--send_exp", "If to run an experiment"),
+    sss::BOOL_ARG_OPT("--send_exp", "If to run an experiment"),
 };
-
-#define PATH_MAX 4096
-
-using ::rome::rdma::ConnectionManager;
-using ::rome::rdma::MemoryPool;
 
 // [mfs] Why are these hard-coded?
 constexpr char iphost[] = "node0";
@@ -42,7 +37,7 @@ using cm_type = MemoryPool::cm_type;
 int main(int argc, char **argv) {
   ROME_INIT_LOG();
 
-  cli::ArgMap args;
+  sss::ArgMap args;
   // import_args will validate that the newly added args don't conflict with
   // those already added.
   auto res = args.import_args(ARGS);
@@ -70,6 +65,7 @@ int main(int argc, char **argv) {
   //        only way to run the code is via a script that knows the internals of
   //        the ExperimentParams proto.  This needs to be refactored.  It is
   //        especially strange because protobufs are usually meant for
+  //        communication, not for convenient merging of structs.
   ExperimentParams params = ExperimentParams();
   bool success =
       google::protobuf::TextFormat::MergeFromString(experiment_parms, &params);
@@ -190,8 +186,8 @@ int main(int argc, char **argv) {
   // [mfs] This is a bit odd.  Why wouldn't this be a separate function?
   if (!do_exp) {
     // Not doing experiment, so just create some test clients
-    std::unique_ptr<Client> client =
-        Client::Create(self, host, peers, params, nullptr, &iht, true);
+    std::unique_ptr<Client<Operation>> client = Client<Operation>::Create(
+        self, host, peers, params, nullptr, &iht, true);
     if (bulk_operations) {
       auto status = client->Operations(true);
       OK_OR_FAIL(status);
@@ -220,12 +216,12 @@ int main(int argc, char **argv) {
     threads.emplace_back(std::thread(
         [&](int index) {
           // Create and run a client in a thread
-          std::unique_ptr<Client> client = Client::Create(
+          std::unique_ptr<Client<Operation>> client = Client<Operation>::Create(
               self, host, peers, params, &client_sync, &iht, index == 0);
           // [mfs]  I would have thought that the `done` flag would be set by
           //        the main thread, as a way to tell all clients to stop?
-          auto output = Client::Run(std::move(client), &done,
-                                    0.5 / (double)params.node_count());
+          auto output = Client<Operation>::Run(
+              std::move(client), &done, 0.5 / (double)params.node_count());
           // [mfs]  It would be good to document how a client can fail, because
           //        it seems like if even one client fails, on any machine, the
           //        whole experiment should be invalidated.

@@ -4,7 +4,7 @@
 #include <sstream>
 #include <type_traits>
 
-#include "../internal/atree/atree.h"
+#include "atree/atree.h"
 #include "metric.h"
 
 namespace rome::metrics {

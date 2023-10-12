@@ -3,11 +3,10 @@
 #include <barrier>
 #include <chrono>
 #include <cstdlib>
+#include <string>
 
 #include <protos/experiment.pb.h>
 
-#include "../colosseum/client_adapter.h"
-#include "../colosseum/streams/stream.h"
 #include "../colosseum/workload_driver.h"
 #include "../rdma/connection_manager.h"
 #include "../rdma/memory_pool.h"
@@ -15,7 +14,6 @@
 
 #include "structures/iht_ds.h"
 
-using ::rome::ClientAdapter;
 using ::rome::WorkloadDriver;
 using ::rome::WorkloadDriverProto;
 using ::rome::rdma::MemoryPool;
@@ -25,11 +23,11 @@ typedef RdmaIHT<int, int, 16, 1024> IHT;
 
 std::string fromStateValue(state_value value) {
   if (FALSE_STATE == value) {
-    return std::string("FALSE");
+    return "FALSE";
   } else if (TRUE_STATE == value) {
-    return std::string("TRUE");
+    return "TRUE";
   } else if (REHASH_DELETED == value) {
-    return std::string("REHASH DELETED");
+    return "REHASH DELETED";
   } else {
     return std::string("UNKNOWN - ") + std::to_string(value);
   }
@@ -50,7 +48,9 @@ void test_output(bool show_passing, HT_Res<int> actual, HT_Res<int> expected,
 // [mfs] This is declared at the wrong scope?
 typedef IHT_Op<int, int> Operation;
 
-class Client : public ClientAdapter<Operation> {
+template <class Operation> class Client {
+  // static_assert(::rome::IsClientAdapter<Client, Operation>);
+
 public:
   // [mfs]  Here and in Server, I don't understand the factory pattern.  It's
   //        not really adding any value.
@@ -113,10 +113,9 @@ public:
     std::uniform_real_distribution<double> dist =
         std::uniform_real_distribution<double>(0.0, 1.0);
     // [mfs]  Just to be sure: will every thread, on every node, have a
-    // different
-    //        seed?  Also, is it really necessary to have a different seed for
-    //        each trial, or should the seed be a function of the node / thread,
-    //        for repeatability?
+    //        different seed?  Also, is it really necessary to have a different
+    //        seed for each trial, or should the seed be a function of the node
+    //        / thread, for repeatability?
     std::default_random_engine gen((unsigned)std::time(NULL));
     int lb = client->params_.key_lb();
     int contains = client->params_.contains();
@@ -162,7 +161,7 @@ public:
     std::barrier<> *barr = client->barrier_;
     bool master_client = client->master_client_;
     // [mfs] Again, it looks like Create() is an unnecessary factory
-    auto driver = rome::WorkloadDriver<Operation>::Create(
+    auto driver = rome::WorkloadDriver<Client, Operation>::Create(
         std::move(client), std::move(workload_stream),
         std::chrono::milliseconds(qps_sample_rate));
     // [mfs]  This is quite odd.  The current thread is invoking an async thread
@@ -193,7 +192,7 @@ public:
   }
 
   // Start the client
-  sss::Status Start() override {
+  sss::Status Start() {
     ROME_INFO("CLIENT :: Starting client...");
     // Conditional to allow us to bypass the barrier for certain client types
     // We want to start at the same time
@@ -206,7 +205,7 @@ public:
   }
 
   // Runs the next operation
-  sss::Status Apply(const Operation &op) override {
+  sss::Status Apply(const Operation &op) {
     count++;
     HT_Res<int> res = HT_Res<int>(FALSE_STATE, 0);
     switch (op.op_type) {
@@ -332,7 +331,7 @@ public:
 
   // A function for communicating with the server that we are done. Will wait
   // until server says it is ok to shut down
-  sss::Status Stop() override {
+  sss::Status Stop() {
     ROME_INFO("CLIENT :: Stopping client...");
     if (!master_client_) {
       // if we aren't the master client we don't need to do the stop sequence.

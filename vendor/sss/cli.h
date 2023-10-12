@@ -1,6 +1,5 @@
-// The cli namespace provides a generic facility for working with command-line
-// arguments.  The supported argument types are int64_t, double, bool, and
-// std::string.
+// A generic facility for working with command-line arguments.  The supported
+// argument types are int64_t, double, bool, and std::string.
 
 #pragma once
 
@@ -11,7 +10,7 @@
 #include <string>
 #include <variant>
 
-namespace cli {
+namespace sss {
 
 /// @brief  A tuple that describes a command-line argument and its value.
 ///         Supported types are int64_t, double, bool, and std::string.
@@ -255,4 +254,4 @@ public:
     return std::get<std::string>(args.find(flag)->second.value.value());
   }
 };
-} // namespace cli
+} // namespace sss

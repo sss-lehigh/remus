@@ -1,5 +1,6 @@
+#pragma once
 
-#include "rome/util/macros.h"
+#include "macros.h"
 
 namespace rome {
 
@@ -15,22 +16,22 @@ template <class Key, class... OptionalInfo>
 class ROME_PACKED ATreeNodeRequiredInfo {
   typedef ATreeNode<Key, OptionalInfo...> node_type;
 
- public:
+public:
   ATreeNodeRequiredInfo(Key key) : key_(key) {
     children_[0] = nullptr;
     children_[1] = nullptr;
   }
   inline Key key() const { return key_; }
 
-  inline node_type* left() const { return children_[0]; }
-  inline node_type* right() const { return children_[1]; }
+  inline node_type *left() const { return children_[0]; }
+  inline node_type *right() const { return children_[1]; }
 
-  inline void set_left(node_type* n) { children_[0] = n; }
-  inline void set_right(node_type* n) { children_[1] = n; }
+  inline void set_left(node_type *n) { children_[0] = n; }
+  inline void set_right(node_type *n) { children_[1] = n; }
 
- private:
+private:
   const Key key_;
-  node_type* children_[2];
+  node_type *children_[2];
 };
 
-}  // namespace rome
+} // namespace rome

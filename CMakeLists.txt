@@ -1,7 +1,7 @@
 ### Standard cmake stuff: minimum version, project name
 
 cmake_minimum_required(VERSION 3.18)
-project(Rome LANGUAGES CXX VERSION 0.0.0)
+project(IHT_Rome LANGUAGES CXX VERSION 0.0.0)
 
 ### Flags that the user can override
 
@@ -45,21 +45,20 @@ endif()
 message(STATUS "Using CXX_STANDARD=${CXX_STANDARD}")
 set(CMAKE_CXX_STANDARD ${CXX_STANDARD})
 
+### Declare the subfolders to recurse into before building the executable
+add_subdirectory(protos)
+
 ### Declare the things that get built to create rome
 
 # NB: This must come before target_compile_definitions(rome ...) and
 #     target_link_libraries(rome ...)
-add_library(rome SHARED rdma/broker.cc rdma/memory.cc )
+
+add_executable(iht_rome iht/main.cc)
 
 ### Set up additional compiler and linker flags
 
-target_include_directories(rome PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
+target_include_directories(iht_rome PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
 # NB: -D flag for ROME_LOG_LEVEL
-target_compile_definitions(rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
+target_compile_definitions(iht_rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
 # NB: `protos` is a library we make by recursing into the `protos` subfolder
-target_link_libraries(rome PUBLIC protos rdma::ibverbs rdma::cm)
-
-### Declare the subfolders to recurse into
-
-add_subdirectory(protos)
-add_subdirectory(iht)
+target_link_libraries(iht_rome PUBLIC protos rdma::ibverbs rdma::cm)
