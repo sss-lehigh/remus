@@ -9,29 +9,12 @@
 
 #pragma once
 
-#include <algorithm>
-#include <chrono>
-#include <functional>
 #include <future>
-#include <initializer_list>
-#include <memory>
-#include <numeric>
-#include <random>
-#include <thread>
-#include <type_traits>
-#include <valarray>
-#include <vector>
+#include <protos/workloaddriver.pb.h>
 
-#include "protos/colosseum.pb.h"
-
-#include "../logging/logging.h"
 #include "../metrics/counter.h"
-#include "../metrics/metric.h"
 #include "../metrics/stopwatch.h"
 #include "../metrics/summary.h"
-#include "../util/distribution_util.h"
-#include "../util/duration_util.h"
-#include "../vendor/sss/status.h"
 
 namespace rome {
 

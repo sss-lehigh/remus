@@ -2,24 +2,20 @@
 
 #include <barrier>
 #include <chrono>
-#include <cstdlib>
-#include <string>
-
 #include <protos/experiment.pb.h>
 
 #include "../colosseum/workload_driver.h"
-#include "../rdma/connection_manager.h"
+#include "../logging/logging.h"
 #include "../rdma/memory_pool.h"
-#include "../util/clocks.h"
 
+#include "common.h"
+
+// [mfs] Rework to avoid needing these two lines... template the client?
 #include "structures/iht_ds.h"
-
-using ::rome::WorkloadDriver;
-using ::rome::WorkloadDriverProto;
-using ::rome::rdma::MemoryPool;
-
-// [mfs] This should really be defined somewhere else
 typedef RdmaIHT<int, int, 16, 1024> IHT;
+
+using SystemClock = std::chrono::system_clock;
+using SteadyClock = std::chrono::steady_clock;
 
 std::string fromStateValue(state_value value) {
   if (FALSE_STATE == value) {
@@ -45,9 +41,6 @@ void test_output(bool show_passing, HT_Res<int> actual, HT_Res<int> expected,
   }
 }
 
-// [mfs] This is declared at the wrong scope?
-typedef IHT_Op<int, int> Operation;
-
 template <class Operation> class Client {
   // static_assert(::rome::IsClientAdapter<Client, Operation>);
 
@@ -55,9 +48,11 @@ public:
   // [mfs]  Here and in Server, I don't understand the factory pattern.  It's
   //        not really adding any value.
   static std::unique_ptr<Client>
-  Create(const MemoryPool::Peer &self, const MemoryPool::Peer &server,
-         const std::vector<MemoryPool::Peer> &peers, ExperimentParams &params,
-         std::barrier<> *barrier, IHT *iht, bool master_client) {
+  Create(const rome::rdma::MemoryPool::Peer &self,
+         const rome::rdma::MemoryPool::Peer &server,
+         const std::vector<rome::rdma::MemoryPool::Peer> &peers,
+         ExperimentParams &params, std::barrier<> *barrier, IHT *iht,
+         bool master_client) {
     return std::unique_ptr<Client>(
         new Client(self, server, peers, params, barrier, iht, master_client));
   }
@@ -68,7 +63,7 @@ public:
   /// @param frac if 0, won't populate. Otherwise, will do this fraction of the
   /// population
   /// @return the resultproto
-  static sss::StatusVal<WorkloadDriverProto>
+  static sss::StatusVal<rome::WorkloadDriverProto>
   Run(std::unique_ptr<Client> client, volatile bool *done, double frac) {
     // [mfs]  I was hopeful that this code was going to actually populate the
     //        data structure from *multiple nodes* simultaneously.  It should,
@@ -246,8 +241,8 @@ public:
     //        cache or TLB, so it's not really representative of real work... it
     //        just throttles throughput (or throttles contention).
     if (params_.has_think_time() && params_.think_time() != 0) {
-      auto start = util::SystemClock::now();
-      while (util::SystemClock::now() - start <
+      auto start = SystemClock::now();
+      while (SystemClock::now() - start <
              std::chrono::nanoseconds(params_.think_time()))
         ;
     }
@@ -373,9 +368,11 @@ public:
 private:
   // [mfs]  This all needs to be documented
 
-  Client(const MemoryPool::Peer &self, const MemoryPool::Peer &host,
-         const std::vector<MemoryPool::Peer> &peers, ExperimentParams &params,
-         std::barrier<> *barrier, IHT *iht, bool master_client)
+  Client(const rome::rdma::MemoryPool::Peer &self,
+         const rome::rdma::MemoryPool::Peer &host,
+         const std::vector<rome::rdma::MemoryPool::Peer> &peers,
+         ExperimentParams &params, std::barrier<> *barrier, IHT *iht,
+         bool master_client)
       : self_(self), host_(host), peers_(peers), params_(params),
         barrier_(barrier), iht_(iht), master_client_(master_client) {
     if (params.unlimited_stream())
@@ -386,9 +383,9 @@ private:
 
   int count = 0;
 
-  const MemoryPool::Peer self_;
-  const MemoryPool::Peer host_;
-  std::vector<MemoryPool::Peer> peers_;
+  const rome::rdma::MemoryPool::Peer self_;
+  const rome::rdma::MemoryPool::Peer host_;
+  std::vector<rome::rdma::MemoryPool::Peer> peers_;
   const ExperimentParams params_;
   std::barrier<> *barrier_;
   IHT *iht_;

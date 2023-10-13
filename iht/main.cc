@@ -1,22 +1,20 @@
-#include <fstream>
-#include <iostream>
-#include <memory>
-#include <ostream>
-#include <stdio.h>
-#include <string>
-#include <thread>
-#include <unistd.h>
+#include "../rdma/memory_pool.h"
 
 #include <google/protobuf/text_format.h>
-#include <protos/colosseum.pb.h>
+#include <protos/experiment.pb.h>
+#include <protos/workloaddriver.pb.h>
+#include <vector>
 
 #include "../logging/logging.h"
-#include "../rdma/connection_manager.h"
-#include "../rdma/memory_pool.h"
+// #include "../rdma/memory_pool.h"
+#include "../vendor/sss/cli.h"
+
 #include "role_client.h"
 #include "role_server.h"
+#include "structures/iht_ds.h"
 
-#include "../vendor/sss/cli.h"
+// [mfs] TODO: Avoid needing this?
+using IHT = RdmaIHT<int, int, 16, 1024>;
 
 /// Declare the command-line arguments for this program
 const auto ARGS = {
@@ -31,8 +29,6 @@ const auto ARGS = {
 // [mfs] Why are these hard-coded?
 constexpr char iphost[] = "node0";
 constexpr uint16_t portNum = 18000;
-
-using cm_type = MemoryPool::cm_type;
 
 int main(int argc, char **argv) {
   ROME_INIT_LOG();
@@ -81,8 +77,8 @@ int main(int argc, char **argv) {
   //
   // [mfs]  This is pushing the hard-coded info about the host into the vector.
   //        It should really not be hard-coded.
-  MemoryPool::Peer host{0, std::string(iphost), portNum};
-  std::vector<MemoryPool::Peer> peers;
+  rome::rdma::MemoryPool::Peer host{0, std::string(iphost), portNum};
+  std::vector<rome::rdma::MemoryPool::Peer> peers;
   peers.push_back(host);
 
   // Set values if we are host machine as well
@@ -96,7 +92,7 @@ int main(int argc, char **argv) {
   //
   // [mfs]  If this check really is needed, then consider using
   //        optional<MemoryPool>, to avoid the unnecessary extra variable.
-  MemoryPool::Peer self;
+  rome::rdma::MemoryPool::Peer self;
   bool outside_exp = true;
   if (hostname[4] == '0') {
     self = host;
@@ -115,7 +111,8 @@ int main(int argc, char **argv) {
     std::string node_id = std::to_string(n);
     ippeer.append(node_id);
     // Create the peer and add it to the list
-    MemoryPool::Peer next{static_cast<uint16_t>(n), ippeer, portNum};
+    rome::rdma::MemoryPool::Peer next{static_cast<uint16_t>(n), ippeer,
+                                      portNum};
     peers.push_back(next);
     // Compare after 4th character to node_id
     if (strncmp(hostname + 4, node_id.c_str(), node_id.length()) == 0) {
@@ -146,8 +143,8 @@ int main(int argc, char **argv) {
 
   // Make a memory pool for the node to share among all client instances
   uint32_t block_size = 1 << params.region_size();
-  MemoryPool pool =
-      MemoryPool(self, std::make_unique<MemoryPool::cm_type>(self.id));
+  rome::rdma::MemoryPool pool = rome::rdma::MemoryPool(
+      self, std::make_unique<rome::rdma::MemoryPool::cm_type>(self.id));
   auto status_pool = pool.Init(block_size, peers);
   OK_OR_FAIL(status_pool);
   ROME_INFO("Created memory pool");
@@ -183,6 +180,8 @@ int main(int argc, char **argv) {
     }));
   }
 
+  using Operation = IHT_Op<int, int>;
+
   // [mfs] This is a bit odd.  Why wouldn't this be a separate function?
   if (!do_exp) {
     // Not doing experiment, so just create some test clients
@@ -210,7 +209,7 @@ int main(int argc, char **argv) {
   std::barrier client_sync = std::barrier(params.thread_count());
   // [mfs]  This seems like a misuse of protobufs: why would the local threads
   //        communicate via protobufs?
-  WorkloadDriverProto results[params.thread_count()];
+  rome::WorkloadDriverProto results[params.thread_count()];
   for (int n = 0; n < params.thread_count(); n++) {
     // Add the thread
     threads.emplace_back(std::thread(
@@ -252,7 +251,7 @@ int main(int argc, char **argv) {
   ResultProto result_proto = ResultProto();
   *result_proto.mutable_params() = params;
   for (int i = 0; i < params.thread_count(); i++) {
-    WorkloadDriverProto *r = result_proto.add_driver();
+    rome::WorkloadDriverProto *r = result_proto.add_driver();
     std::string output;
     results[i].SerializeToString(&output);
     r->MergeFromString(output);

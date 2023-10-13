@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../vendor/sss/status.h"
+
 #define TRACE 0
 #define DEBUG 1
 #define INFO 2

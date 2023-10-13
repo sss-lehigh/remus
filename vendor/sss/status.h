@@ -37,6 +37,7 @@ struct Status {
   }
 };
 
+// TODO: Tranform this into a variant?
 template <class T> struct StatusVal {
   Status status;
   std::optional<T> val;

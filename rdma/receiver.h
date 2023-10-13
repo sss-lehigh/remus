@@ -2,6 +2,10 @@
 
 #include <rdma/rdma_cma.h>
 
+// [mfs] It looks like this is overly generic.  There is currently only one
+// implementation of this (ConnectionManager) and it is only used in one place
+// (Broker).
+
 namespace rome::rdma {
 
 // Interface used by `RdmaBroker` to handle connection requests. Each of the

@@ -1,57 +1,15 @@
 #pragma once
 
-#include <atomic>
-#include <cstdint>
-#include <infiniband/verbs.h>
-
-#include "../../logging/logging.h"
-#include "../../rdma/connection_manager.h"
-#include "../../rdma/memory.h"
 #include "../../rdma/memory_pool.h"
+#include "../common.h"
 
-using ::rome::rdma::ConnectionManager;
-using ::rome::rdma::MemoryPool;
-using ::rome::rdma::remote_nullptr;
-using ::rome::rdma::remote_ptr;
-using ::rome::rdma::RemoteObjectProto;
-
-#define CONTAINS 0
-#define INSERT 1
-#define REMOVE 2
-#define CNF_ELIST_SIZE 7   // 7
-#define CNF_PLIST_SIZE 128 // 128
-
-/// @brief  IHT_Op is used by the Client Adapter to pass in operations to Apply,
-///         by forming a stream of IHT_Ops.
-template <typename K, typename V> struct IHT_Op {
-  int op_type;
-  K key;
-  V value;
-  IHT_Op(int op_type_, K key_, V value_)
-      : op_type(op_type_), key(key_), value(value_){};
-};
-
-// [mfs] This should be an enum, but I don't really see why it's even needed.
-typedef uint64_t state_value;
-// Value states
-// [mfs] What is "REHASH_DELETED"?
-state_value FALSE_STATE = 1, TRUE_STATE = 2, REHASH_DELETED = 3;
-
-/// @brief Output for IHT that includes a status and a value
-// [mfs] An Optional would work better here...
-template <typename T> struct HT_Res {
-  state_value status;
-  T result;
-
-  HT_Res(state_value status, T result) {
-    this->status = status;
-    this->result = result;
-  }
-};
+using rome::rdma::remote_nullptr;
+using rome::rdma::remote_ptr;
+using rome::rdma::RemoteObjectProto;
 
 template <class K, class V, int ELIST_SIZE, int PLIST_SIZE> class RdmaIHT {
 private:
-  MemoryPool::Peer self_;
+  rome::rdma::MemoryPool::Peer self_;
 
   // "Poor-mans" enum to represent the state of a node. P-lists cannot be locked
   // E_LOCKED = 1, E_UNLOCKED = 2, P_UNLOCKED = 3
@@ -239,11 +197,12 @@ private:
 public:
   // [mfs]  Why is this a field?  Shouldn't it be a capability that gets passed
   //        in by the calling thread on each operation?
-  MemoryPool *pool_;
+  rome::rdma::MemoryPool *pool_;
 
-  using conn_type = MemoryPool::conn_type;
+  using conn_type = rome::rdma::MemoryPool::conn_type;
 
-  RdmaIHT(MemoryPool::Peer self, MemoryPool *pool) : self_(self), pool_(pool) {
+  RdmaIHT(rome::rdma::MemoryPool::Peer self, rome::rdma::MemoryPool *pool)
+      : self_(self), pool_(pool) {
     if ((PLIST_SIZE * 8) % 64 != 0)
       ROME_INFO("Warning: Suboptimal PLIST_SIZE b/c PList needs to be aligned "
                 "to 64 bytes");
@@ -261,8 +220,8 @@ public:
   // [mfs]  This "replace the innards" approach isn't really the right way to do
   //        this... it saves one RDMA access per operation, but I don't think
   //        it's trustable, and we could always just cache it.
-  sss::Status Init(MemoryPool::Peer host,
-                   const std::vector<MemoryPool::Peer> &peers) {
+  sss::Status Init(rome::rdma::MemoryPool::Peer host,
+                   const std::vector<rome::rdma::MemoryPool::Peer> &peers) {
     bool is_host_ = self_.id == host.id;
 
     if (is_host_) {

@@ -1,17 +1,8 @@
 #pragma once
 
-#include <asm-generic/errno-base.h>
-#include <infiniband/verbs.h>
 #include <rdma/rdma_cma.h>
-#include <rdma/rdma_verbs.h>
 
-#include <cstddef>
-#include <limits>
-#include <type_traits>
-
-#include "../../util/status_util.h"
 #include "../../vendor/sss/status.h"
-#include "memory.h"
 #include "messenger.h"
 
 namespace rome::rdma {

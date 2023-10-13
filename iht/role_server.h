@@ -1,15 +1,10 @@
-#include <algorithm>
+#pragma once
 
+#include <memory>
 #include <protos/experiment.pb.h>
+#include <vector>
 
-#include "../rdma/connection_manager.h"
 #include "../rdma/memory_pool.h"
-#include "structures/iht_ds.h"
-
-using ::rome::rdma::MemoryPool;
-
-// [mfs] This typedef is at the wrong scope
-typedef RdmaIHT<int, int, 16, 1024> IHT;
 
 // [mfs]  This needs documentation.  It looks like it is more of an "experiment
 //        manager" than a "server", but I'm not seeing how it manages remote
@@ -19,10 +14,10 @@ class Server {
 public:
   ~Server() = default;
 
-  static std::unique_ptr<Server> Create(MemoryPool::Peer server,
-                                        std::vector<MemoryPool::Peer> clients,
-                                        ExperimentParams params,
-                                        MemoryPool *pool) {
+  static std::unique_ptr<Server>
+  Create(rome::rdma::MemoryPool::Peer server,
+         std::vector<rome::rdma::MemoryPool::Peer> clients,
+         ExperimentParams params, rome::rdma::MemoryPool *pool) {
     return std::unique_ptr<Server>(new Server(server, clients, params, pool));
   }
 
@@ -125,12 +120,13 @@ public:
 private:
   // [mfs] This all needs documentation
 
-  Server(MemoryPool::Peer self, std::vector<MemoryPool::Peer> peers,
-         ExperimentParams params, MemoryPool *pool)
+  Server(rome::rdma::MemoryPool::Peer self,
+         std::vector<rome::rdma::MemoryPool::Peer> peers,
+         ExperimentParams params, rome::rdma::MemoryPool *pool)
       : self_(self), peers_(peers), params_(params), pool_(pool) {}
 
-  const MemoryPool::Peer self_;
-  std::vector<MemoryPool::Peer> peers_;
+  const rome::rdma::MemoryPool::Peer self_;
+  std::vector<rome::rdma::MemoryPool::Peer> peers_;
   const ExperimentParams params_;
-  MemoryPool *pool_;
+  rome::rdma::MemoryPool *pool_;
 };

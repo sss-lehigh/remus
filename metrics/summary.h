@@ -1,9 +1,11 @@
 #pragma once
 #include <array>
 #include <cmath>
+#include <protos/metrics.pb.h>
 #include <sstream>
 #include <type_traits>
 
+#include "../vendor/sss/status.h"
 #include "atree/atree.h"
 #include "metric.h"
 

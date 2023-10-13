@@ -1,46 +1,59 @@
 #pragma once
 
 #include <cstdint>
-#include <cstdlib>
 #include <fstream>
 #include <infiniband/verbs.h>
 #include <memory>
-#include <string>
+#include <string> // TODO: Don't use string_view?
 #include <sys/mman.h>
 #include <unordered_map>
 #include <variant>
 
 #include "../logging/logging.h"
-#include "../util/status_util.h"
 #include "../vendor/sss/status.h"
 
-#include "util.h"
+#include <infiniband/verbs.h>
+#include <memory>
 
-namespace {
+#include "../logging/logging.h"
+#include "../vendor/sss/status.h"
 
-// Tries to read the number of available hugepages from the system. This is only
-// implemented for Linux-based operating systems.
-inline sss::StatusVal<int> GetNumHugepages(std::string_view path) {
-  // Try to open file.
-  // [mfs] I had to explicitly convert to string?
-  std::ifstream file(std::string(path).data());
-  if (!file.is_open()) {
-    sss::Status err = {sss::Unknown, "Failed to open file: "};
-    err << path;
-    return {err, {}};
+#define STATUSVAL_OR_DIE(__s)                                                  \
+  if (!(__s.status.t == sss::Ok)) {                                            \
+    ROME_FATAL(__s.status.message.value());                                    \
   }
 
-  // Read file.
-  int nr_hugepages;
-  file >> nr_hugepages;
-  if (!file.fail()) {
-    return {sss::Status::Ok(), nr_hugepages};
-  } else {
-    return {{sss::Unknown, "Failed to read nr_hugepages"}, {}};
+#define RDMA_CM_CHECK(func, ...)                                               \
+  {                                                                            \
+    int ret = func(__VA_ARGS__);                                               \
+    if (ret != 0) {                                                            \
+      sss::Status err = {sss::InternalError, ""};                              \
+      err << #func << "(): " << strerror(errno);                               \
+      return err;                                                              \
+    }                                                                          \
   }
-}
 
-} // namespace
+#define RDMA_CM_CHECK_TOVAL(func, ...)                                         \
+  {                                                                            \
+    int ret = func(__VA_ARGS__);                                               \
+    if (ret != 0) {                                                            \
+      sss::Status err = {sss::InternalError, ""};                              \
+      err << #func << "(): " << strerror(errno);                               \
+      return {err, {}};                                                        \
+    }                                                                          \
+  }
+
+#define RDMA_CM_ASSERT(func, ...)                                              \
+  {                                                                            \
+    int ret = func(__VA_ARGS__);                                               \
+    ROME_ASSERT(ret == 0, "{}{}{}", #func, "(): ", strerror(errno));           \
+  }
+
+struct ibv_mr_deleter {
+  void operator()(ibv_mr *mr) { ibv_dereg_mr(mr); }
+};
+
+using ibv_mr_unique_ptr = std::unique_ptr<ibv_mr, ibv_mr_deleter>;
 
 namespace rome::rdma {
 
@@ -49,6 +62,28 @@ namespace rome::rdma {
 // memory region can then use it directly, or wrap it around some more complex
 // allocation mechanism.
 class RdmaMemory {
+  // Tries to read the number of available hugepages from the system. This is
+  // only implemented for Linux-based operating systems.
+  inline sss::StatusVal<int> GetNumHugepages(std::string_view path) {
+    // Try to open file.
+    // [mfs] I had to explicitly convert to string?
+    std::ifstream file(std::string(path).data());
+    if (!file.is_open()) {
+      sss::Status err = {sss::Unknown, "Failed to open file: "};
+      err << path;
+      return {err, {}};
+    }
+
+    // Read file.
+    int nr_hugepages;
+    file >> nr_hugepages;
+    if (!file.fail()) {
+      return {sss::Status::Ok(), nr_hugepages};
+    } else {
+      return {{sss::Unknown, "Failed to read nr_hugepages"}, {}};
+    }
+  }
+
 public:
   static constexpr int kDefaultAccess =
       IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |

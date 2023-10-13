@@ -1,36 +1,24 @@
+
 #pragma once
 
 #include <arpa/inet.h>
-#include <asm-generic/errno.h>
-#include <atomic>
-#include <chrono>
 #include <cstdint>
-#include <fcntl.h>
+#include <cstring>
 #include <infiniband/verbs.h>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <netdb.h>
-#include <netinet/in.h>
-#include <optional>
 #include <random>
 #include <rdma/rdma_cma.h>
-#include <rdma/rdma_verbs.h>
-#include <string>
-#include <string_view>
-#include <sys/socket.h>
-#include <thread>
+#include <unordered_map>
 #include <unordered_set>
 
-#include "../../util/status_util.h"
-#include "../../vendor/sss/status.h"
+#include "../logging/logging.h"
+#include "../vendor/sss/status.h"
 #include "broker.h"
 #include "channel.h"
-#include "device.h"
-#include "memory.h"
 #include "messenger.h"
 #include "receiver.h"
-#include "util.h"
 
 namespace rome::rdma {
 
@@ -74,11 +62,7 @@ private:
   std::unique_ptr<channel_type> channel_;
 };
 
-} // namespace rome::rdma
-
 #define LOOPBACK_PORT_NUM 1
-
-namespace rome::rdma {
 
 template <typename ChannelType>
 class ConnectionManager : public RdmaReceiverInterface {
