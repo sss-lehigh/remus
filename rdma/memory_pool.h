@@ -213,24 +213,14 @@ private:
 
   Peer self_;
 
-  std::mutex control_lock_;
-  std::mutex rdma_per_read_lock_;
-
-  uint64_t id_gen = 0;
-  std::unordered_set<uint64_t> wr_ids;
-  std::unordered_map<std::thread::id, uint64_t> thread_ids;
-
-  // max of "THREAD_MAX" threads, can trivially increase
-  std::condition_variable cond_vars[THREAD_MAX];
-  std::atomic<bool> mailboxes[THREAD_MAX];
-  bool run_worker = true;
-  std::mutex mutex_vars[THREAD_MAX];
+  volatile uint64_t *prev_ = nullptr;
 
   std::unique_ptr<ConnectionManager<channel_type>> connection_manager_;
   std::unique_ptr<rdma_memory_resource> rdma_memory_;
   ibv_mr *mr_;
 
   std::unordered_map<uint16_t, conn_info_t> conn_info_;
+  ibv_send_wr send_wr_{};
 
   rome::metrics::Summary<size_t> rdma_per_read_;
 
@@ -287,10 +277,6 @@ public:
                                            got.val.value().rkey(), mr_->lkey});
     }
 
-    std::thread t = std::thread([this] {
-      WorkerThread();
-    }); // TODO: Can I lower/raise the priority of this thread?
-    t.detach();
     return {sss::Ok, {}};
   }
 
@@ -344,8 +330,6 @@ public:
     ROME_DEBUG("Write: {:x} @ {}", (uint64_t)val, ptr);
     auto info = conn_info_.at(ptr.id());
 
-    uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
-
     T *local;
     if (prealloc == remote_nullptr) {
       auto alloc = rdma_allocator<T>(rdma_memory_.get());
@@ -358,8 +342,7 @@ public:
                  (uint64_t)local);
     }
 
-    ROME_ASSERT((uint64_t)local != ptr.address() || ptr.id() != self_.id,
-                "WTF");
+    ROME_ASSERT((uint64_t)local != ptr.address(), "WTF");
     std::memset(local, 0, sizeof(T));
     *local = val;
     ibv_sge sge{};
@@ -367,8 +350,6 @@ public:
     sge.length = sizeof(T);
     sge.lkey = mr_->lkey;
 
-    ibv_send_wr send_wr_{};
-    send_wr_.wr_id = index_as_id;
     send_wr_.num_sge = 1;
     send_wr_.sg_list = &sge;
     send_wr_.opcode = IBV_WR_RDMA_WRITE;
@@ -378,17 +359,20 @@ public:
 
     ibv_send_wr *bad = nullptr;
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
-
-    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-    while (!this->mailboxes[index_as_id]) {
-      this->cond_vars[index_as_id].wait(lck);
+    ibv_wc wc;
+    auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+    while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
+      poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
     }
-    this->mailboxes[index_as_id] = false;
 
     if (prealloc == remote_nullptr) {
       auto alloc = rdma_allocator<T>(rdma_memory_.get());
       alloc.deallocate(local);
     }
+    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS,
+                "ibv_poll_cq(): {} ({})",
+                (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)),
+                (std::stringstream() << ptr).str());
   }
 
   template <typename T>
@@ -396,17 +380,11 @@ public:
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
 
-    uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
-
     ibv_sge sge{};
-    auto alloc = rdma_allocator<uint64_t>(rdma_memory_.get());
-    volatile uint64_t *prev_ = alloc.allocate();
     sge.addr = reinterpret_cast<uint64_t>(prev_);
     sge.length = sizeof(uint64_t);
     sge.lkey = mr_->lkey;
 
-    ibv_send_wr send_wr_{};
-    send_wr_.wr_id = index_as_id;
     send_wr_.num_sge = 1;
     send_wr_.sg_list = &sge;
     send_wr_.opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
@@ -419,11 +397,14 @@ public:
     ibv_send_wr *bad = nullptr;
     while (true) {
       RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
-      std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-      while (!this->mailboxes[index_as_id]) {
-        this->cond_vars[index_as_id].wait(lck);
+      ibv_wc wc;
+      auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+      while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
+        poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
       }
-      this->mailboxes[index_as_id] = false;
+      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
+                  (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+
       ROME_DEBUG("Swap: expected={:x}, swap={:x}, prev={:x} (id={})",
                  send_wr_.wr.atomic.compare_add, (uint64_t)swap, *prev_,
                  self_.id);
@@ -431,9 +412,7 @@ public:
         break;
       send_wr_.wr.atomic.compare_add = *prev_;
     };
-    T ret = T(*prev_);
-    alloc.deallocate((uint64_t *)prev_, 8);
-    return ret;
+    return T(*prev_);
   }
 
   template <typename T>
@@ -441,17 +420,11 @@ public:
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
 
-    uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
-
     ibv_sge sge{};
-    auto alloc = rdma_allocator<uint64_t>(rdma_memory_.get());
-    volatile uint64_t *prev_ = alloc.allocate();
     sge.addr = reinterpret_cast<uint64_t>(prev_);
     sge.length = sizeof(uint64_t);
     sge.lkey = mr_->lkey;
 
-    ibv_send_wr send_wr_{};
-    send_wr_.wr_id = index_as_id;
     send_wr_.num_sge = 1;
     send_wr_.sg_list = &sge;
     send_wr_.opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
@@ -463,18 +436,16 @@ public:
 
     ibv_send_wr *bad = nullptr;
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
-
-    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-    while (!this->mailboxes[index_as_id]) {
-      this->cond_vars[index_as_id].wait(lck);
+    ibv_wc wc;
+    auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+    while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
+      poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
     }
-    this->mailboxes[index_as_id] = false;
-
+    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
+                (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
     ROME_DEBUG("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}  (id={})",
                expected, swap, *prev_, static_cast<uint64_t>(self_.id));
-    T ret = T(*prev_);
-    alloc.deallocate((uint64_t *)prev_, 8);
-    return ret;
+    return T(*prev_);
   }
 
   template <typename T> inline remote_ptr<T> GetRemotePtr(const T *ptr) const {
@@ -485,39 +456,10 @@ public:
     return GetRemotePtr<T>(reinterpret_cast<const T *>(mr_->addr));
   }
 
-  /// @brief Identify an op thread to the service "worker" thread. (Must be done
-  /// before operations can be run)
-  void RegisterThread() {
-    control_lock_.lock();
-    std::thread::id mid = std::this_thread::get_id();
-    if (this->thread_ids.find(mid) != this->thread_ids.end()) {
-      ROME_FATAL("Cannot register the same thread twice");
-      return;
-    }
-    if (this->id_gen == THREAD_MAX) {
-      ROME_FATAL("Increase THREAD_MAX of memory pool");
-      return;
-    }
-    this->thread_ids.insert(std::make_pair(mid, this->id_gen));
-    this->id_gen++;
-    control_lock_.unlock();
-  }
-
-  // Do I need this?
-  void KillWorkerThread() {
-    this->run_worker = false;
-    // Notify all mailboxes
-    for (int i = 0; i < THREAD_MAX; i++) {
-      std::unique_lock lck(this->mutex_vars[i]);
-      this->mailboxes[i] = true;
-      this->cond_vars[i].notify_one();
-    }
-  }
-
 private:
   template <typename T>
-  inline void ReadInternal(remote_ptr<T> ptr, size_t offset, size_t bytes,
-                           size_t chunk_size, remote_ptr<T> prealloc) {
+  void ReadInternal(remote_ptr<T> ptr, size_t offset, size_t bytes,
+                    size_t chunk_size, remote_ptr<T> prealloc) {
     const int num_chunks =
         bytes % chunk_size ? (bytes / chunk_size) + 1 : bytes / chunk_size;
     const size_t remainder = bytes % chunk_size;
@@ -525,15 +467,9 @@ private:
 
     auto info = conn_info_.at(ptr.id());
 
-    // this is not in the original
-    uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
-
     T *local = std::to_address(prealloc);
     ibv_sge sges[num_chunks];
     ibv_send_wr wrs[num_chunks];
-
-    // uint64_t wr_id_done;
-
     for (int i = 0; i < num_chunks; ++i) {
       auto chunk_offset = offset + i * chunk_size;
       sges[i].addr = reinterpret_cast<uint64_t>(local) + chunk_offset;
@@ -544,7 +480,6 @@ private:
       }
       sges[i].lkey = mr_->lkey;
 
-      wrs[i].wr_id = index_as_id; // was ++wr_id_gen, not sure if even needed?
       wrs[i].num_sge = 1;
       wrs[i].sg_list = &sges[i];
       wrs[i].opcode = IBV_WR_RDMA_READ;
@@ -558,48 +493,22 @@ private:
 
     ibv_send_wr *bad;
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, wrs, &bad);
+    ibv_wc wc;
+    int poll = 0;
 
-    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-    while (!this->mailboxes[index_as_id]) {
-      this->cond_vars[index_as_id].wait(lck);
-    }
-    this->mailboxes[index_as_id] = false;
-    rdma_per_read_lock_.lock();
+    // [mfs] Removed "kill"
+    for (; poll == 0; poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc))
+      ;
+    ROME_ASSERT(
+        poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
+        (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
+
     rdma_per_read_ << num_chunks;
-    rdma_per_read_lock_.unlock();
   }
 
-  // [mfs]  According to [el], the WorkerThread facility is a starting point for
-  //        supporting multithreaded clients.  It is possible to post multiple
-  //        requests on the same qp, and they'll finish in order, so we
-  //        definitely will want a way to let that happen.  But right now, I'm
-  //        not sure this code supports that.  I think it might be best to undo
-  //        the change, redesign it, and then reimplement it.
-  void WorkerThread() {
-    while (this->run_worker) {
-      for (auto it : this->conn_info_) {
-        // TODO: Load balance the connections we check. Threads should have a
-        // way to let us know what is worth checking. Also might no be an issue?
-        // Polling isn't expensive
-
-        // Poll from conn
-        conn_info_t info = it.second;
-        ibv_wc wc;
-        int poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-        if (poll == 0)
-          continue;
-
-        // We polled something :)
-        ROME_ASSERT(
-            poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
-            (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
-        // notify wc.wr_id;
-        std::unique_lock lck(this->mutex_vars[wc.wr_id]);
-        this->mailboxes[wc.wr_id] = true;
-        this->cond_vars[wc.wr_id].notify_one();
-      }
-    }
-  }
+  // [mfs]  According to [el], it is possible to post multiple requests on the
+  //        same qp, and they'll finish in order, so we definitely will want a
+  //        way to let that happen.
 };
 
 } // namespace rome::rdma
