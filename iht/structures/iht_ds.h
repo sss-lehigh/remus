@@ -221,69 +221,20 @@ public:
                 "to 64 bytes");
   };
 
-  /// @brief Initialize the IHT by connecting to the peers and exchanging the
-  /// PList pointer
-  /// @param host the leader of the initialization
-  /// @param peers all the nodes in the neighborhood
-  /// @return status code for the function
-  //
-  // [mfs]  This "replace the innards" approach isn't really the right way to do
-  //        this... it saves one RDMA access per operation, but I don't think
-  //        it's trustable, and we could always just cache it.
-  sss::Status Init(MemoryPool::Peer host,
-                   const std::vector<MemoryPool::Peer> &peers) {
-    bool is_host_ = self_.id == host.id;
-
-    if (is_host_) {
-      // Host machine, it is my responsibility to initiate configuration
-      RemoteObjectProto proto;
-      remote_plist iht_root = pool_->Allocate<PList>();
-      // Init plist and set remote proto to communicate its value
-      InitPList(iht_root, 1);
-      this->root = iht_root;
-      proto.set_raddr(iht_root.address());
-
-      // Iterate through peers
-      for (auto p = peers.begin(); p != peers.end(); p++) {
-        // Ignore sending pointer to myself
-        if (p->id == self_.id)
-          continue;
-
-        // Form a connection with the machine
-        auto conn_or = pool_->connection_manager()->GetConnection(p->id);
-        RETURN_STATUSVAL_ON_ERROR(conn_or);
-
-        // Send the proto over
-        auto status = conn_or.val.value()->channel()->Send(proto);
-        RETURN_STATUS_ON_ERROR(status);
-      }
-    } else {
-      // Listen for a connection
-      auto conn_or = pool_->connection_manager()->GetConnection(host.id);
-      RETURN_STATUSVAL_ON_ERROR(conn_or);
-
-      // Try to get the data from the machine, repeatedly trying until
-      // successful
-      //
-      // [mfs]  Since the connection is shared, I need to get a better
-      //        understanding on how this data gets into a buffer that is
-      //        allocated and owned by the current thread.
-      auto got =
-          conn_or.val.value()->channel()->TryDeliver<RemoteObjectProto>();
-      // TODO: use blocking Deliver()?
-      while (got.status.t == sss::Unavailable) {
-        got = conn_or.val.value()->channel()->TryDeliver<RemoteObjectProto>();
-      }
-      RETURN_STATUSVAL_ON_ERROR(got);
-
-      // From there, decode the data into a value
-      remote_plist iht_root =
-          decltype(iht_root)(host.id, got.val.value().raddr());
-      this->root = iht_root;
+  /// @brief Create a fresh iht
+    /// @return the iht root pointer
+    remote_ptr<anon_ptr> InitAsFirst(){
+        remote_plist iht_root = pool_->Allocate<PList>();
+        InitPList(iht_root, 1);
+        this->root = iht_root;
+        return static_cast<remote_ptr<anon_ptr>>(iht_root);
     }
 
-    return sss::Status::Ok();
-  }
+    /// @brief Initialize an IHT from the pointer of another IHT
+    /// @param root_ptr the root pointer of the other iht from InitAsFirst();
+    void InitFromPointer(remote_ptr<anon_ptr> root_ptr){
+        this->root = static_cast<remote_plist>(root_ptr);
+    }
 
   /// @brief Gets a value at the key.
   /// @param key the key to search on

@@ -19,6 +19,8 @@ message ExperimentParams {
     required int32 region_size = 12 [default = 22];
     required int32 thread_count = 13 [default = 1];
     required int32 node_count = 14 [default = 0];
+    required int32 qp_max = 15 [default = 30];
+    required int32 node_id = 16 [default = -1];
 }
 
 message ResultProto {

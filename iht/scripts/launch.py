@@ -15,17 +15,12 @@ def domain_name(nodetype):
     node_h = ['apt.emulab.net', 'cse.lehigh.edu', 'clemson.cloudlab.us', 'utah.cloudlab.us', 'utah.cloudlab.us', 'utah.cloudlab.us', 'utah.cloudlab.us']
     return node_h[node_i.index(nodetype)]
 
-
-
-# Define FLAGS to represet the flags
-FLAGS = flags.FLAGS
-
 # Experiment configuration
 flags.DEFINE_string('ssh_keyfile', '~/.ssh/id_rsa', 'Path to ssh file for authentication')
 flags.DEFINE_string('ssh_user', 'esl225', 'Username for login')
-flags.DEFINE_string('nodefile', '../../rome/scripts/nodefiles/r320.csv', 'Path to csv with the node names')
+flags.DEFINE_string('nodefile', '../../scripts/nodefiles/r320.csv', 'Path to csv with the node names')
 flags.DEFINE_string('experiment_name', None, 'Used as local save directory', required=True)
-flags.DEFINE_string('bin_dir', 'RDMA/rdma_iht', 'Directory where we run bazel build from')
+flags.DEFINE_string('bin_dir', 'librome_iht/iht_rdma_minimal', 'Directory where we run bazel build from')
 flags.DEFINE_bool('dry_run', required=True, default=None, help='Print the commands instead of running them')
 flags.DEFINE_string('exp_result', 'iht_result.pbtxt', 'File to retrieve experiment result')
 
@@ -51,10 +46,15 @@ flags.DEFINE_bool('default', required=False, default=False, help="If to run the 
 # Cluster parameters
 flags.DEFINE_integer('thread_count', required=False, default=1, help="The number of threads to start per client. Only applicable in send_exp")
 flags.DEFINE_integer('node_count', required=False, default=1, help="The number of nodes to use in the experiment. Will use node0-nodeN")
+flags.DEFINE_integer('qp_max', required=False, default=30, help="The number of queues to use in the experiment MAX")
 
-SINGLE_QUOTE = "'\"'\"'"
+# Define FLAGS to represet the flags
+FLAGS = flags.FLAGS
+FLAGS(sys.argv)
+
+QUOTE = "\""
 def make_one_line(proto):
-    return SINGLE_QUOTE + ' '.join(line for line in str(proto).split('\n')) + SINGLE_QUOTE 
+    return QUOTE + ' '.join(line for line in str(proto).split('\n')) + QUOTE 
 
 def quote(string):
     return f"'{string}'"
@@ -66,44 +66,46 @@ def is_valid(string):
             return False
     return True
 
+# Create a function that will create a file and run the given command using that file as stout
+def __run__(cmd, outfile, file_perm):
+    with open(f"{outfile}.txt", file_perm) as f:
+        if FLAGS.dry_run:
+            print(cmd)
+        else:
+            try:
+                subprocess.run(cmd, shell=True, check=True, stderr=f, stdout=f)
+                print(outfile, "Successful Startup")
+                return
+            except subprocess.CalledProcessError as e:
+                print(outfile, "Invalid Startup because", e)
+
 def execute(commands, file_perm):
     """For each command in commands, start a process"""
-    # Create a function that will create a file and run the given command using that file as stout
-    def __run__(cmd, outfile):
-        with open(f"{outfile}.txt", file_perm) as f:
-            if FLAGS.dry_run:
-                print(cmd)
-            else:
-                try:
-                    subprocess.run(cmd, shell=True, check=True, stderr=f, stdout=f)
-                    print(outfile, "Successful Startup")
-                    return
-                except subprocess.CalledProcessError as e:
-                    print(outfile, "Invalid Startup because", e)
-
     processes: List[Process] = []
     for cmd, file in commands:
         # Start a thread
-        processes.append(Process(target=__run__, args=(cmd, os.path.join("results", FLAGS.experiment_name, file))))
+        file_out = os.path.join("results", FLAGS.experiment_name, file)
+        processes.append(Process(target=__run__, args=(cmd, file_out, file_perm)))
         processes[-1].start()
 
     # Wait for all threads to finish
     for process in processes:
         process.join()
 
-def process_exp_flags():
+def process_exp_flags(node_id):
     params = protos.ExperimentParams()
+    params.node_id = node_id
     """Returns a string to append to the payload"""
     if FLAGS.from_param_config is not None:
         with open(FLAGS.from_param_config, "r") as f:
             # Load the json into the proto
             json_data = f.read()
             mapper = json.loads(json_data)
-            one_to_ones = ["think_time", "qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "contains", "insert", "remove", "key_lb", "key_ub", "region_size", "thread_count", "node_count"]
+            one_to_ones = ["think_time", "qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "contains", "insert", "remove", "key_lb", "key_ub", "region_size", "thread_count", "node_count", "qp_max"]
             for param in one_to_ones:
                 exec(f"params.{param} = mapper['{param}']")
     elif not FLAGS.default:
-        one_to_ones = ["think_time", "qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "region_size", "thread_count", "node_count"]
+        one_to_ones = ["think_time", "qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "region_size", "thread_count", "node_count", "qp_max"]
         for param in one_to_ones:
             exec(f"params.{param} = FLAGS.{param}")
         contains, insert, remove = FLAGS.op_distribution.split("-")
@@ -134,10 +136,11 @@ def main(args):
         for node in csv.reader(f):
             # For every node in nodefile, get the node info
             nodename, nodealias, nodetype = node
+            node_id = int(nodename.replace("node", ""))
             # Construct ssh command and payload
             ssh_login = f"ssh -i {FLAGS.ssh_keyfile} {FLAGS.ssh_user}@{nodealias}.{domain_name(nodetype)}"
             bazel_path = f"/users/{FLAGS.ssh_user}/go/bin/bazelisk"
-            payload = f"cd {FLAGS.bin_dir}; {bazel_path} run main --log_level={FLAGS.log_level} --"
+            payload = f"cd {FLAGS.bin_dir} && cmake . && make && LD_LIBRARY_PATH=./build:./build/protos ./build/iht/iht"
             # Adding run-type
             if FLAGS.send_test:
                 payload += " --send_test"
@@ -149,7 +152,7 @@ def main(args):
                 print("Must specify whether testing methods '--send_test', doing bulk operations '--send_bulk', or sending experiment '--send_exp'")
                 exit(1)
             # Adding experiment flags
-            payload += " --experiment_params=" + make_one_line(process_exp_flags())
+            payload += " --experiment_params " + make_one_line(process_exp_flags(node_id))
             # Tuple: (Creating Command | Output File Name)
             commands.append((' '.join([ssh_login, quote(payload)]), nodename))
             if FLAGS.send_exp:

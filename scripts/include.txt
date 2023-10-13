@@ -1,2 +1,5 @@
 rome/
 rdma_iht/
+librome/
+iht/
+iht_rdma_minimal/

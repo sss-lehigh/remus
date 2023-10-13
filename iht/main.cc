@@ -12,11 +12,13 @@
 #include "../logging/logging.h"
 #include "../rdma/connection_manager/connection_manager.h"
 #include "../rdma/memory_pool/memory_pool.h"
+#include "../util/tcp/tcp.h"
 
 #include "protos/colosseum.pb.h"
 
 #include "role_client.h"
 #include "role_server.h"
+#include "context_manager.h"
 
 #include "../vendor/sss/cli.h"
 
@@ -30,15 +32,15 @@ auto ARGS = {
 };
 
 #define PATH_MAX 4096
+#define PORT_NUM 18000
 
-using ::rome::rdma::ConnectionManager;
-using ::rome::rdma::MemoryPool;
-
-// [mfs] Why are these hard-coded?
-constexpr char iphost[] = "node0";
-constexpr uint16_t portNum = 18000;
-
+using rome::rdma::ConnectionManager;
+using rome::rdma::MemoryPool;
 using cm_type = MemoryPool::cm_type;
+
+// The optimial number of memory pools is mp=min(t, MAX_QP/n) where n is the number of nodes and t is the number of threads
+// To distribute mp (memory pools) across t threads, it is best for t/mp to be a whole number
+
 
 int main(int argc, char **argv) {
   ROME_INIT_LOG();
@@ -71,186 +73,163 @@ int main(int argc, char **argv) {
   //        only way to run the code is via a script that knows the internals of
   //        the ExperimentParams proto.  This needs to be refactored.  It is
   //        especially strange because protobufs are usually meant for
+  // [esl]  TODO: replace for json?
   ExperimentParams params = ExperimentParams();
   bool success =
       google::protobuf::TextFormat::MergeFromString(experiment_parms, &params);
   ROME_ASSERT(success, "Couldn't parse protobuf");
-  ROME_ASSERT(params.node_count() > 0,
-              "Cannot start experiment. Node count must be > 0");
+  // Check node count
+  if (params.node_count() <= 0 || params.thread_count() <= 0){
+      ROME_INFO("Cannot start experiment. Node/thread count was found to be 0");
+      exit(1);
+  }
+  // Check we are in this experiment
+  if (params.node_id() >= params.node_count()){
+      ROME_INFO("Not in this experiment. Exiting");
+      exit(0);
+  }
 
-  // Get hostname of this process
-  char hostname[4096];
-  gethostname(hostname, 4096);
+  // Determine the number of memory pools to use in the experiment
+  // Each memory pool represents 
+  int mp = std::min(params.thread_count(), (int) std::floor(params.qp_max() / params.node_count()));
+  if (mp == 0) mp = 1; // Make sure if node_count > qp_max, we don't end up with 0 memory pools
+    
+  ROME_INFO("Distributing {} MemoryPools across {} threads", mp, params.thread_count());
 
   // Start initializing a vector of peers
-  //
-  // [mfs]  This is pushing the hard-coded info about the host into the vector.
-  //        It should really not be hard-coded.
-  MemoryPool::Peer host{0, std::string(iphost), portNum};
+  volatile bool done = false; // (TODO: Should be atomic?)
   std::vector<MemoryPool::Peer> peers;
-  peers.push_back(host);
-
-  // Set values if we are host machine as well
-  //
-  // [mfs]  This is a hack.  The host machine should be part of the config
-  //
-  // [mfs]  The use of "outside_exp" doesn't really make sense.  It seems like
-  //        it is validating that the node is part of the experiment, but it's
-  //        not clear what conditions would lead to it *not* being part of the
-  //        experiment (unless the configuration was wrong).
-  //
-  // [mfs]  If this check really is needed, then consider using
-  //        optional<MemoryPool>, to avoid the unnecessary extra variable.
-  MemoryPool::Peer self;
-  bool outside_exp = true;
-  if (hostname[4] == '0') {
-    self = host;
-    outside_exp = false;
+  for(uint16_t n = 0; n < mp * params.node_count(); n++){
+      // Create the ip_peer (really just node name)
+      std::string ippeer = "node";
+      std::string node_id = std::to_string((int) floor(n / mp));
+      ippeer.append(node_id);
+      // Create the peer and add it to the list
+      MemoryPool::Peer next = MemoryPool::Peer(n, ippeer, PORT_NUM + n + 1);
+      peers.push_back(next);
   }
-
-  // Make the peer list by iterating through the node count
-  //
-  // [mfs]  This use of do_exp is strange.  Why not have different functions for
-  //        each of the execution modes?
-  for (int n = 1; n < params.node_count() && do_exp; n++) {
-    // Create the ip_peer (really just node name)
-    //
-    // [mfs] Again, the hard-coded names and ports are concerning
-    std::string ippeer = "node";
-    std::string node_id = std::to_string(n);
-    ippeer.append(node_id);
-    // Create the peer and add it to the list
-    MemoryPool::Peer next{static_cast<uint16_t>(n), ippeer, portNum};
-    peers.push_back(next);
-    // Compare after 4th character to node_id
-    if (strncmp(hostname + 4, node_id.c_str(), node_id.length()) == 0) {
-      // If matching, next is self
-      self = next;
-      outside_exp = false;
-    }
+  // Print the peers included in this experiment
+  // This is just for debugging to ensure they are what you expect
+  for(int i = 0; i < peers.size(); i++){
+      ROME_DEBUG("Peer list {}:{}@{}", i, peers.at(i).id, peers.at(i).address);
   }
-
-  // Test for an invalid configuration at this node
-  //
-  // [mfs]  See above... how is this possible without the whole experiment being
-  //        invalid?
-  if (outside_exp) {
-    // [mfs] Sleeping is a bad way to synchronize
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(200)); // So we get this printed last
-    ROME_INFO("Not in experiment. Shutting down");
-    return 0;
-  }
-  // Print the IPs of the peers of this node
-  //
-  // [mfs]  I would prefer some kind of explicit handshaking, instead of using
-  //        the node names.
-  for (int i = 0; i < peers.size(); i++) {
-    ROME_INFO("Peer list {}:{}@{}", i, peers.at(i).id, peers.at(i).address);
-  }
-
-  // Make a memory pool for the node to share among all client instances
+  MemoryPool::Peer host = peers.at(0);
+  // Initialize memory pools into an array
+  std::vector<std::thread> mempool_threads;
+  MemoryPool* pools[mp];
+  // Create multiple memory pools to be shared (have to use threads since Init is blocking)
   uint32_t block_size = 1 << params.region_size();
-  MemoryPool pool =
-      MemoryPool(self, std::make_unique<MemoryPool::cm_type>(self.id));
-  auto status_pool = pool.Init(block_size, peers);
-  OK_OR_FAIL(status_pool);
-  ROME_INFO("Created memory pool");
+  for(int i = 0; i < mp; i++){
+      mempool_threads.emplace_back(std::thread([&](int mp_index, int self_index){
+          MemoryPool::Peer self = peers.at(self_index);
+          ROME_INFO(mp != params.thread_count() ? "Is shared" : "Is not shared");
+          MemoryPool* pool = new MemoryPool(self, std::make_unique<MemoryPool::cm_type>(self.id), mp != params.thread_count());
+          sss::Status status_pool = pool->Init(block_size, peers);
+          OK_OR_FAIL(status_pool);
+          pools[mp_index] = pool;
+      }, i, (params.node_id() * mp) + i));
+  }
+  // Let the init finish
+  for(int i = 0; i < mp; i++){
+      mempool_threads[i].join();
+  }
+  // Assign a context to free the memory allocated by the new memorypool calls
+  ContextManger manager = ContextManger([&](){
+      for(int i = 0; i < mp; i++){
+          delete pools[i];
+      }
+  });
 
-  // Put an IHT into the memory pool
-  //
-  // [mfs]  This should be done differently.  `iht` should be a remote pointer,
-  //        distributed by the lead node.
-  //
-  // [mfs]  Right now, this is TestMap?  Switch to IHT?  Or define it in this
-  //        file...
-  IHT iht = IHT(self, &pool);
-  auto status_iht = iht.Init(host, peers);
-  OK_OR_FAIL(status_iht);
-
+  // Create a list of client and server  threads
   std::vector<std::thread> threads;
-  volatile bool done = false;
-  if (hostname[4] == '0') {
-    // If dedicated server-node, we must start the server
-    //
-    // [mfs]  I don't understand this.  What is the job of the server, relative
-    //        to the other nodes?  Why one thread?
-    threads.emplace_back(std::thread([&]() {
-      // We are the server
-      std::unique_ptr<Server> server =
-          Server::Create(host, peers, params, &pool);
-      ROME_INFO("Server Created");
-      // [mfs] What are these params to Launch?
-      auto run_status = server->Launch(&done, params.runtime(),
-                                       [&iht]() { iht.try_rehash(); });
-      OK_OR_FAIL(run_status);
-      ROME_INFO("[SERVER THREAD] -- End of execution; -- ");
-    }));
+  if (params.node_id() == 0){
+      // If dedicated server-node, we must send IHT pointer and wait for clients to finish
+      threads.emplace_back(std::thread([&](){
+          // Initialize X connections
+          tcp::SocketManager socket_handle = tcp::SocketManager(PORT_NUM);
+          for(int i = 0; i < params.thread_count() * params.node_count(); i++){
+              // TODO: Can we have a per-node connection?
+              // I haven't gotten around to coming up with a clean way to reduce the number of sockets connected to the server
+              socket_handle.accept_conn();
+          }
+          // Create a root ptr to the IHT
+          IHT iht = IHT(host, pools[0]);
+          remote_ptr<anon_ptr> root_ptr = iht.InitAsFirst();
+          // Send the root pointer over
+          tcp::message ptr_message = tcp::message(root_ptr.raw());
+          socket_handle.send_to_all(&ptr_message);
+          // We are the server
+          ExperimentManager::ClientStopBarrier(socket_handle, params.runtime());
+          for(int i = 0; i < mp; i++){
+              // Stop the worker thread of the memory pool
+              pools[i]->KillWorkerThread();
+          }
+          ROME_INFO("[SERVER THREAD] -- End of execution; -- ");
+      }));
+    }
+
+  // Initialize T endpoints, one for each thread
+  tcp::EndpointManager endpoint_managers[params.thread_count()];
+  for(uint16_t i = 0; i < params.thread_count(); i++){
+      endpoint_managers[i] = tcp::EndpointManager(PORT_NUM, host.address.c_str());
   }
 
-  // [mfs] This is a bit odd.  Why wouldn't this be a separate function?
-  if (!do_exp) {
-    // Not doing experiment, so just create some test clients
-    std::unique_ptr<Client> client =
-        Client::Create(self, host, peers, params, nullptr, &iht, true);
-    if (bulk_operations) {
-      auto status = client->Operations(true);
-      OK_OR_FAIL(status);
-    } else if (test_operations) {
-      auto status = client->Operations(false);
-      OK_OR_FAIL(status);
-    }
-    // Wait for server to complete
-    done = true;
-    threads[0].join();
-    ROME_INFO("[TEST] -- End of execution; -- ");
-    exit(0);
-  }
 
   // Barrier to start all the clients at the same time
   //
   // [mfs]  This starts all the clients *on this thread*, but that's not really
   //        a sufficient barrier.  A tree barrier is needed, to coordinate
   //        across nodes.
+  // [esl]  Is this something that would need to be implemented using rome?
+  // I'm not exactly sure what the implementation of an RDMA barrier would look like. If you have one in mind, lmk and I can start working on it.
   std::barrier client_sync = std::barrier(params.thread_count());
   // [mfs]  This seems like a misuse of protobufs: why would the local threads
   //        communicate via protobufs?
+  // [esl]  TODO: In the refactoring of the client adaptor, remove dependency on protobufs for a workload object
   WorkloadDriverProto results[params.thread_count()];
-  for (int n = 0; n < params.thread_count(); n++) {
-    // Add the thread
-    threads.emplace_back(std::thread(
-        [&](int index) {
+  for(int i = 0; i < params.thread_count(); i++){
+      threads.emplace_back(std::thread([&](int thread_index){
+          int mempool_index = thread_index % mp;
+          MemoryPool* pool = pools[mempool_index];
+          MemoryPool::Peer self = peers.at((params.node_id() * mp) + mempool_index);
+          IHT iht = IHT(self, pool);
+          // sleep for a short while to ensure the receiving end is up and running
+          // NB: We have no way to ensure the server is running before connecting to it
+          // In the future, having some kind of remote_barrier data structure would be much better
+          std::this_thread::sleep_for(std::chrono::milliseconds(10)); 
+          // Get the data from the server to init the IHT
+          tcp::message ptr_message;
+          endpoint_managers[thread_index].recv_server(&ptr_message);
+          iht.InitFromPointer(remote_ptr<anon_ptr>(ptr_message.get_first()));
+          
+          ROME_DEBUG("Creating client");
           // Create and run a client in a thread
-          std::unique_ptr<Client> client = Client::Create(
-              self, host, peers, params, &client_sync, &iht, index == 0);
           // [mfs]  I would have thought that the `done` flag would be set by
-          //        the main thread, as a way to tell all clients to stop?
-          auto output = Client::Run(std::move(client), &done,
-                                    0.5 / (double)params.node_count());
+          // the main thread, as a way to tell all clients to stop?
+          std::unique_ptr<Client> client = Client::Create(host, endpoint_managers[thread_index], params, &client_sync, &iht);
+          sss::StatusVal<WorkloadDriverProto> output = Client::Run(std::move(client), 
+                                                                   thread_index, 
+                                                                   0.5 / (double) (params.node_count() * params.thread_count()));
           // [mfs]  It would be good to document how a client can fail, because
-          //        it seems like if even one client fails, on any machine, the
-          //        whole experiment should be invalidated.
-          if (output.status.t == sss::Ok) {
-            results[index] = output.val.value();
+          // it seems like if even one client fails, on any machine, the
+          //  whole experiment should be invalidated.
+          if (output.status.t == sss::StatusType::Ok && output.val.has_value()){
+              results[thread_index] = output.val.value();
           } else {
-            ROME_ERROR("Client run failed");
+              ROME_ERROR("Client run failed");
           }
           ROME_INFO("[CLIENT THREAD] -- End of execution; -- ");
-        },
-        n));
+      }, i));
   }
 
   // Join all threads
   int i = 0;
-  for (auto it = threads.begin(); it != threads.end(); it++) {
-    // [mfs]  This seems like a bad message.  It doesn't say which node.  Why
-    //        not have one at the end?  And where's the error checking on the
-    //        returns from the clients?
-    ROME_INFO("Syncing {}", ++i);
-    auto t = it;
-    t->join();
+  for (auto it = threads.begin(); it != threads.end(); it++){
+      // For debug purposes, sometimes it helps to see which threads haven't deadlocked
+      ROME_DEBUG("Syncing {}", ++i);
+      auto t = it;
+      t->join();
   }
-
   // [mfs]  Again, odd use of protobufs for relatively straightforward combining
   //        of results.  Or am I missing something, and each node is sending its
   //        results, so they are all accumulated at the main node?
@@ -264,10 +243,12 @@ int main(int argc, char **argv) {
   }
 
   // [mfs]  Does this produce one file per node?
-  ROME_INFO("Compiled Proto Results ### {}", result_proto.DebugString());
+  // [esl] Yes, this produces one file per node, 
+  // The launch.py script will scp this file and use the protobuf to interpret it
+  // TODO: Replace this file out for a simple CSV --> much easier to parse on the developer side and a lot more code friendly
+  ROME_DEBUG("Compiled Proto Results ### {}", result_proto.DebugString());
   std::ofstream filestream("iht_result.pbtxt");
   filestream << result_proto.DebugString();
-  filestream.flush(); // [mfs] I thought streams auto-flushed on close?
   filestream.close();
 
   ROME_INFO("[EXPERIMENT] -- End of execution; -- ");

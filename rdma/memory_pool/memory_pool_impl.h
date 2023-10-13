@@ -125,8 +125,10 @@ MemoryPool::DoorbellBatchBuilder::Build() {
 
 MemoryPool::MemoryPool(
     const Peer &self,
-    std::unique_ptr<ConnectionManager<channel_type>> connection_manager)
-    : self_(self), connection_manager_(std::move(connection_manager)),
+    std::unique_ptr<ConnectionManager<channel_type>> connection_manager, bool is_shared)
+    : self_(self),
+      is_shared_(is_shared),
+      connection_manager_(std::move(connection_manager)),
       rdma_per_read_("rdma_per_read", "ops", 10000) {}
 
 sss::Status MemoryPool::Init(uint32_t capacity,
@@ -167,10 +169,12 @@ sss::Status MemoryPool::Init(uint32_t capacity,
         p.id, conn_info_t{conn.val.value(), got.val.value().rkey(), mr_->lkey});
   }
 
-  std::thread t = std::thread([this] {
-    WorkerThread();
-  }); // TODO: Can I lower/raise the priority of this thread?
-  t.detach();
+  if (is_shared_){
+    std::thread t = std::thread([this]{ 
+      WorkerThread(); 
+    }); // TODO: Can I lower/raise the priority of this thread?
+    t.detach();
+  }
   return {sss::Ok, {}};
 }
 
@@ -184,29 +188,29 @@ void MemoryPool::KillWorkerThread() {
   }
 }
 
-void MemoryPool::WorkerThread() {
-  while (this->run_worker) {
-    for (auto it : this->conn_info_) {
-      // TODO: Load balance the connections we check. Threads should have a way
-      // to let us know what is worth checking Also might no be an issue?
-      // Polling isn't expensive
+void MemoryPool::WorkerThread(){
+    ROME_DEBUG("Worker thread");
+    while(this->run_worker){
+      for(auto it : this->conn_info_){
+        // TODO: Load balance the connections we check. Threads should have a way to let us know what is worth checking
+        // Also might no be an issue? Polling isn't expensive
 
-      // Poll from conn
-      conn_info_t info = it.second;
-      ibv_wc wc;
-      int poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-      if (poll == 0)
-        continue;
-
-      // We polled something :)
-      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
-                  (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
-      // notify wc.wr_id;
-      std::unique_lock lck(this->mutex_vars[wc.wr_id]);
-      this->mailboxes[wc.wr_id] = true;
-      this->cond_vars[wc.wr_id].notify_one();
+        // Poll from conn
+        conn_info_t info = it.second;
+        ibv_wc wcs[THREAD_MAX];
+        int poll = ibv_poll_cq(info.conn->id()->send_cq, THREAD_MAX, wcs);
+        if (poll == 0) continue;
+        ROME_ASSERT(poll > 0, "ibv_poll_cq(): {}", strerror(errno));
+        // We polled something :)
+        for(int i = 0; i < poll; i++){
+          ROME_ASSERT(wcs[i].status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", ibv_wc_status_str(wcs[i].status));
+          // notify wcs[i].wr_id;
+          std::unique_lock lck(this->mutex_vars[wcs[i].wr_id]);
+          this->mailboxes[wcs[i].wr_id] = true;
+          this->cond_vars[wcs[i].wr_id].notify_one();
+        }
+      }
     }
-  }
 }
 
 void MemoryPool::RegisterThread() {
@@ -332,15 +336,26 @@ void MemoryPool::ReadInternal(remote_ptr<T> ptr, size_t offset, size_t bytes,
 
   ibv_send_wr *bad;
   RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, wrs, &bad);
-
-  std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-  while (!this->mailboxes[index_as_id]) {
-    this->cond_vars[index_as_id].wait(lck);
+  
+  if (is_shared_){
+    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
+    while (!this->mailboxes[index_as_id]){
+      this->cond_vars[index_as_id].wait(lck);
+    }
+    this->mailboxes[index_as_id] = false;
+    rdma_per_read_lock_.lock();
+    rdma_per_read_ << num_chunks;
+    rdma_per_read_lock_.unlock();
+  } else {
+    // Poll until we get something
+    ibv_wc wc;
+    int poll = 0;
+    for (; poll == 0; poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc)){}
+    ROME_ASSERT(
+        poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
+        (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
+    rdma_per_read_ << num_chunks;
   }
-  this->mailboxes[index_as_id] = false;
-  rdma_per_read_lock_.lock();
-  rdma_per_read_ << num_chunks;
-  rdma_per_read_lock_.unlock();
 }
 
 template <typename T>
@@ -376,6 +391,9 @@ void MemoryPool::Write(remote_ptr<T> ptr, const T &val,
   send_wr_.num_sge = 1;
   send_wr_.sg_list = &sge;
   send_wr_.opcode = IBV_WR_RDMA_WRITE;
+  // TODO: Manipulate send flags based on arguments!!
+  // https://www.rdmamojo.com/2013/01/26/ibv_post_send/
+  // https://www.rdmamojo.com/2013/06/08/tips-and-tricks-to-optimize-your-rdma-code/
   send_wr_.send_flags = IBV_SEND_SIGNALED | IBV_SEND_FENCE;
   send_wr_.wr.rdma.remote_addr = ptr.address();
   send_wr_.wr.rdma.rkey = info.rkey;
@@ -383,11 +401,21 @@ void MemoryPool::Write(remote_ptr<T> ptr, const T &val,
   ibv_send_wr *bad = nullptr;
   RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
 
-  std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-  while (!this->mailboxes[index_as_id]) {
-    this->cond_vars[index_as_id].wait(lck);
+  if (is_shared_){
+    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
+    while (!this->mailboxes[index_as_id]) {
+      this->cond_vars[index_as_id].wait(lck);
+    }
+    this->mailboxes[index_as_id] = false;
+  } else {
+      // Poll until we get something
+      ibv_wc wc;
+      auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+      while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
+        poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+      }
+      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), (std::stringstream() << ptr).str());
   }
-  this->mailboxes[index_as_id] = false;
 
   if (prealloc == remote_nullptr) {
     auto alloc = rdma_allocator<T>(rdma_memory_.get());
@@ -423,11 +451,22 @@ T MemoryPool::AtomicSwap(remote_ptr<T> ptr, uint64_t swap, uint64_t hint) {
   ibv_send_wr *bad = nullptr;
   while (true) {
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
-    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-    while (!this->mailboxes[index_as_id]) {
-      this->cond_vars[index_as_id].wait(lck);
+
+    if (is_shared_){
+      std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
+      while (!this->mailboxes[index_as_id]) {
+        this->cond_vars[index_as_id].wait(lck);
+      }
+      this->mailboxes[index_as_id] = false;
+    } else {
+      // Poll until we get something
+      ibv_wc wc;
+      auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+      while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
+        poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+      }
+      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
     }
-    this->mailboxes[index_as_id] = false;
     ROME_DEBUG("Swap: expected={:x}, swap={:x}, prev={:x} (id={})",
                send_wr_.wr.atomic.compare_add, (uint64_t)swap, *prev_,
                self_.id);
@@ -436,7 +475,7 @@ T MemoryPool::AtomicSwap(remote_ptr<T> ptr, uint64_t swap, uint64_t hint) {
     send_wr_.wr.atomic.compare_add = *prev_;
   };
   T ret = T(*prev_);
-  alloc.deallocate((uint64_t *)prev_, 8);
+  alloc.deallocate((uint64_t *) prev_, 8);
   return ret;
 }
 
@@ -468,12 +507,21 @@ T MemoryPool::CompareAndSwap(remote_ptr<T> ptr, uint64_t expected,
 
   ibv_send_wr *bad = nullptr;
   RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
-
-  std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-  while (!this->mailboxes[index_as_id]) {
-    this->cond_vars[index_as_id].wait(lck);
+  
+  if (is_shared_){
+    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
+    while (!this->mailboxes[index_as_id]) {
+      this->cond_vars[index_as_id].wait(lck);
+    }
+    this->mailboxes[index_as_id] = false;
+  } else {
+    ibv_wc wc;
+    auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+    while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
+      poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+    }
+    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
   }
-  this->mailboxes[index_as_id] = false;
 
   ROME_DEBUG("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}  (id={})",
              expected, swap, *prev_, static_cast<uint64_t>(self_.id));

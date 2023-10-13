@@ -3,8 +3,8 @@
 #include <infiniband/verbs.h>
 
 #include "../../vendor/sss/status.h"
-#include "../rdma/channel/rdma_accessor.h"
-#include "../rdma/rdma_util.h"
+#include "../../rdma/channel/rdma_accessor.h"
+#include "../../rdma/rdma_util.h"
 
 namespace rome::rdma {
 

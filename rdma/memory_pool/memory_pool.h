@@ -26,11 +26,6 @@
 
 namespace rome::rdma {
 
-using ::rome::rdma::EmptyRdmaAccessor;
-using ::rome::rdma::RdmaChannel;
-using ::rome::rdma::RemoteObjectProto;
-using ::rome::rdma::TwoSidedRdmaMessenger;
-
 class MemoryPool {
 #ifndef ROME_MEMORY_POOL_MESSENGER_CAPACITY
   static constexpr size_t kMemoryPoolMessengerCapacity = 1 << 12;
@@ -70,7 +65,8 @@ public:
 
   inline MemoryPool(
       const Peer &self,
-      std::unique_ptr<ConnectionManager<channel_type>> connection_manager);
+      std::unique_ptr<ConnectionManager<channel_type>> connection_manager, 
+      bool is_shared);
 
   class DoorbellBatch {
   public:
@@ -233,6 +229,7 @@ private:
   void WorkerThread();
 
   Peer self_;
+  bool is_shared_;
 
   std::mutex control_lock_;
   std::mutex rdma_per_read_lock_;
