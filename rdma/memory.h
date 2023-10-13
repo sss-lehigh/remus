@@ -52,7 +52,6 @@
 struct ibv_mr_deleter {
   void operator()(ibv_mr *mr) { ibv_dereg_mr(mr); }
 };
-
 using ibv_mr_unique_ptr = std::unique_ptr<ibv_mr, ibv_mr_deleter>;
 
 namespace rome::rdma {
@@ -66,7 +65,9 @@ class RdmaMemory {
   // only implemented for Linux-based operating systems.
   inline sss::StatusVal<int> GetNumHugepages(std::string_view path) {
     // Try to open file.
-    // [mfs] I had to explicitly convert to string?
+    //
+    // [mfs]  I had to explicitly convert to string.  That typically means that
+    //        string_view is not a good thing to use.
     std::ifstream file(std::string(path).data());
     if (!file.is_open()) {
       sss::Status err = {sss::Unknown, "Failed to open file: "};

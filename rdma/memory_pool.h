@@ -175,15 +175,15 @@ template <typename T> struct std::hash<rome::rdma::remote_ptr<T>> {
 
 namespace rome::rdma {
 
-// [mfs] This is a concerning "secret" configuration parameter
-#define THREAD_MAX 50
-
 class MemoryPool {
   // [mfs] These should probably be template parameters
   static constexpr size_t kMemoryPoolMessengerCapacity = 1 << 12;
   static constexpr size_t kMemoryPoolMessageSize = 1 << 8;
 
 public:
+  /// Peer describes another node in the system
+  ///
+  /// TODO: do all nodes agree on the mapping between id and address:port?
   struct Peer {
     uint16_t id;
     std::string address;
@@ -213,6 +213,8 @@ private:
 
   Peer self_;
 
+  // TODO:  This shouldn't be a class-wide field if we want multithreading.
+  //        Check [el]'s fork for an alternative.
   volatile uint64_t *prev_ = nullptr;
 
   std::unique_ptr<ConnectionManager<channel_type>> connection_manager_;
@@ -220,6 +222,9 @@ private:
   ibv_mr *mr_;
 
   std::unordered_map<uint16_t, conn_info_t> conn_info_;
+
+  // TODO:  This shouldn't be a class-wide field if we want multithreading.
+  //        Check [el]'s fork for an alternative.
   ibv_send_wr send_wr_{};
 
   rome::metrics::Summary<size_t> rdma_per_read_;
@@ -240,13 +245,22 @@ public:
   }
   conn_info_t conn_info(uint16_t id) const { return conn_info_.at(id); }
 
+  /// This method does two things.
+  /// - It creates a memory region with `capacity` as its size.
+  /// - It does an all-all communication with every peer, to create a connection
+  ///   with each, and then it exchanges regions with all peers.
+  ///
+  /// TODO: Should there be some kind of "shutdown()" method?
   inline sss::Status Init(uint32_t capacity, const std::vector<Peer> &peers) {
     auto status = connection_manager_->Start(self_.address, self_.port);
     RETURN_STATUS_ON_ERROR(status);
+
+    // Create a memory region (mr) in the current protection domain (pd)
     rdma_memory_ = std::make_unique<rdma_memory_resource>(
         capacity + sizeof(uint64_t), connection_manager_->pd());
     mr_ = rdma_memory_->mr();
 
+    // Go through the list of peers and connect to each of them
     for (const auto &p : peers) {
       auto connected = connection_manager_->Connect(p.id, p.address, p.port);
       while (connected.status.t == sss::Unavailable) {
@@ -255,6 +269,7 @@ public:
       RETURN_STATUSVAL_ON_ERROR(connected);
     }
 
+    // Send the memory region to all peers
     RemoteObjectProto rm_proto;
     rm_proto.set_rkey(mr_->rkey);
     rm_proto.set_raddr(reinterpret_cast<uint64_t>(mr_->addr));
@@ -265,6 +280,7 @@ public:
       RETURN_STATUS_ON_ERROR(status);
     }
 
+    // Get all peers' memory regions
     for (const auto &p : peers) {
       auto conn = connection_manager_->GetConnection(p.id);
       STATUSVAL_OR_DIE(conn);
@@ -273,6 +289,7 @@ public:
         got = conn.val.value()->channel()->TryDeliver<RemoteObjectProto>();
       }
       RETURN_STATUSVAL_ON_ERROR(got);
+      // [mfs] I don't understand why we use mr_->lkey?
       conn_info_.emplace(p.id, conn_info_t{conn.val.value(),
                                            got.val.value().rkey(), mr_->lkey});
     }
@@ -280,22 +297,21 @@ public:
     return {sss::Ok, {}};
   }
 
+  /// Allocate some memory from the local RDMA heap
   template <typename T> remote_ptr<T> Allocate(size_t size = 1) {
-    // ROME_INFO("Allocating {} bytes ({} {} times)", sizeof(T)*size, sizeof(T),
-    // size);
     auto ret = remote_ptr<T>(
         self_.id, rdma_allocator<T>(rdma_memory_.get()).allocate(size));
     return ret;
   }
 
+  /// Deallocate some memory to the local RDMA heap (must be from this node)
   template <typename T> void Deallocate(remote_ptr<T> p, size_t size = 1) {
-    // ROME_INFO("Deallocating {} bytes ({} {} times)", sizeof(T)*size,
-    // sizeof(T), size); else ROME_INFO("Deallocating {} bytes", sizeof(T));
     ROME_ASSERT(p.id() == self_.id,
                 "Alloc/dealloc on remote node not implemented...");
     rdma_allocator<T>(rdma_memory_.get()).deallocate(std::to_address(p), size);
   }
 
+  /// Read from RDMA, store the result in prealloc (may allocate)
   template <typename T>
   remote_ptr<T> Read(remote_ptr<T> ptr,
                      remote_ptr<T> prealloc = remote_nullptr) {
@@ -305,6 +321,9 @@ public:
     return prealloc;
   }
 
+  /// Read from RDMA, store the result in prealloc (may allocate)
+  ///
+  /// This version takes a `size` argument, for variable-length objects
   template <typename T>
   remote_ptr<T> ExtendedRead(remote_ptr<T> ptr, int size,
                              remote_ptr<T> prealloc = remote_nullptr) {
@@ -315,6 +334,11 @@ public:
     return prealloc;
   }
 
+  /// Read from RDMA, store the result in prealloc (may allocate)
+  ///
+  /// This version does not read the entire object
+  ///
+  /// TODO: Does this require bytes < sizeof(T)?
   template <typename T>
   remote_ptr<T> PartialRead(remote_ptr<T> ptr, size_t offset, size_t bytes,
                             remote_ptr<T> prealloc = remote_nullptr) {
@@ -324,12 +348,21 @@ public:
     return prealloc;
   }
 
+  /// Write to RDMA
   template <typename T>
   void Write(remote_ptr<T> ptr, const T &val,
              remote_ptr<T> prealloc = remote_nullptr) {
     ROME_DEBUG("Write: {:x} @ {}", (uint64_t)val, ptr);
     auto info = conn_info_.at(ptr.id());
 
+    // [mfs] I have a few concerns about this code:
+    // -  Why do we need to allocate?  Why can't we just use `val`?  Is it
+    //    because `val` might be shared?  If so, the read of `val` is racy.
+    // -  If we do need to allocate, why can't we allocate on the stack?
+    // -  Why are we memsetting `local` if we're using the copy constructor to
+    //    set `local` to val?
+    // -  Does the use of the copy constructor imply that we are assuming T is
+    //    trivially copyable?
     T *local;
     if (prealloc == remote_nullptr) {
       auto alloc = rdma_allocator<T>(rdma_memory_.get());
@@ -375,6 +408,9 @@ public:
                 (std::stringstream() << ptr).str());
   }
 
+  /// Do a 64-bit swap over RDMA
+  ///
+  /// [mfs] If the swap value is always a uint64_t, why is this templated on T?
   template <typename T>
   T AtomicSwap(remote_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
     static_assert(sizeof(T) == 8);
@@ -415,15 +451,19 @@ public:
     return T(*prev_);
   }
 
+  /// Do a 64-bit CAS over RDMA
+  ///
+  /// [mfs] If the swap value is always a uint64_t, why is this templated on T?
   template <typename T>
   T CompareAndSwap(remote_ptr<T> ptr, uint64_t expected, uint64_t swap) {
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
 
-    ibv_sge sge{};
-    sge.addr = reinterpret_cast<uint64_t>(prev_);
-    sge.length = sizeof(uint64_t);
-    sge.lkey = mr_->lkey;
+    // TODO: would the code be clearer if all of the ibv_* initialization
+    // throughout this file used the new syntax?
+    ibv_sge sge{.addr = reinterpret_cast<uint64_t>(prev_),
+                .length = sizeof(uint64_t),
+                .lkey = mr_->lkey};
 
     send_wr_.num_sge = 1;
     send_wr_.sg_list = &sge;
@@ -457,6 +497,10 @@ public:
   }
 
 private:
+  /// Internal method implementing common code for RDMA read
+  ///
+  /// TODO: It appears that we *always* call this with bytes <= chunk_size.
+  ///       Could we get rid of some of the complexity?
   template <typename T>
   void ReadInternal(remote_ptr<T> ptr, size_t offset, size_t bytes,
                     size_t chunk_size, remote_ptr<T> prealloc) {

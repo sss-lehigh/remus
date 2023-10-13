@@ -133,6 +133,7 @@ int main(int argc, char **argv) {
     ROME_INFO("Not in experiment. Shutting down");
     return 0;
   }
+
   // Print the IPs of the peers of this node
   //
   // [mfs]  I would prefer some kind of explicit handshaking, instead of using
@@ -143,7 +144,7 @@ int main(int argc, char **argv) {
 
   // Make a memory pool for the node to share among all client instances
   uint32_t block_size = 1 << params.region_size();
-  rome::rdma::MemoryPool pool = rome::rdma::MemoryPool(
+  rome::rdma::MemoryPool pool(
       self, std::make_unique<rome::rdma::MemoryPool::cm_type>(self.id));
   auto status_pool = pool.Init(block_size, peers);
   OK_OR_FAIL(status_pool);

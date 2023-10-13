@@ -7,7 +7,13 @@
 
 namespace rome::rdma {
 
-template <typename Messenger> class RdmaChannel : public Messenger {
+/// [mfs] It is a bit odd that a channel "is-a" messenger, instead of "has-a".
+///       The fact that I could make the inheritance `private`, and the fact
+///       that {Send wraps SendMessage} and {TryDeliver wraps
+///       TryDeliverMessage}, strongly suggest that it's really a has-a.
+template <typename Messenger> class RdmaChannel : private Messenger {
+  // A pointer to the QP used to post sends and receives.
+  rdma_cm_id *id_; //! NOT OWNED
 public:
   ~RdmaChannel() {}
   explicit RdmaChannel(rdma_cm_id *id) : Messenger(id), id_(id) {}
@@ -49,10 +55,6 @@ public:
   sss::Status Post(ibv_send_wr *wr, ibv_send_wr **bad) {
     return this->PostInternal(wr, bad);
   }
-
-private:
-  // A pointer to the QP used to post sends and receives.
-  rdma_cm_id *id_; //! NOT OWNED
 };
 
 } // namespace rome::rdma

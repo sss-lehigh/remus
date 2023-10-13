@@ -48,6 +48,8 @@ public:
 
 // The interface for all coroutine schedulers. A scheduler can add new
 // coroutines, start running, and cancel running. So
+//
+// TODO: Make this a concept?
 template <typename PromiseT> class Scheduler {
 public:
   // Adds a new coroutine to the runner to be run with a given policy.
@@ -61,10 +63,24 @@ public:
   virtual void Cancel() = 0;
 };
 
-using Cancelation = std::atomic<bool>;
+using Cancellation = std::atomic<bool>;
 
+// [mfs]  If we only use one scheduler, should it be hard-coded (or at least not
+//        virtual dispatch?)
 template <typename PromiseT>
 class RoundRobinScheduler : public Scheduler<PromiseT> {
+  struct CoroWrapper {
+    ~CoroWrapper() { handle.destroy(); }
+    std::coroutine_handle<PromiseT> handle;
+    CoroWrapper *prev;
+    CoroWrapper *next;
+  };
+
+  int task_count_;
+  CoroWrapper *curr_;
+  CoroWrapper *last_;
+  std::atomic<bool> canceled_;
+
 public:
   ~RoundRobinScheduler() { ROME_TRACE("Task count: {}", task_count_); }
   RoundRobinScheduler() : task_count_(0), curr_(nullptr), canceled_(false) {}
@@ -130,28 +146,15 @@ public:
   }
 
   // Cancels the scheduler and then waits for all currently scheduled tasks to
-  // complete. Coroutines can obtain a pointer to the cancelation flag using
-  // `Cancelation()` and then check if it has been canceled.
+  // complete. Coroutines can obtain a pointer to the Cancellation flag using
+  // `Cancellation()` and then check if it has been canceled.
   void Cancel() override {
     canceled_ = true;
     while (curr_ != nullptr)
       ;
   }
 
-  const Cancelation &Cancelation() const { return canceled_; }
-
-private:
-  struct CoroWrapper {
-    ~CoroWrapper() { handle.destroy(); }
-    std::coroutine_handle<PromiseT> handle;
-    CoroWrapper *prev;
-    CoroWrapper *next;
-  };
-
-  int task_count_;
-  CoroWrapper *curr_;
-  CoroWrapper *last_;
-  std::atomic<bool> canceled_;
+  const Cancellation &Cancellation() const { return canceled_; }
 };
 
 } // namespace util
@@ -357,7 +360,7 @@ private:
         receiver_->OnDisconnect(id);
 
         // `num_connections_` will only reach zero once all connections have
-        // recevied their disconnect messages.
+        // received their disconnect messages.
         num_connections_.fetch_add(-1);
         ROME_DEBUG("({}) Num connections: {}", fmt::ptr(this),
                    num_connections_);

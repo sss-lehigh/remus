@@ -31,20 +31,44 @@ public:
 };
 #endif
 
-// [mfs] Why do we need this?
-class EmptyRdmaMessenger {
-public:
-  ~EmptyRdmaMessenger() = default;
-  explicit EmptyRdmaMessenger(rdma_cm_id *id) {}
-  sss::Status SendMessage(const Message &msg) { return sss::Status::Ok(); }
-  sss::StatusVal<Message> TryDeliverMessage() {
-    return {{sss::Ok, {}}, Message{nullptr, 0}};
-  }
-};
-
+/// [mfs] Is this a good name?  Doesn't "two sided" typically mean "RPC" in the
+///       RDMA world?
+///
+/// NB: This is only used by MemoryPool
 template <uint32_t kCapacity = 1ul << 12, uint32_t kRecvMaxBytes = 1ul << 8>
 class TwoSidedRdmaMessenger {
   static_assert(kCapacity % 2 == 0, "Capacity must be divisible by two.");
+
+  // The remotely accessible memory used for the send and recv buffers.
+  RdmaMemory rm_;
+
+  // A pointer to the QP used to post sends and receives.
+  rdma_cm_id *id_; //! NOT OWNED
+
+  // Pointer to memory region identified by `kSendId`.
+  ibv_mr *send_mr_;
+
+  // Size of send buffer.
+  const int send_capacity_;
+
+  // Pointer to the base address and next unposted address of send buffer.
+  uint8_t *send_base_, *send_next_;
+
+  uint32_t send_total_;
+
+  // Pointer to memory region identified by `kRecvId`.
+  ibv_mr *recv_mr_;
+
+  // Size of the recv buffer.
+  const int recv_capacity_;
+
+  // Pointer to base address and next unposted address.
+  uint8_t *recv_base_, *recv_next_;
+
+  // Tracks the number of completed receives. This is used by
+  // `PrepareRecvBuffer()` to ensure that it is only called when all posted
+  // receives have been completed.
+  uint32_t recv_total_;
 
 public:
   explicit TwoSidedRdmaMessenger(rdma_cm_id *id)
@@ -122,12 +146,10 @@ public:
 
     if (comps < 0) {
       sss::Status e = {sss::InternalError, {}};
-      e << "rdma_get_send_comp: {}" << strerror(errno);
-      return e;
+      return e << "rdma_get_send_comp: {}" << strerror(errno);
     } else if (wc.status != IBV_WC_SUCCESS) {
       sss::Status e = {sss::InternalError, {}};
-      e << "rdma_get_send_comp(): " << ibv_wc_status_str(wc.status);
-      return e;
+      return e << "rdma_get_send_comp(): " << ibv_wc_status_str(wc.status);
     }
 
     send_next_ += msg.length;
@@ -151,6 +173,8 @@ public:
         return {{sss::Aborted, "QP in error state"}, {}};
       case IBV_WC_SUCCESS: {
         // Prepare the response.
+        //
+        // [mfs] It looks like there's a lot of copying baked into the API?
         sss::StatusVal<Message> res = {sss::Status::Ok(), {}};
         res.val->buffer = std::make_unique<uint8_t[]>(wc.byte_len);
         std::memcpy(res.val->buffer.get(), recv_next_, wc.byte_len);
@@ -197,37 +221,6 @@ private:
     }
     recv_next_ = recv_base_;
   }
-
-  // The remotely accessible memory used for the send and recv buffers.
-  RdmaMemory rm_;
-
-  // A pointer to the QP used to post sends and receives.
-  rdma_cm_id *id_; //! NOT OWNED
-
-  // Pointer to memory region identified by `kSendId`.
-  ibv_mr *send_mr_;
-
-  // Size of send buffer.
-  const int send_capacity_;
-
-  // Pointer to the base address and next unposted address of send buffer.
-  uint8_t *send_base_, *send_next_;
-
-  uint32_t send_total_;
-
-  // Pointer to memory region identified by `kRecvId`.
-  ibv_mr *recv_mr_;
-
-  // Size of the recv buffer.
-  const int recv_capacity_;
-
-  // Pointer to base address and next unposted address.
-  uint8_t *recv_base_, *recv_next_;
-
-  // Tracks the number of completed receives. This is used by
-  // `PrepareRecvBuffer()` to ensure that it is only called when all posted
-  // receives have been completed.
-  uint32_t recv_total_;
 };
 
 } // namespace rome::rdma
