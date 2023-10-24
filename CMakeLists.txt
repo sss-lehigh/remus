@@ -5,7 +5,7 @@ project(Rome LANGUAGES CXX VERSION 0.0.0)
 
 ### Flags that the user can override
 
-set(LOG_LEVEL "INFO" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
+set(LOG_LEVEL "DEBUG" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
 set(CXX_STANDARD 23 CACHE STRING "Uses C++20 or 23")
 
 

@@ -39,7 +39,7 @@ inline void __rome_init_log__() {
   ::spdlog::set_default_logger(std::move(__rome_log__));
   SPDLOG_INFO(
       "Logging level: {}",
-      ::spdlog::level::level_string_views[::spdlog::default_logger()->level()]);
+      ::spdlog::level::to_string_view(::spdlog::default_logger()->level()));
 }
 
 #if ROME_LOG_LEVEL == OFF

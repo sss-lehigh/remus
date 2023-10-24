@@ -140,7 +140,7 @@ def main(args):
             # Construct ssh command and payload
             ssh_login = f"ssh -i {FLAGS.ssh_keyfile} {FLAGS.ssh_user}@{nodealias}.{domain_name(nodetype)}"
             bazel_path = f"/users/{FLAGS.ssh_user}/go/bin/bazelisk"
-            payload = f"cd {FLAGS.bin_dir} && cmake . && make && LD_LIBRARY_PATH=./build:./build/protos ./build/iht/iht"
+            payload = f"cd {FLAGS.bin_dir} && cmake . && make && LD_LIBRARY_PATH=.:./protos ./iht/iht"
             # Adding run-type
             if FLAGS.send_test:
                 payload += " --send_test"

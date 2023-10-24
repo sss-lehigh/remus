@@ -107,7 +107,7 @@ sss::Status RdmaMemory::RegisterMemoryRegion(std::string_view id,
     return {sss::InternalError, "Failed to register memory region"};
   }
   memory_regions_.emplace(id, std::move(mr));
-  ROME_DEBUG("Memory region registered: {} @ {} to {} (length={})", id,
+  ROME_TRACE("Memory region registered: {} @ {} to {} (length={})", id,
              fmt::ptr(base), fmt::ptr(base + length), length);
   return sss::Status::Ok();
 }

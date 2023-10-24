@@ -47,12 +47,26 @@ public:
   typedef ConnectionManager<channel_type> cm_type;
   typedef cm_type::conn_type conn_type;
 
+  /**
+   * @brief Construct a peer object to represent a node/machine. 
+   * Used in creating connections via the memorypool or connection managers
+   */
   struct Peer {
     uint16_t id;
     std::string address;
     uint16_t port;
 
+    /**
+     * @brief Construct a new Peer object with id and port of 0, empty address
+     */
     Peer() : Peer(0, "", 0) {}
+    /**
+     * @brief Construct a new Peer object
+     * 
+     * @param id the peer's unique ID
+     * @param address the address (hostname or IP) of the peer's machine
+     * @param port the port to connect to
+     */
     Peer(uint16_t id, std::string address, uint16_t port)
         : id(id), address(address), port(port) {}
   };

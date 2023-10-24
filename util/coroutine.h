@@ -133,7 +133,7 @@ public:
       ;
   }
 
-  const Cancelation &Cancelation() const { return canceled_; }
+  const Cancelation &IsCancelation() const { return canceled_; }
 
 private:
   struct CoroWrapper {

@@ -1,8 +1,7 @@
-#pragma once
-
 #include <barrier>
 #include <chrono>
 #include <cstdlib>
+#include <optional>
 
 #include "../colosseum/client_adaptor.h"
 #include "../colosseum/qps_controller.h"
@@ -15,7 +14,8 @@
 #include "common.h"
 #include "protos/experiment.pb.h"
 // #include "structures/hashtable.h"
-#include "structures/iht_ds.h"
+#include "iht_ds.h"
+#include "common.h"
 // #include "structures/test_map.h"
 
 using ::rome::ClientAdaptor;
@@ -24,30 +24,19 @@ using ::rome::WorkloadDriverProto;
 using ::rome::rdma::MemoryPool;
 
 // [mfs] This should really be defined somewhere else
-typedef RdmaIHT<int, int, 16, 1024> IHT;
+typedef RdmaIHT<int, int, CNF_ELIST_SIZE, CNF_PLIST_SIZE> IHT;
 
-std::string fromStateValue(state_value value) {
-  if (FALSE_STATE == value) {
-    return std::string("FALSE");
-  } else if (TRUE_STATE == value) {
-    return std::string("TRUE");
-  } else if (REHASH_DELETED == value) {
-    return std::string("REHASH DELETED");
-  } else {
-    return std::string("UNKNOWN - ") + std::to_string(value);
-  }
-}
-
-// Function to run a test case
-void test_output(bool show_passing, HT_Res<int> actual, HT_Res<int> expected,
+// Function to run a test case (will return a success code)
+inline bool test_output(bool show_passing, std::optional<int> actual, std::optional<int> expected,
                  std::string message) {
-  if (actual.status != expected.status && actual.result != expected.result) {
-    ROME_INFO("[-] {} func():({},{}) != expected:({},{})", message,
-              fromStateValue(actual.status), actual.result,
-              fromStateValue(expected.status), expected.result);
+  if (actual.has_value() != expected.has_value() && actual.value_or(0) != expected.value_or(0)) {
+    ROME_INFO("[-] {} func():(Has Value {}=>{}) != expected:(Has Value {}=>{})", message, actual.has_value(), actual.value_or(0),
+              expected.has_value(), expected.value_or(0));
+    return false;
   } else if (show_passing) {
     ROME_INFO("[+] Test Case {} Passed!", message);
   }
+  return true;
 }
 
 // [mfs] This is declared at the wrong scope?
@@ -222,7 +211,7 @@ public:
   // Runs the next operation
   sss::Status Apply(const Operation &op) override {
     count++;
-    HT_Res<int> res = HT_Res<int>(FALSE_STATE, 0);
+    std::optional<int> res;
     switch (op.op_type) {
     case (CONTAINS):
       // [mfs]  I don't understand the purpose of "progression".  Is it just for
@@ -231,25 +220,25 @@ public:
       if (count % progression == 0)
         ROME_INFO("Running Operation {}: contains({})", count, op.key);
       res = iht_->contains(op.key);
-      if (res.status == TRUE_STATE)
-        ROME_ASSERT(res.result == op.key,
-                    "Invalid result of ({}) contains operation {}!={}",
-                    res.status, res.result, op.key);
+      if (res.has_value())
+        ROME_ASSERT(res.value() == op.key,
+                    "Invalid result of contains operation {}!={}",
+                    res.value(), op.key);
       break;
     case (INSERT):
       if (count % progression == 0)
         ROME_INFO("Running Operation {}: insert({}, {})", count, op.key,
                   op.value);
       res = iht_->insert(op.key, op.value);
+      if (res.has_value())
+        ROME_ASSERT(res.value() == op.key, "Invalid result of insert operation {}!={}", res.value(), op.key);
       break;
     case (REMOVE):
       if (count % progression == 0)
         ROME_INFO("Running Operation {}: remove({})", count, op.key);
       res = iht_->remove(op.key);
-      if (res.status == TRUE_STATE)
-        ROME_ASSERT(res.result == op.key,
-                    "Invalid result of ({}) remove operation {}!={}",
-                    res.status, res.result, op.key);
+      if (res.has_value())
+        ROME_ASSERT(res.value() == op.key, "Invalid result of remove operation {}!={}", res.value(), op.key);
       break;
     default:
       ROME_INFO("Expected CONTAINS, INSERT, or REMOVE operation.");

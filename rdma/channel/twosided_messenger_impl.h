@@ -121,10 +121,10 @@ TwoSidedRdmaMessenger<kCapacity, kRecvMaxBytes>::TryDeliverMessage() {
       return {{sss::Aborted, "QP in error state"}, {}};
     case IBV_WC_SUCCESS: {
       // Prepare the response.
-      sss::StatusVal<Message> res = {sss::Status::Ok(), {}};
-      res.val->buffer = std::make_unique<uint8_t[]>(wc.byte_len);
+      // [esl] I was getting an error with the code that was previously here. The optional was throwing a bad_optional_access exception. I think the optional had to be constructed with a value. It might be better to refactor Message to make it moveable and construct in a series of steps instead of one long statement...
+      sss::StatusVal<Message> res = {sss::Status::Ok(), std::make_optional(Message{std::make_unique<uint8_t[]>(wc.byte_len), wc.byte_len})};
       std::memcpy(res.val->buffer.get(), recv_next_, wc.byte_len);
-      res.val->length = wc.byte_len;
+      ROME_TRACE("{} {}", res.val->buffer.get(), res.val->length);
 
       // If the tail reached the end of the receive buffer then all posted
       // wrs have been consumed and we can post new ones.

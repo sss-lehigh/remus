@@ -90,7 +90,7 @@ inline sss::StatusVal<std::string> ibdev2netip(std::string_view ib_dev) {
     const std::regex r("^\\s*inet\\s+((\\d{1,3}\\.){3}\\d{1,3}).*\n$");
     std::smatch m;
     if (str.empty() || !std::regex_match(str, m, r)) {
-      ROME_DEBUG("Match: {}", m[0].str());
+      ROME_TRACE("Match: {}", m[0].str());
       sss::Status err = {sss::NotFound, "No IP address found for netdev: "};
       err << str;
       return {err, {}};

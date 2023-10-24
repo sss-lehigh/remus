@@ -15,6 +15,7 @@
 #include "../util/tcp/tcp.h"
 
 #include "protos/colosseum.pb.h"
+#include "protos/experiment.pb.h"
 
 #include "role_client.h"
 #include "role_server.h"
@@ -24,23 +25,17 @@
 
 auto ARGS = {
     cli::STR_ARG_OPT("--experiment_params", "Experimental parameters", ""),
-    cli::BOOL_ARG_OPT("--send_bulk",
-                      "If to run bulk operations. (More for benchmarking)"),
-    cli::BOOL_ARG_OPT("--send_test",
-                      "If to test the functionality of the methods."),
-    cli::BOOL_ARG_OPT("--send_exp", "If to run an experiment"),
 };
 
 #define PATH_MAX 4096
 #define PORT_NUM 18000
 
-using rome::rdma::ConnectionManager;
 using rome::rdma::MemoryPool;
 using cm_type = MemoryPool::cm_type;
 
 // The optimial number of memory pools is mp=min(t, MAX_QP/n) where n is the number of nodes and t is the number of threads
 // To distribute mp (memory pools) across t threads, it is best for t/mp to be a whole number
-
+// IHT RDMA MINIMAL
 
 int main(int argc, char **argv) {
   ROME_INIT_LOG();
@@ -62,9 +57,6 @@ int main(int argc, char **argv) {
   }
 
   // Extract the args to variables
-  bool bulk_operations = args.bget("--send_bulk");
-  bool test_operations = args.bget("--send_test");
-  bool do_exp = args.bget("--send_exp");
   std::string experiment_parms = args.sget("--experiment_params");
 
   // Use the args to set up the experiment
@@ -102,7 +94,7 @@ int main(int argc, char **argv) {
   for(uint16_t n = 0; n < mp * params.node_count(); n++){
       // Create the ip_peer (really just node name)
       std::string ippeer = "node";
-      std::string node_id = std::to_string((int) floor(n / mp));
+      std::string node_id = std::to_string((int) n / mp);
       ippeer.append(node_id);
       // Create the peer and add it to the list
       MemoryPool::Peer next = MemoryPool::Peer(n, ippeer, PORT_NUM + n + 1);

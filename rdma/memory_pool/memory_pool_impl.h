@@ -361,7 +361,7 @@ void MemoryPool::ReadInternal(remote_ptr<T> ptr, size_t offset, size_t bytes,
 template <typename T>
 void MemoryPool::Write(remote_ptr<T> ptr, const T &val,
                        remote_ptr<T> prealloc) {
-  ROME_DEBUG("Write: {:x} @ {}", (uint64_t)val, ptr);
+  // ROME_TRACE("Write: {:x} @ {}", (uint64_t)sizeof(val), ptr);
   auto info = conn_info_.at(ptr.id());
 
   uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
@@ -370,12 +370,12 @@ void MemoryPool::Write(remote_ptr<T> ptr, const T &val,
   if (prealloc == remote_nullptr) {
     auto alloc = rdma_allocator<T>(rdma_memory_.get());
     local = alloc.allocate();
-    ROME_DEBUG("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
-               (uint64_t)local);
+    // ROME_TRACE("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
+    //           (uint64_t)local);
   } else {
     local = std::to_address(prealloc);
-    ROME_DEBUG("Preallocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
-               (uint64_t)local);
+    // ROME_TRACE("Preallocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
+    //           (uint64_t)local);
   }
 
   ROME_ASSERT((uint64_t)local != ptr.address() || ptr.id() != self_.id, "WTF");
@@ -467,9 +467,9 @@ T MemoryPool::AtomicSwap(remote_ptr<T> ptr, uint64_t swap, uint64_t hint) {
       }
       ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
     }
-    ROME_DEBUG("Swap: expected={:x}, swap={:x}, prev={:x} (id={})",
-               send_wr_.wr.atomic.compare_add, (uint64_t)swap, *prev_,
-               self_.id);
+    // ROME_TRACE("Swap: expected={:x}, swap={:x}, prev={:x} (id={})",
+    //           send_wr_.wr.atomic.compare_add, (uint64_t)swap, *prev_,
+    //           self_.id);
     if (*prev_ == send_wr_.wr.atomic.compare_add)
       break;
     send_wr_.wr.atomic.compare_add = *prev_;
@@ -523,8 +523,7 @@ T MemoryPool::CompareAndSwap(remote_ptr<T> ptr, uint64_t expected,
     ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
   }
 
-  ROME_DEBUG("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}  (id={})",
-             expected, swap, *prev_, static_cast<uint64_t>(self_.id));
+  // ROME_TRACE("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}  (id={})", expected, swap, *prev_, static_cast<uint64_t>(self_.id));
   T ret = T(*prev_);
   alloc.deallocate((uint64_t *)prev_, 8);
   return ret;
