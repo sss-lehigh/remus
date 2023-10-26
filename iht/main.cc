@@ -6,8 +6,9 @@
 #include <vector>
 
 #include "../logging/logging.h"
-// #include "../rdma/memory_pool.h"
 #include "../vendor/sss/cli.h"
+
+#include "../rdma/rdma.h"
 
 #include "role_client.h"
 #include "role_server.h"
@@ -77,8 +78,8 @@ int main(int argc, char **argv) {
   //
   // [mfs]  This is pushing the hard-coded info about the host into the vector.
   //        It should really not be hard-coded.
-  rome::rdma::MemoryPool::Peer host{0, std::string(iphost), portNum};
-  std::vector<rome::rdma::MemoryPool::Peer> peers;
+  rome::rdma::Peer host{0, std::string(iphost), portNum};
+  std::vector<rome::rdma::Peer> peers;
   peers.push_back(host);
 
   // Set values if we are host machine as well
@@ -92,7 +93,7 @@ int main(int argc, char **argv) {
   //
   // [mfs]  If this check really is needed, then consider using
   //        optional<MemoryPool>, to avoid the unnecessary extra variable.
-  rome::rdma::MemoryPool::Peer self;
+  rome::rdma::Peer self;
   bool outside_exp = true;
   if (hostname[4] == '0') {
     self = host;
@@ -111,8 +112,7 @@ int main(int argc, char **argv) {
     std::string node_id = std::to_string(n);
     ippeer.append(node_id);
     // Create the peer and add it to the list
-    rome::rdma::MemoryPool::Peer next{static_cast<uint16_t>(n), ippeer,
-                                      portNum};
+    rome::rdma::Peer next{static_cast<uint16_t>(n), ippeer, portNum};
     peers.push_back(next);
     // Compare after 4th character to node_id
     if (strncmp(hostname + 4, node_id.c_str(), node_id.length()) == 0) {
@@ -142,13 +142,10 @@ int main(int argc, char **argv) {
     ROME_INFO("Peer list {}:{}@{}", i, peers.at(i).id, peers.at(i).address);
   }
 
-  // Make a memory pool for the node to share among all client instances
+  // Initialize our capability for interacting with ROME
   uint32_t block_size = 1 << params.region_size();
-  rome::rdma::MemoryPool pool(
-      self, std::make_unique<rome::rdma::MemoryPool::cm_type>(self.id));
-  auto status_pool = pool.Init(block_size, peers);
-  OK_OR_FAIL(status_pool);
-  ROME_INFO("Created memory pool");
+  rome::rdma::rdma_capability ROME(self);
+  ROME.init_pool(block_size, peers);
 
   // Put an IHT into the memory pool
   //
@@ -157,7 +154,7 @@ int main(int argc, char **argv) {
   //
   // [mfs]  Right now, this is TestMap?  Switch to IHT?  Or define it in this
   //        file...
-  IHT iht = IHT(self, &pool);
+  IHT iht = IHT(self, &ROME);
   auto status_iht = iht.Init(host, peers);
   OK_OR_FAIL(status_iht);
 
@@ -171,7 +168,7 @@ int main(int argc, char **argv) {
     threads.emplace_back(std::thread([&]() {
       // We are the server
       std::unique_ptr<Server> server =
-          Server::Create(host, peers, params, &pool);
+          Server::Create(host, peers, params, &ROME);
       ROME_INFO("Server Created");
       // [mfs] What are these params to Launch?
       auto run_status = server->Launch(&done, params.runtime(),

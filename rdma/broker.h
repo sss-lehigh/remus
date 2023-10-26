@@ -2,173 +2,83 @@
 
 #include <arpa/inet.h>
 #include <atomic>
-#include <coroutine>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <infiniband/verbs.h>
 #include <memory>
 #include <netdb.h>
+#include <optional>
 #include <rdma/rdma_cma.h>
+#include <string>
+#include <vector>
 
 #include "../logging/logging.h"
 #include "../vendor/sss/status.h"
-#include "device.h"
-#include "receiver.h"
 
-namespace util {
+namespace rome::rdma::internal {
 
-// Forward declaration necessary so that `from_promise()` is defined for our
-// coroutine handle. There may be a cleaner way to accomplish this, but this how
-// its done here, https://en.cppreference.com/w/cpp/language/coroutines.
-class Promise;
-
-// For our purposes, the return object of a coroutine is just a wrapper for the
-// `promise_type`. Any coroutine that is used with the scheduler must return a
-// `Task`.
-class Coro : public std::coroutine_handle<Promise> {
-public:
-  using promise_type = Promise;
-  using handler_type = std::coroutine_handle<Promise>;
-};
-
-// The promise object of a coroutine dictates behavior when the coroutine first
-// starts, and when it returns. It also can save some state to be queried later.
-class Promise {
-public:
-  Coro get_return_object() {
-    return {std::coroutine_handle<Promise>::from_promise(*this)};
-  }
-
-  std::suspend_always initial_suspend() { return {}; }
-  std::suspend_always final_suspend() noexcept { return {}; }
-  void unhandled_exception() {
-    std::rethrow_exception(std::current_exception());
-  }
-  void return_void() {}
-};
-
-// The interface for all coroutine schedulers. A scheduler can add new
-// coroutines, start running, and cancel running. So
-//
-// TODO: Make this a concept?
-template <typename PromiseT> class Scheduler {
-public:
-  // Adds a new coroutine to the runner to be run with a given policy.
-  virtual void Schedule(std::coroutine_handle<PromiseT> task) = 0;
-
-  // Starts running the coroutines until `Stop()` is called or some other
-  // temination condition is reached.
-  virtual void Run() = 0;
-
-  // Cancels running the coroutines.
-  virtual void Cancel() = 0;
-};
-
-using Cancellation = std::atomic<bool>;
-
-// [mfs]  If we only use one scheduler, should it be hard-coded (or at least not
-//        virtual dispatch?)
-template <typename PromiseT>
-class RoundRobinScheduler : public Scheduler<PromiseT> {
-  struct CoroWrapper {
-    ~CoroWrapper() { handle.destroy(); }
-    std::coroutine_handle<PromiseT> handle;
-    CoroWrapper *prev;
-    CoroWrapper *next;
-  };
-
-  int task_count_;
-  CoroWrapper *curr_;
-  CoroWrapper *last_;
-  std::atomic<bool> canceled_;
-
-public:
-  ~RoundRobinScheduler() { ROME_TRACE("Task count: {}", task_count_); }
-  RoundRobinScheduler() : task_count_(0), curr_(nullptr), canceled_(false) {}
-
-  // Getters.
-  int task_count() const { return task_count_; }
-
-  // Inserts the given task as the next task to run.
-  void Schedule(std::coroutine_handle<PromiseT> task) override {
-    if (canceled_)
-      return;
-    auto coro = new CoroWrapper{task, nullptr, nullptr};
-    if (curr_ == nullptr) {
-      coro->prev = coro;
-      coro->next = coro;
-      curr_ = coro;
-      last_ = curr_;
-    } else {
-      coro->prev = last_;
-      coro->next = last_->next;
-      last_->next->prev = coro;
-      last_->next = coro;
-      last_ = coro;
-    }
-    ++task_count_;
-  }
-
-  void Run() override {
-    ROME_ASSERT(curr_ != nullptr,
-                "You must schedule at least one task before running");
-    while (curr_ != nullptr) {
-      if (curr_->handle.done()) {
-        if (curr_->next == curr_) {
-          // Only one coroutine was left...
-          --task_count_;
-          delete curr_;
-          last_ = nullptr;
-          std::atomic_thread_fence(std::memory_order_release);
-          curr_ = nullptr;
+/// A broker handles the connection setup using the RDMA CM library. It is
+/// single threaded but communicates with all other brokers in the system to
+/// exchange information regarding the underlying RDMA memory configurations.
+///
+/// TODO: The edits to this (avoid coroutines) are not tested
+///
+/// TODO: This is templated on the CM to break a circular dependence without
+///       resorting to virtual methods.  There's probably a better approach?
+template <class CM> class RdmaBroker {
+  class RdmaDevice {
+    static sss::StatusVal<std::vector<int>>
+    FindActivePorts(ibv_context *context) {
+      // Find the first active port, failing if none exists.
+      ibv_device_attr dev_attr;
+      ibv_query_device(context, &dev_attr);
+      std::vector<int> ports;
+      for (int i = 1; i <= dev_attr.phys_port_cnt; ++i) {
+        ibv_port_attr port_attr;
+        ibv_query_port(context, i, &port_attr);
+        if (port_attr.state != IBV_PORT_ACTIVE) {
           continue;
+        } else {
+          ports.push_back(i);
         }
+      }
 
-        // Unlink `curr_` by setting its predecessor's next to `curr_`'s next.
-        // And setting the successors's prev to `curr_`'s prev. Finally, update
-        // the tail of the list to point to `curr_`'s predecessor.
-        curr_->prev->next = curr_->next;
-        curr_->next->prev = curr_->prev;
-        if (last_ == curr_) {
-          last_ = curr_->prev;
-        }
-
-        // Cleanup the removed `Task` by deleting the `TaskWrapper`, which in
-        // turn takes care of destroying the underlying coroutine handle.
-        auto *temp = curr_;
-        curr_ = curr_->next;
-        --task_count_;
-        delete temp;
+      if (ports.empty()) {
+        return {{sss::Unavailable, "No active ports"}, {}};
       } else {
-        curr_->handle.resume();
-        curr_ = curr_->next;
+        return {sss::Status::Ok(), ports};
       }
     }
-  }
 
-  // Cancels the scheduler and then waits for all currently scheduled tasks to
-  // complete. Coroutines can obtain a pointer to the Cancellation flag using
-  // `Cancellation()` and then check if it has been canceled.
-  void Cancel() override {
-    canceled_ = true;
-    while (curr_ != nullptr)
-      ;
-  }
+  public:
+    // Returns a vector of device name and active port pairs that are accessible
+    // on this machine.
+    static sss::StatusVal<std::vector<std::pair<std::string, int>>>
+    GetAvailableDevices() {
+      int num_devices;
+      auto **device_list = ibv_get_device_list(&num_devices);
+      if (num_devices <= 0) {
+        return {{sss::NotFound, "No devices found"}, {}};
+      }
+      std::vector<std::pair<std::string, int>> active;
+      for (int i = 0; i < num_devices; ++i) {
+        auto *context = ibv_open_device(device_list[i]);
+        if (context) {
+          auto ports_or = FindActivePorts(context);
+          if (ports_or.status.t != sss::Ok)
+            continue;
+          for (auto p : ports_or.val.value()) {
+            active.emplace_back(context->device->name, p);
+          }
+        }
+      }
 
-  const Cancellation &Cancellation() const { return canceled_; }
-};
+      ibv_free_device_list(device_list);
+      return {sss::Status::Ok(), active};
+    }
+  };
 
-} // namespace util
-namespace rome::rdma {
-
-using Scheduler = util::RoundRobinScheduler<util::Promise>;
-
-// A broker handles the connection setup using the RDMA CM library. It is single
-// threaded but communicates with all other brokers in the system to exchange
-// information regarding the underlying RDMA memory configurations.
-//
-// In the future, this could potentially be replaced with a more robust
-// component (e.g., Zookeeper) but for now we stick with a simple approach.
-class RdmaBroker {
   // The working thread that listens and responds to incoming messages.
   struct thread_deleter {
     void operator()(std::thread *thread) {
@@ -196,10 +106,7 @@ class RdmaBroker {
   std::atomic<uint32_t> num_connections_;
 
   // Maintains connections that are forwarded by the broker.
-  RdmaReceiverInterface *receiver_; //! NOT OWNED
-
-  // Runs connection handler coroutine.
-  Scheduler scheduler_;
+  CM *receiver_; //! NOT OWNED
 
 public:
   ~RdmaBroker() {
@@ -213,7 +120,7 @@ public:
   // is returned.
   static std::unique_ptr<RdmaBroker>
   Create(std::optional<std::string_view> address, std::optional<uint16_t> port,
-         RdmaReceiverInterface *receiver) {
+         CM *receiver) {
     auto *broker = new RdmaBroker(receiver);
     auto status = broker->Init(address, port);
     if (status.t == sss::Ok) {
@@ -244,7 +151,7 @@ public:
 private:
   static constexpr int kMaxRetries = 100;
 
-  RdmaBroker(RdmaReceiverInterface *receiver)
+  RdmaBroker(CM *receiver)
       : terminate_(false), status_(sss::Status::Ok()), listen_channel_(nullptr),
         listen_id_(nullptr), num_connections_(0), receiver_(receiver) {}
 
@@ -310,26 +217,27 @@ private:
     return sss::Status::Ok();
   }
 
-  // NB: Coroutine
-  util::Coro HandleConnectionRequests() {
+  void HandleConnectionRequests() {
     rdma_cm_event *event = nullptr;
     int ret;
     while (true) {
       do {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         // If we are shutting down, and there are no connections left then we
         // should finish.
         if (terminate_)
-          co_return;
+          return;
 
         // Attempt to read from `listen_channel_`
         ret = rdma_get_cm_event(listen_channel_, &event);
         if (ret != 0 && errno != EAGAIN) {
           status_ = {sss::InternalError, "rdma_get_cm_event(): "};
           status_ << strerror(errno);
-          co_return;
+          return;
         }
-        co_await std::suspend_always{};
+        std::this_thread::yield(); // TODO: is this right?
+
+        // It was this at top, then an await/suspend here
+        // std::this_thread::sleep_for(std::chrono::milliseconds(10))
       } while ((ret != 0 && errno == EAGAIN));
 
       ROME_DEBUG("({}) Got event: {} (id={})", fmt::ptr(this),
@@ -346,9 +254,8 @@ private:
       case RDMA_CM_EVENT_ESTABLISHED: {
         rdma_cm_id *id = event->id;
         // Now that we've established the connection, we can transition to
-        // using it to communicate with the other node. This is handled in
-        // another coroutine that we can resume every round.
-        receiver_->OnEstablished(id, event);
+        // using it to communicate with the other node
+        rdma_ack_cm_event(event);
 
         num_connections_.fetch_add(1);
         ROME_DEBUG("({}) Num connections: {}", fmt::ptr(this),
@@ -383,13 +290,15 @@ private:
         ROME_FATAL("Not implemented");
       }
 
-      co_await std::suspend_always{}; // Suspend after handling a given message.
+      // TODO: is this right?  It used to be co_await suspend_always
+      std::this_thread::yield();
+      // co_await std::suspend_always{}; // Suspend after handling a given
+      // message.
     }
   }
 
   void Run() {
-    scheduler_.Schedule(HandleConnectionRequests());
-    scheduler_.Run();
+    HandleConnectionRequests();
     ROME_TRACE("Finished: {}",
                (status_.t == sss::Ok) ? "Ok" : status_.message.value());
   }

@@ -49,7 +49,7 @@ Arg STR_ARG_OPT(std::string flag, const char *desc, std::string def_val) {
 ///
 /// @return An Arg for this command-line arg
 Arg STR_ARG(std::string flag, const char *desc) {
-  return {flag, desc, Arg::STR};
+  return {flag, desc, Arg::STR, std::nullopt};
 }
 
 /// @brief  Construct an optional command-line arg that is a bool.  It will
@@ -82,7 +82,7 @@ Arg I64_ARG_OPT(std::string flag, const char *desc, int64_t def_val) {
 ///
 /// @return An Arg for this command-line arg
 Arg I64_ARG(std::string flag, const char *desc) {
-  return {flag, desc, Arg::I64};
+  return {flag, desc, Arg::I64, std::nullopt};
 }
 
 /// @brief  Construct an optional command-line arg of type double
@@ -103,7 +103,7 @@ Arg F64_ARG_OPT(std::string flag, const char *desc, double def_val) {
 ///
 /// @return An Arg for this command-line arg
 Arg F64_ARG(std::string flag, const char *desc) {
-  return {flag, desc, Arg::F64};
+  return {flag, desc, Arg::F64, std::nullopt};
 }
 
 /// @brief A collection of Args, and associated methods for working with them

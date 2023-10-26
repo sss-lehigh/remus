@@ -8,7 +8,6 @@ project(IHT_Rome LANGUAGES CXX VERSION 0.0.0)
 set(LOG_LEVEL "INFO" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
 set(CXX_STANDARD 23 CACHE STRING "Uses C++20 or 23")
 
-
 ### Make sure we have the required packages
 
 find_package(Protobuf REQUIRED)
@@ -60,5 +59,7 @@ add_executable(iht_rome iht/main.cc)
 target_include_directories(iht_rome PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
 # NB: -D flag for ROME_LOG_LEVEL
 target_compile_definitions(iht_rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
+# Use this to turn on warnings during compilation
+# target_compile_options(iht_rome PUBLIC -Wall -Wextra -Werror)
 # NB: `protos` is a library we make by recursing into the `protos` subfolder
 target_link_libraries(iht_rome PUBLIC protos rdma::ibverbs rdma::cm)

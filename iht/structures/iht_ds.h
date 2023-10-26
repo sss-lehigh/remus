@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../rdma/memory_pool.h"
+#include "../../rdma/rdma.h"
 #include "../common.h"
 
 using rome::rdma::remote_nullptr;
@@ -9,7 +9,7 @@ using rome::rdma::RemoteObjectProto;
 
 template <class K, class V, int ELIST_SIZE, int PLIST_SIZE> class RdmaIHT {
 private:
-  rome::rdma::MemoryPool::Peer self_;
+  rome::rdma::Peer self_;
 
   // "Poor-mans" enum to represent the state of a node. P-lists cannot be locked
   // E_LOCKED = 1, E_UNLOCKED = 2, P_UNLOCKED = 3
@@ -197,11 +197,9 @@ private:
 public:
   // [mfs]  Why is this a field?  Shouldn't it be a capability that gets passed
   //        in by the calling thread on each operation?
-  rome::rdma::MemoryPool *pool_;
+  rome::rdma::rdma_capability *pool_;
 
-  using conn_type = rome::rdma::MemoryPool::conn_type;
-
-  RdmaIHT(rome::rdma::MemoryPool::Peer self, rome::rdma::MemoryPool *pool)
+  RdmaIHT(rome::rdma::Peer self, rome::rdma::rdma_capability *pool)
       : self_(self), pool_(pool) {
     if ((PLIST_SIZE * 8) % 64 != 0)
       ROME_INFO("Warning: Suboptimal PLIST_SIZE b/c PList needs to be aligned "
@@ -220,10 +218,14 @@ public:
   // [mfs]  This "replace the innards" approach isn't really the right way to do
   //        this... it saves one RDMA access per operation, but I don't think
   //        it's trustable, and we could always just cache it.
-  sss::Status Init(rome::rdma::MemoryPool::Peer host,
-                   const std::vector<rome::rdma::MemoryPool::Peer> &peers) {
+  sss::Status Init(rome::rdma::Peer host,
+                   const std::vector<rome::rdma::Peer> &peers) {
     bool is_host_ = self_.id == host.id;
 
+    // [mfs]  In addition to me not liking this code, I think the encapsulation
+    //        needs to change.  The pool should expose rpc_send and rpc_recv
+    //        methods, so that we don't have to expose connections, channels,
+    //        etc.
     if (is_host_) {
       // Host machine, it is my responsibility to initiate configuration
       RemoteObjectProto proto;
@@ -234,13 +236,13 @@ public:
       proto.set_raddr(iht_root.address());
 
       // Iterate through peers
-      for (auto p = peers.begin(); p != peers.end(); p++) {
+      for (const auto &p : peers) {
         // Ignore sending pointer to myself
-        if (p->id == self_.id)
+        if (p.id == self_.id)
           continue;
 
         // Form a connection with the machine
-        auto conn_or = pool_->connection_manager()->GetConnection(p->id);
+        auto conn_or = pool_->GetConnection(p);
         RETURN_STATUSVAL_ON_ERROR(conn_or);
 
         // Send the proto over
@@ -249,7 +251,7 @@ public:
       }
     } else {
       // Listen for a connection
-      auto conn_or = pool_->connection_manager()->GetConnection(host.id);
+      auto conn_or = pool_->GetConnection(host);
       RETURN_STATUSVAL_ON_ERROR(conn_or);
 
       // Try to get the data from the machine, repeatedly trying until
@@ -258,12 +260,7 @@ public:
       // [mfs]  Since the connection is shared, I need to get a better
       //        understanding on how this data gets into a buffer that is
       //        allocated and owned by the current thread.
-      auto got =
-          conn_or.val.value()->channel()->TryDeliver<RemoteObjectProto>();
-      // TODO: use blocking Deliver()?
-      while (got.status.t == sss::Unavailable) {
-        got = conn_or.val.value()->channel()->TryDeliver<RemoteObjectProto>();
-      }
+      auto got = conn_or.val.value()->channel()->Deliver<RemoteObjectProto>();
       RETURN_STATUSVAL_ON_ERROR(got);
 
       // From there, decode the data into a value

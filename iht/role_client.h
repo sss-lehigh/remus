@@ -6,7 +6,7 @@
 
 #include "../colosseum/workload_driver.h"
 #include "../logging/logging.h"
-#include "../rdma/memory_pool.h"
+#include "../rdma/rdma.h"
 
 #include "common.h"
 
@@ -48,11 +48,9 @@ public:
   // [mfs]  Here and in Server, I don't understand the factory pattern.  It's
   //        not really adding any value.
   static std::unique_ptr<Client>
-  Create(const rome::rdma::MemoryPool::Peer &self,
-         const rome::rdma::MemoryPool::Peer &server,
-         const std::vector<rome::rdma::MemoryPool::Peer> &peers,
-         ExperimentParams &params, std::barrier<> *barrier, IHT *iht,
-         bool master_client) {
+  Create(const rome::rdma::Peer &self, const rome::rdma::Peer &server,
+         const std::vector<rome::rdma::Peer> &peers, ExperimentParams &params,
+         std::barrier<> *barrier, IHT *iht, bool master_client) {
     return std::unique_ptr<Client>(
         new Client(self, server, peers, params, barrier, iht, master_client));
   }
@@ -326,6 +324,10 @@ public:
 
   // A function for communicating with the server that we are done. Will wait
   // until server says it is ok to shut down
+  //
+  // [mfs]  This is really just trying to create a Barrier over RPC.  There's
+  //        nothing wrong with that, in principle, but if all we really need is
+  //        a barrier, then why not just make a barrier?
   sss::Status Stop() {
     ROME_INFO("CLIENT :: Stopping client...");
     if (!master_client_) {
@@ -341,7 +343,7 @@ public:
     if (host_.id == self_.id)
       return sss::Status::Ok(); // if we are the host, we don't need to do the
                                 // stop sequence
-    auto conn = iht_->pool_->connection_manager()->GetConnection(host_.id);
+    auto conn = iht_->pool_->GetConnection(host_);
     if (conn.status.t != sss::Ok) {
       return {sss::InternalError, "Failed to retrieve server connection"};
     }
@@ -354,11 +356,8 @@ public:
     // done.
     //
     // [mfs] Why not use a blocking send?
-    auto msg = conn.val.value()->channel()->TryDeliver<AckProto>();
-    while ((msg.status.t != sss::Ok && msg.status.t == sss::Unavailable)) {
-      msg = conn.val.value()->channel()->TryDeliver<AckProto>();
-    }
-    // [mfs] Not a helpful message...
+    auto msg = conn.val.value()->channel()->Deliver<AckProto>();
+    // [mfs] The ACK might not be sss::Ok... is that acceptable?
     ROME_INFO("CLIENT :: Received Ack");
 
     // Return ok status
@@ -368,11 +367,9 @@ public:
 private:
   // [mfs]  This all needs to be documented
 
-  Client(const rome::rdma::MemoryPool::Peer &self,
-         const rome::rdma::MemoryPool::Peer &host,
-         const std::vector<rome::rdma::MemoryPool::Peer> &peers,
-         ExperimentParams &params, std::barrier<> *barrier, IHT *iht,
-         bool master_client)
+  Client(const rome::rdma::Peer &self, const rome::rdma::Peer &host,
+         const std::vector<rome::rdma::Peer> &peers, ExperimentParams &params,
+         std::barrier<> *barrier, IHT *iht, bool master_client)
       : self_(self), host_(host), peers_(peers), params_(params),
         barrier_(barrier), iht_(iht), master_client_(master_client) {
     if (params.unlimited_stream())
@@ -383,9 +380,9 @@ private:
 
   int count = 0;
 
-  const rome::rdma::MemoryPool::Peer self_;
-  const rome::rdma::MemoryPool::Peer host_;
-  std::vector<rome::rdma::MemoryPool::Peer> peers_;
+  const rome::rdma::Peer self_;
+  const rome::rdma::Peer host_;
+  std::vector<rome::rdma::Peer> peers_;
   const ExperimentParams params_;
   std::barrier<> *barrier_;
   IHT *iht_;

@@ -84,8 +84,8 @@ private:
     void OnInsert(NodeType *curr) override { Visit(curr); }
     void OnRemove(NodeType *curr) override { Visit(curr); }
     void OnUpdate(NodeType *curr) override { Visit(curr); }
-    void Update(NodeType *curr, const typename NodeType::value_type &value,
-                const typename NodeType::metadata_type &metadata) override {
+    void Update(NodeType *curr, const typename NodeType::value_type &,
+                const typename NodeType::metadata_type &) override {
       curr->set_value(curr->value() + 1);
       Visit(curr);
     }

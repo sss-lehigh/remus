@@ -4,7 +4,7 @@
 #include <protos/experiment.pb.h>
 #include <vector>
 
-#include "../rdma/memory_pool.h"
+#include "../rdma/rdma.h"
 
 // [mfs]  This needs documentation.  It looks like it is more of an "experiment
 //        manager" than a "server", but I'm not seeing how it manages remote
@@ -14,24 +14,25 @@ class Server {
 public:
   ~Server() = default;
 
-  static std::unique_ptr<Server>
-  Create(rome::rdma::MemoryPool::Peer server,
-         std::vector<rome::rdma::MemoryPool::Peer> clients,
-         ExperimentParams params, rome::rdma::MemoryPool *pool) {
+  static std::unique_ptr<Server> Create(rome::rdma::Peer server,
+                                        std::vector<rome::rdma::Peer> clients,
+                                        ExperimentParams params,
+                                        rome::rdma::rdma_capability *pool) {
     return std::unique_ptr<Server>(new Server(server, clients, params, pool));
   }
 
   /// @brief Start the server
-  /// @param pool the memory pool to use
-  /// @param done a bool for inter-thread communication
-  /// @param runtime_s how long to wait before listening for finishing messages
+  ///
+  /// @param done       a bool for inter-thread communication
+  /// @param runtime_s  how long to wait before listening for finishing messages
+  /// @param cleanup    [mfs] ???
+  ///
   /// @return the status
-  //
-  // [mfs]  The documentation is stale.  No pool?
   sss::Status Launch(volatile bool *done, int runtime_s,
                      std::function<void()> cleanup) {
     // Sleep while clients are running if there is a set runtime.
     if (runtime_s > 0) {
+      // [mfs] We should always worry if there are explicit sleeps...
       ROME_INFO("SERVER :: Sleeping for {}", runtime_s);
 
       for (int it = 0; it < runtime_s * 10; it++) {
@@ -64,6 +65,11 @@ public:
       cleanup();
     }
 
+    // [mfs]  As in role_client, it seems that exposing pool_->GetConnection()
+    //        is just to let the application implement a barrier using RPC.  If
+    //        that's the case, why not just have a real barrier using one-sided
+    //        primitives?
+
     // Wait for all the other nodes to send a message
     //
     // [mfs] This is remote clients, not local clients
@@ -72,7 +78,7 @@ public:
         continue; // ignore self since joining threads will force client and
                   // server to end at the same time
       ROME_INFO("SERVER :: receiving ack from {}", p.id);
-      auto conn_or = pool_->connection_manager()->GetConnection(p.id);
+      auto conn_or = pool_->GetConnection(p);
       // [mfs] If this exits early, do other things ever get cleaned up?
       RETURN_STATUSVAL_ON_ERROR(conn_or);
 
@@ -81,10 +87,7 @@ public:
       //
       // [mfs]  Since this is blocking, why not use Deliver instead of
       //        TryDeliver?
-      auto msg = conn->channel()->TryDeliver<AckProto>();
-      while ((msg.status.t != sss::Ok && msg.status.t == sss::Unavailable)) {
-        msg = conn->channel()->TryDeliver<AckProto>();
-      }
+      auto msg = conn->channel()->Deliver<AckProto>();
       // [mfs] The ACK might not be sss::Ok... is that acceptable?
       ROME_INFO("SERVER :: received ack");
     }
@@ -95,7 +98,7 @@ public:
         continue; // ignore self since joining threads will force client and
                   // server to end at the same time
       ROME_INFO("SERVER :: sending ack to {}", p.id);
-      auto conn_or = pool_->connection_manager()->GetConnection(p.id);
+      auto conn_or = pool_->GetConnection(p);
       // [mfs] If this exits early, do other things ever get cleaned up?
       RETURN_STATUSVAL_ON_ERROR(conn_or);
       auto *conn = conn_or.val.value();
@@ -119,14 +122,14 @@ public:
 
 private:
   // [mfs] This all needs documentation
-
-  Server(rome::rdma::MemoryPool::Peer self,
-         std::vector<rome::rdma::MemoryPool::Peer> peers,
-         ExperimentParams params, rome::rdma::MemoryPool *pool)
+  //
+  // [mfs] Why a factory pattern here?
+  Server(rome::rdma::Peer self, std::vector<rome::rdma::Peer> peers,
+         ExperimentParams params, rome::rdma::rdma_capability *pool)
       : self_(self), peers_(peers), params_(params), pool_(pool) {}
 
-  const rome::rdma::MemoryPool::Peer self_;
-  std::vector<rome::rdma::MemoryPool::Peer> peers_;
+  const rome::rdma::Peer self_;
+  std::vector<rome::rdma::Peer> peers_;
   const ExperimentParams params_;
-  rome::rdma::MemoryPool *pool_;
+  rome::rdma::rdma_capability *pool_;
 };
