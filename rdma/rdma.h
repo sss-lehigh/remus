@@ -23,6 +23,10 @@ public:
                        new internal::ConnectionManager((self.id)))) {}
 
   // TODO: Why can't we merge this into the constructor?
+  //
+  // [mfs]  Let's be more ambitious... now that the surface is smaller, can we
+  //        completely decouple the broker, the pool, and the connection
+  //        manager?  We could move logic from pool.Init into this method...
   void init_pool(uint32_t block_size, std::vector<Peer> &peers) {
     auto status_pool = pool.Init(block_size, peers);
     OK_OR_FAIL(status_pool);
@@ -61,16 +65,29 @@ public:
     return pool.Read(ptr, prealloc);
   }
 
-  /// [mfs] Why do we need to return connections?  Seems broken!
-  ///
-  /// [mfs] It looks like GetConnection is being used as a pathway into doing
-  ///       RPCs for synchronous communication.  We should replace it with
-  ///       explicit "blocking send to" and "blocking receive from" methods.
-  ///
-  /// [mfs] Note that right now, rome only allows synchronous RPC of protobufs.
-  ///       Long-term, that's kind of silly, but for now, we can live with it.
-  sss::StatusVal<internal::Connection *> GetConnection(const Peer &host) {
-    return pool.connection_manager()->GetConnection(host.id);
+  template <class T> sss::Status Send(const Peer &to, T &proto) {
+    // Form a connection with the machine
+    auto conn_or = pool.connection_manager()->GetConnection(to.id);
+    RETURN_STATUSVAL_ON_ERROR(conn_or);
+
+    // Send the proto over
+    return conn_or.val.value()->channel()->Send(proto);
+  }
+
+  template <class T> sss::StatusVal<T> Recv(const Peer &from) {
+    // Listen for a connection
+    auto conn_or = pool.connection_manager()->GetConnection(from.id);
+    if (conn_or.status.t != sss::Ok)
+      return {conn_or.status, {}};
+
+    // Try to get the data from the machine, repeatedly trying until
+    // successful
+    //
+    // [mfs]  Since the connection is shared, I need to get a better
+    //        understanding on how this data gets into a buffer that is
+    //        allocated and owned by the current thread.
+    auto got = conn_or.val.value()->channel()->Deliver<T>();
+    return got;
   }
 };
 } // namespace rome::rdma

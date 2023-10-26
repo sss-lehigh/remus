@@ -78,16 +78,7 @@ public:
         continue; // ignore self since joining threads will force client and
                   // server to end at the same time
       ROME_INFO("SERVER :: receiving ack from {}", p.id);
-      auto conn_or = pool_->GetConnection(p);
-      // [mfs] If this exits early, do other things ever get cleaned up?
-      RETURN_STATUSVAL_ON_ERROR(conn_or);
-
-      auto *conn = conn_or.val.value();
-      // [mfs]  This is confusing.  Does "Deliver" mean "Receive?"
-      //
-      // [mfs]  Since this is blocking, why not use Deliver instead of
-      //        TryDeliver?
-      auto msg = conn->channel()->Deliver<AckProto>();
+      auto msg = pool_->Recv<AckProto>(p);
       // [mfs] The ACK might not be sss::Ok... is that acceptable?
       ROME_INFO("SERVER :: received ack");
     }
@@ -98,17 +89,14 @@ public:
         continue; // ignore self since joining threads will force client and
                   // server to end at the same time
       ROME_INFO("SERVER :: sending ack to {}", p.id);
-      auto conn_or = pool_->GetConnection(p);
-      // [mfs] If this exits early, do other things ever get cleaned up?
-      RETURN_STATUSVAL_ON_ERROR(conn_or);
-      auto *conn = conn_or.val.value();
-      AckProto e;
       // Send back an ack proto let the client know that all the other clients
       // are done
       //
       // [mfs]  The AckProto is empty... we could get by with something simpler,
       //        like an int, to reduce the dependence on protobufs.
-      auto sent = conn->channel()->Send(e);
+      AckProto e;
+      auto sent = pool_->Send(p, e);
+      RETURN_STATUS_ON_ERROR(sent);
       ROME_INFO("SERVER :: sent ack");
     }
 

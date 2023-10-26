@@ -241,28 +241,12 @@ public:
         if (p.id == self_.id)
           continue;
 
-        // Form a connection with the machine
-        auto conn_or = pool_->GetConnection(p);
-        RETURN_STATUSVAL_ON_ERROR(conn_or);
-
-        // Send the proto over
-        auto status = conn_or.val.value()->channel()->Send(proto);
+        auto status = pool_->Send(p, proto);
         RETURN_STATUS_ON_ERROR(status);
       }
     } else {
-      // Listen for a connection
-      auto conn_or = pool_->GetConnection(host);
-      RETURN_STATUSVAL_ON_ERROR(conn_or);
-
-      // Try to get the data from the machine, repeatedly trying until
-      // successful
-      //
-      // [mfs]  Since the connection is shared, I need to get a better
-      //        understanding on how this data gets into a buffer that is
-      //        allocated and owned by the current thread.
-      auto got = conn_or.val.value()->channel()->Deliver<RemoteObjectProto>();
+      auto got = pool_->Recv<RemoteObjectProto>(host);
       RETURN_STATUSVAL_ON_ERROR(got);
-
       // From there, decode the data into a value
       remote_plist iht_root =
           decltype(iht_root)(host.id, got.val.value().raddr());

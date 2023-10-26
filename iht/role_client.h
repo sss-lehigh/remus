@@ -343,20 +343,14 @@ public:
     if (host_.id == self_.id)
       return sss::Status::Ok(); // if we are the host, we don't need to do the
                                 // stop sequence
-    auto conn = iht_->pool_->GetConnection(host_);
-    if (conn.status.t != sss::Ok) {
-      return {sss::InternalError, "Failed to retrieve server connection"};
-    }
     // send the ack to let the server know that we are done
     AckProto e;
-    auto sent = conn.val.value()->channel()->Send(e);
+    auto sent = iht_->pool_->Send(host_, e);
     ROME_INFO("CLIENT :: Sent Ack");
 
     // Wait to receive an ack back. Letting us know that the other clients are
     // done.
-    //
-    // [mfs] Why not use a blocking send?
-    auto msg = conn.val.value()->channel()->Deliver<AckProto>();
+    auto msg = iht_->pool_->Recv<AckProto>(host_);
     // [mfs] The ACK might not be sss::Ok... is that acceptable?
     ROME_INFO("CLIENT :: Received Ack");
 
