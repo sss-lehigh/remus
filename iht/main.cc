@@ -19,7 +19,6 @@
 
 #include "role_client.h"
 #include "role_server.h"
-#include "context_manager.h"
 
 #include "../vendor/sss/cli.h"
 
@@ -108,14 +107,14 @@ int main(int argc, char **argv) {
   MemoryPool::Peer host = peers.at(0);
   // Initialize memory pools into an array
   std::vector<std::thread> mempool_threads;
-  MemoryPool* pools[mp];
+  std::shared_ptr<MemoryPool> pools[mp];
   // Create multiple memory pools to be shared (have to use threads since Init is blocking)
   uint32_t block_size = 1 << params.region_size();
   for(int i = 0; i < mp; i++){
       mempool_threads.emplace_back(std::thread([&](int mp_index, int self_index){
           MemoryPool::Peer self = peers.at(self_index);
           ROME_INFO(mp != params.thread_count() ? "Is shared" : "Is not shared");
-          MemoryPool* pool = new MemoryPool(self, std::make_unique<MemoryPool::cm_type>(self.id), mp != params.thread_count());
+          std::shared_ptr<MemoryPool> pool = std::make_shared<MemoryPool>(self, std::make_unique<MemoryPool::cm_type>(self.id), mp != params.thread_count());
           sss::Status status_pool = pool->Init(block_size, peers);
           OK_OR_FAIL(status_pool);
           pools[mp_index] = pool;
@@ -125,12 +124,6 @@ int main(int argc, char **argv) {
   for(int i = 0; i < mp; i++){
       mempool_threads[i].join();
   }
-  // Assign a context to free the memory allocated by the new memorypool calls
-  ContextManger manager = ContextManger([&](){
-      for(int i = 0; i < mp; i++){
-          delete pools[i];
-      }
-  });
 
   // Create a list of client and server  threads
   std::vector<std::thread> threads;
@@ -145,8 +138,8 @@ int main(int argc, char **argv) {
               socket_handle.accept_conn();
           }
           // Create a root ptr to the IHT
-          IHT iht = IHT(host, pools[0]);
-          remote_ptr<anon_ptr> root_ptr = iht.InitAsFirst();
+          IHT iht = IHT(host);
+          remote_ptr<anon_ptr> root_ptr = iht.InitAsFirst(pools[0]);
           // Send the root pointer over
           tcp::message ptr_message = tcp::message(root_ptr.raw());
           socket_handle.send_to_all(&ptr_message);
@@ -173,19 +166,20 @@ int main(int argc, char **argv) {
   //        a sufficient barrier.  A tree barrier is needed, to coordinate
   //        across nodes.
   // [esl]  Is this something that would need to be implemented using rome?
-  // I'm not exactly sure what the implementation of an RDMA barrier would look like. If you have one in mind, lmk and I can start working on it.
+  //        I'm not exactly sure what the implementation of an RDMA barrier would look like. If you have one in mind, lmk and I can start working on it.
   std::barrier client_sync = std::barrier(params.thread_count());
   // [mfs]  This seems like a misuse of protobufs: why would the local threads
   //        communicate via protobufs?
-  // [esl]  TODO: In the refactoring of the client adaptor, remove dependency on protobufs for a workload object
+  // [esl]  Protobufs were a pain to code with. I think the ClientAdaptor returns a protobuf and I never understood why it didn't just return an object. 
+  // TODO:  In the refactoring of the client adaptor, remove dependency on protobufs for a workload object
   WorkloadDriverProto results[params.thread_count()];
   for(int i = 0; i < params.thread_count(); i++){
       threads.emplace_back(std::thread([&](int thread_index){
           int mempool_index = thread_index % mp;
-          MemoryPool* pool = pools[mempool_index];
+          std::shared_ptr<MemoryPool> pool = pools[mempool_index];
           MemoryPool::Peer self = peers.at((params.node_id() * mp) + mempool_index);
-          IHT iht = IHT(self, pool);
-          // sleep for a short while to ensure the receiving end is up and running
+          IHT iht = IHT(self);
+          // sleep for a short while to ensure the receiving end (SocketManager) is up and running
           // NB: We have no way to ensure the server is running before connecting to it
           // In the future, having some kind of remote_barrier data structure would be much better
           std::this_thread::sleep_for(std::chrono::milliseconds(10)); 
@@ -196,15 +190,15 @@ int main(int argc, char **argv) {
           
           ROME_DEBUG("Creating client");
           // Create and run a client in a thread
-          // [mfs]  I would have thought that the `done` flag would be set by
-          // the main thread, as a way to tell all clients to stop?
-          std::unique_ptr<Client> client = Client::Create(host, endpoint_managers[thread_index], params, &client_sync, &iht);
+          std::unique_ptr<Client> client = Client::Create(host, endpoint_managers[thread_index], params, &client_sync, &iht, pool);
           sss::StatusVal<WorkloadDriverProto> output = Client::Run(std::move(client), 
                                                                    thread_index, 
                                                                    0.5 / (double) (params.node_count() * params.thread_count()));
           // [mfs]  It would be good to document how a client can fail, because
           // it seems like if even one client fails, on any machine, the
           //  whole experiment should be invalidated.
+          // [esl] I agree. A strange thing though: I think the output of Client::Run is always OK. 
+          //       Any errors just crash the script, which lead to no results being generated?
           if (output.status.t == sss::StatusType::Ok && output.val.has_value()){
               results[thread_index] = output.val.value();
           } else {
@@ -225,6 +219,8 @@ int main(int argc, char **argv) {
   // [mfs]  Again, odd use of protobufs for relatively straightforward combining
   //        of results.  Or am I missing something, and each node is sending its
   //        results, so they are all accumulated at the main node?
+  // [esl]  Each node will create a result proto, combining the results of each thread, and save it. 
+  //        Then the launch script scp these files, getting one results file per node. The graphing script will combine the results of these files.
   ResultProto result_proto = ResultProto();
   *result_proto.mutable_params() = params;
   for (int i = 0; i < params.thread_count(); i++) {
@@ -234,9 +230,9 @@ int main(int argc, char **argv) {
     r->MergeFromString(output);
   }
 
-  // [mfs]  Does this produce one file per node?
+  // [mfs] Does this produce one file per node?
   // [esl] Yes, this produces one file per node, 
-  // The launch.py script will scp this file and use the protobuf to interpret it
+  //       The launch.py script will scp this file and use the protobuf to interpret it
   // TODO: Replace this file out for a simple CSV --> much easier to parse on the developer side and a lot more code friendly
   ROME_DEBUG("Compiled Proto Results ### {}", result_proto.DebugString());
   std::ofstream filestream("iht_result.pbtxt");

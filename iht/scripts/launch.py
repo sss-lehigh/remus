@@ -32,7 +32,6 @@ flags.DEFINE_enum('log_level', 'info', ['info', 'debug', 'trace'], 'The level of
 
 # Experiment parameters
 flags.DEFINE_string('from_param_config', required=False, default=None, help="If to override the parameters with a config file.")
-flags.DEFINE_integer('think_time', required=False, default=0, help="How long to wait in between operations (in nano seconds)")
 flags.DEFINE_integer('qps_sample_rate', required=False, default=10, help="The QP sampling rate")
 flags.DEFINE_integer('max_qps_second', required=False, default=-1, help="The max qps per second. Leaving -1 will be infinite")
 flags.DEFINE_integer('runtime', required=False, default=10, help="How long to run the experiment before cutting off")
@@ -101,11 +100,11 @@ def process_exp_flags(node_id):
             # Load the json into the proto
             json_data = f.read()
             mapper = json.loads(json_data)
-            one_to_ones = ["think_time", "qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "contains", "insert", "remove", "key_lb", "key_ub", "region_size", "thread_count", "node_count", "qp_max"]
+            one_to_ones = ["qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "contains", "insert", "remove", "key_lb", "key_ub", "region_size", "thread_count", "node_count", "qp_max"]
             for param in one_to_ones:
                 exec(f"params.{param} = mapper['{param}']")
     elif not FLAGS.default:
-        one_to_ones = ["think_time", "qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "region_size", "thread_count", "node_count", "qp_max"]
+        one_to_ones = ["qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "region_size", "thread_count", "node_count", "qp_max"]
         for param in one_to_ones:
             exec(f"params.{param} = FLAGS.{param}")
         contains, insert, remove = FLAGS.op_distribution.split("-")
@@ -140,14 +139,14 @@ def main(args):
             # Construct ssh command and payload
             ssh_login = f"ssh -i {FLAGS.ssh_keyfile} {FLAGS.ssh_user}@{nodealias}.{domain_name(nodetype)}"
             bazel_path = f"/users/{FLAGS.ssh_user}/go/bin/bazelisk"
-            payload = f"cd {FLAGS.bin_dir} && cmake . && make && LD_LIBRARY_PATH=.:./protos ./iht/iht"
+            payload = f"cd {FLAGS.bin_dir} && cmake . && make && LD_LIBRARY_PATH=.:./protos ./iht/"
             # Adding run-type
             if FLAGS.send_test:
-                payload += " --send_test"
+                payload += "iht_test --send_test"
             elif FLAGS.send_bulk:
-                payload += " --send_bulk"
+                payload += "iht_test --send_bulk"
             elif FLAGS.send_exp:
-                payload += " --send_exp"
+                payload += "iht"
             else:
                 print("Must specify whether testing methods '--send_test', doing bulk operations '--send_bulk', or sending experiment '--send_exp'")
                 exit(1)
@@ -156,8 +155,7 @@ def main(args):
             # Tuple: (Creating Command | Output File Name)
             commands.append((' '.join([ssh_login, quote(payload)]), nodename))
             if FLAGS.send_exp:
-                bridge = 'bazel-out/k8-fastbuild/bin/main.runfiles/rdma_iht'
-                filepath = os.path.join(f"/users/{FLAGS.ssh_user}", FLAGS.bin_dir, bridge, FLAGS.exp_result)
+                filepath = os.path.join(f"/users/{FLAGS.ssh_user}", FLAGS.bin_dir, FLAGS.exp_result)
                 local_dir = os.path.join("./results", FLAGS.experiment_name + "-stats", nodename + "-" + FLAGS.exp_result)
                 copy = f"scp {ssh_login[4:]}:{filepath} {local_dir}"
                 commands_copy.append((copy, nodename))

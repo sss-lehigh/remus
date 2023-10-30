@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <optional>
+#include <random>
 
 #include "../colosseum/client_adaptor.h"
 #include "../colosseum/qps_controller.h"
@@ -22,13 +23,13 @@ using ::rome::ClientAdaptor;
 using ::rome::WorkloadDriver;
 using ::rome::WorkloadDriverProto;
 using ::rome::rdma::MemoryPool;
+using namespace std;
 
 // [mfs] This should really be defined somewhere else
 typedef RdmaIHT<int, int, CNF_ELIST_SIZE, CNF_PLIST_SIZE> IHT;
 
 // Function to run a test case (will return a success code)
-inline bool test_output(bool show_passing, std::optional<int> actual, std::optional<int> expected,
-                 std::string message) {
+inline bool test_output(bool show_passing, optional<int> actual, optional<int> expected, string message) {
   if (actual.has_value() != expected.has_value() && actual.value_or(0) != expected.value_or(0)) {
     ROME_INFO("[-] {} func():(Has Value {}=>{}) != expected:(Has Value {}=>{})", message, actual.has_value(), actual.value_or(0),
               expected.has_value(), expected.value_or(0));
@@ -39,16 +40,13 @@ inline bool test_output(bool show_passing, std::optional<int> actual, std::optio
   return true;
 }
 
-// [mfs] This is declared at the wrong scope?
-typedef IHT_Op<int, int> Operation;
-
-class Client : public ClientAdaptor<Operation> {
+class Client : public ClientAdaptor<IHT_Op<int, int>> {
+  typedef IHT_Op<int, int> Operation;
 public:
   // [mfs]  Here and in Server, I don't understand the factory pattern.  It's
   //        not really adding any value.
-  // [esl]  To be honest, it was mainly a monkey-see monkey-do situation
-  //        I felt like since the Client inherited from the ClientAdaptor, 
-  //        I had to follow the pattern I saw in other examples.
+  // [esl]  I think Jacob was trying to force the users of Client to make a unique_ptr? 
+  //        It was the pattern I observed, so it felt safer to just follow it haha
   /// @brief Force the creation of a unique ptr to a client instance
   /// @param server the "server"-peer that is responsible for coordination among clients
   /// @param endpoint a EndpointManager instance that can be owned by the client. TODO: replace for unique ptr?
@@ -56,9 +54,9 @@ public:
   /// @param barrier a barrier to synchonize local clients
   /// @param iht a pointer to an IHT
   /// @return a unique ptr
-  static std::unique_ptr<Client>
-  Create(const MemoryPool::Peer &server, tcp::EndpointManager &endpoint, ExperimentParams& params, std::barrier<> *barrier, IHT* iht) {
-    return std::unique_ptr<Client>(new Client(server, endpoint, params, barrier, iht));
+  static unique_ptr<Client>
+  Create(const MemoryPool::Peer &server, tcp::EndpointManager &endpoint, ExperimentParams& params, barrier<> *barrier, IHT* iht, shared_ptr<MemoryPool> pool) {
+    return unique_ptr<Client>(new Client(server, endpoint, params, barrier, iht, pool));
   }
 
   /// @brief Run the client
@@ -68,19 +66,18 @@ public:
   /// population
   /// @return the resultproto
   static sss::StatusVal<WorkloadDriverProto>
-  Run(std::unique_ptr<Client> client, int thread_id, double frac) {
+  Run(unique_ptr<Client> client, int thread_id, double frac) {
     // [mfs]  I was hopeful that this code was going to actually populate the
     //        data structure from *multiple nodes* simultaneously.  It should,
     //        or else all of the initial elists and plists are going to be on
     //        the same machine, which probably means all of the elists and
     //        plists will always be on the same machine.
-    //
-    // [mfs]  This should be in another function
+    // [esl]  A remote barrier is defintely needed to make sure this all happens at the same time...
     int key_lb = client->params_.key_lb(), key_ub = client->params_.key_ub();
     int op_count = (key_ub - key_lb) * frac;
     ROME_INFO("CLIENT :: Data structure ({}%) is being populated ({} items inserted) by this client", frac * 100, op_count);
-    client->iht_->pool_->RegisterThread();
-    client->iht_->populate(op_count, key_lb, key_ub, [=](int key){ return key; });
+    client->pool_->RegisterThread();
+    client->iht_->populate(client->pool_, op_count, key_lb, key_ub, [=](int key){ return key; });
     ROME_DEBUG("CLIENT :: Done with populate!");
     // TODO: Sleeping for 1 second to account for difference between remote
     // client start times. Must fix this in the future to a better solution
@@ -89,20 +86,19 @@ public:
     //
     // [mfs] Indeed, this indicates the need for a distributed barrier
     // [esl] I'm not sure what the design for a distributed barrier over RDMA would look like
-    // But I would be interested in creating one so everyone can use it
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    //       But I would be interested in creating one so everyone can use it.
+    this_thread::sleep_for(chrono::seconds(1));
     
-
     // TODO: Signal Handler
     // signal(SIGINT, signal_handler);
 
     // Setup qps_controller.
-    std::unique_ptr<rome::LeakyTokenBucketQpsController<util::SystemClock>>
+    unique_ptr<rome::LeakyTokenBucketQpsController<util::SystemClock>>
         qps_controller =
             rome::LeakyTokenBucketQpsController<util::SystemClock>::Create(
                 client->params_.max_qps_second()); // what is the value here
 
-    std::vector<Operation> operations = std::vector<Operation>();
+    vector<Operation> operations = vector<Operation>();
 
     // initialize random number generator and key_range
     int key_range = client->params_.key_ub() - client->params_.key_lb();
@@ -110,28 +106,22 @@ public:
     // Create a random operation generator that is
     // - evenly distributed among the key range
     // - within the specified ratios for operations
-    //
-    // [mfs]  Since we're working with ints, why not use int distributions? They
-    //        should be faster.
-    std::uniform_real_distribution<double> dist =
-        std::uniform_real_distribution<double>(0.0, 1.0);
-    // [mfs]  Just to be sure: will every thread, on every node, have a
-    // different
-    //        seed?  Also, is it really necessary to have a different seed for
-    //        each trial, or should the seed be a function of the node / thread,
-    //        for repeatability?
-    // [esl]  TODO: Creating a random number generator using the node and thread id
-    std::default_random_engine gen(client->params_.node_id() * client->params_.thread_count() + thread_id);
+    uniform_int_distribution<int> op_dist = uniform_int_distribution<int>(1, 100);
+    uniform_int_distribution<int> k_dist = uniform_int_distribution<int>(client->params_.key_lb(), client->params_.key_ub());
+
+    // Ensuring each node has a different seed value
+    default_random_engine gen(client->params_.node_id() * client->params_.thread_count() + thread_id);
     int lb = client->params_.key_lb();
     int contains = client->params_.contains();
     int insert = client->params_.insert();
-    std::function<Operation(void)> generator = [&]() {
-      double rng = dist(gen) * 100;
-      int k = dist(gen) * key_range + lb;
-      if (rng < contains) { // between 0 and CONTAINS
+    function<Operation(void)> generator = [&]() {
+      int rng = op_dist(gen);
+      int k = k_dist(gen);
+      if (rng <= contains) { 
+        // between 0 and CONTAINS
         return Operation(CONTAINS, k, 0);
-      } else if (rng <
-                 contains + insert) { // between CONTAINS and CONTAINS + INSERT
+      } else if (rng <= contains + insert) { 
+        // between CONTAINS and CONTAINS + INSERT
         return Operation(INSERT, k, k);
       } else {
         return Operation(REMOVE, k, 0);
@@ -140,10 +130,9 @@ public:
 
     // Generate two streams based on what the user wants (operation count or
     // timed stream)
-    std::unique_ptr<rome::Stream<Operation>> workload_stream;
+    unique_ptr<rome::Stream<Operation>> workload_stream;
     if (client->params_.unlimited_stream()) {
-      workload_stream =
-          std::make_unique<rome::EndlessStream<Operation>>(generator);
+      workload_stream = make_unique<rome::EndlessStream<Operation>>(generator);
     } else {
       // Deliver a workload
       //
@@ -156,21 +145,20 @@ public:
       for (int j = 0; j < WORKLOAD_AMOUNT; j++) {
         operations.push_back(generator());
       }
-      workload_stream =
-          std::make_unique<rome::TestStream<Operation>>(operations);
+      workload_stream = make_unique<rome::TestStream<Operation>>(operations);
     }
 
     // Create and start the workload driver (also starts client and lets it
     // run).
     int32_t runtime = client->params_.runtime();
     int32_t qps_sample_rate = client->params_.qps_sample_rate();
-    std::barrier<> *barr = client->barrier_;
+    barrier<> *barr = client->barrier_;
 
     // [mfs] Again, it looks like Create() is an unnecessary factory
     // [esl] It is, I wish the WorkloadDriver was a bit more simple to use
     auto driver = rome::WorkloadDriver<Operation>::Create(
         std::move(client), std::move(workload_stream), qps_controller.get(),
-        std::chrono::milliseconds(qps_sample_rate));
+        chrono::milliseconds(qps_sample_rate));
     // [mfs]  This is quite odd.  The current thread is invoking an async thread
     //        to actually do the work, which means we have lots of extra thread
     //        creation and joining.
@@ -178,31 +166,32 @@ public:
     //        and useful, but feels wrong in implementation
     OK_OR_FAIL(driver->Start());
     // [mfs]
-    std::this_thread::sleep_for(std::chrono::seconds(runtime));
+    this_thread::sleep_for(chrono::seconds(runtime));
     ROME_DEBUG("Done here, stop sequence");
     // Wait for all the clients to stop. Then set the done to true to release
     // the server
-    if (barr != nullptr) 
-        barr->arrive_and_wait();
+    if (barr != nullptr) {
+      barr->arrive_and_wait();
+    }
     // [mfs] If we didn't use WorkloadDriver, then we wouldn't need Stop()
     OK_OR_FAIL(driver->Stop());
     ROME_INFO("CLIENT :: Driver generated {}", driver->ToString());
     // [mfs]  It seems like these protos aren't being sent across machines.  Are
     //        they really needed?
     // [esl]  TODO: They are used by the workload driver. It was easier to live with
-    //        then to spend the time to refactor. There probably needs to be a class for storing the result of an experiment
+    //        then to spend the time to refactor, which is why they haven't been changed yet. 
+    //        There probably needs to be a class for storing the result of an experiment.
     return {sss::Status::Ok(), driver->ToProto()};
   }
 
   // Start the client
   sss::Status Start() override {
     ROME_INFO("CLIENT :: Starting client...");
-    this->iht_->pool_->RegisterThread();
-    // Conditional to allow us to bypass the barrier for certain client types
-    // We want to start at the same time
-    //
+    pool_->RegisterThread();
     // [mfs]  The entire barrier infrastructure is odd.  Nobody is using it to
     //        know when to get time, and it's completely per-node.
+    // [esl]  I think the Workload driver gets time, which is why I think its a good idea to synchronize the threads
+    //        You make a good point, synchronizing among nodes would be good 
     if (barrier_ != nullptr)
       barrier_->arrive_and_wait();
     return sss::Status::Ok();
@@ -211,50 +200,44 @@ public:
   // Runs the next operation
   sss::Status Apply(const Operation &op) override {
     count++;
-    std::optional<int> res;
+    optional<int> res;
     switch (op.op_type) {
     case (CONTAINS):
       // [mfs]  I don't understand the purpose of "progression".  Is it just for
       //        getting periodic output?  If so, it's going to hurt the
       //        experiment's latency, so it's probably a bad idea.
-      if (count % progression == 0)
-        ROME_INFO("Running Operation {}: contains({})", count, op.key);
-      res = iht_->contains(op.key);
-      if (res.has_value())
-        ROME_ASSERT(res.value() == op.key,
-                    "Invalid result of contains operation {}!={}",
-                    res.value(), op.key);
+      // [esl]  Periodic output helps me determine if my code is still running or if I've deadlocked
+      //        Changing it to ROME_DEBUG to try and avoid hurting latency...
+      if (count % progression == 0) {
+        ROME_DEBUG("Running Operation {}: contains({})", count, op.key);
+      }
+      res = iht_->contains(pool_, op.key);
+      if (res.has_value()) {
+        ROME_ASSERT(res.value() == op.key, "Invalid result of contains operation {}!={}", res.value(), op.key);
+      }
       break;
     case (INSERT):
-      if (count % progression == 0)
-        ROME_INFO("Running Operation {}: insert({}, {})", count, op.key,
-                  op.value);
-      res = iht_->insert(op.key, op.value);
-      if (res.has_value())
+      if (count % progression == 0){
+        ROME_DEBUG("Running Operation {}: insert({}, {})", count, op.key, op.value);
+      }
+      res = iht_->insert(pool_, op.key, op.value);
+      if (res.has_value()){
         ROME_ASSERT(res.value() == op.key, "Invalid result of insert operation {}!={}", res.value(), op.key);
+      }
       break;
     case (REMOVE):
-      if (count % progression == 0)
-        ROME_INFO("Running Operation {}: remove({})", count, op.key);
-      res = iht_->remove(op.key);
-      if (res.has_value())
+      if (count % progression == 0){
+        ROME_DEBUG("Running Operation {}: remove({})", count, op.key);
+      }
+      res = iht_->remove(pool_, op.key);
+      if (res.has_value()){
         ROME_ASSERT(res.value() == op.key, "Invalid result of remove operation {}!={}", res.value(), op.key);
+      }
       break;
     default:
-      ROME_INFO("Expected CONTAINS, INSERT, or REMOVE operation.");
+      // if we get something other than a contains, insert, or remove, the program probably should die
+      ROME_FATAL("Expected CONTAINS, INSERT, or REMOVE operation.");
       break;
-    }
-    // Think in between operations for simulation purposes.
-    //
-    // [mfs]  This doesn't actually work.  The "simulation" doesn't impact the
-    //        cache or TLB, so it's not really representative of real work... it
-    //        just throttles throughput (or throttles contention).
-    // [esl]  TODO: Again another case of "monkey-see monkey-do"... when copying the client adaptor
-    if (params_.has_think_time() && params_.think_time() != 0) {
-      auto start = util::SystemClock::now();
-      while (util::SystemClock::now() - start <
-             std::chrono::nanoseconds(params_.think_time()))
-        ;
     }
     return sss::Status::Ok();
   }
@@ -283,9 +266,10 @@ private:
   /// @param params the experiment parameters
   /// @param barrier a barrier to synchonize local clients
   /// @param iht a pointer to an IHT
+  /// @param pool the memory pool capability for the IHT
   /// @return a unique ptr
-  Client(const MemoryPool::Peer &host, tcp::EndpointManager &endpoint, ExperimentParams &params, std::barrier<> *barrier, IHT* iht)
-    : host_(host), endpoint_(endpoint), params_(params), barrier_(barrier), iht_(iht) {
+  Client(const MemoryPool::Peer &host, tcp::EndpointManager &endpoint, ExperimentParams &params, barrier<> *barrier, IHT* iht, shared_ptr<MemoryPool> pool)
+    : host_(host), endpoint_(endpoint), params_(params), barrier_(barrier), iht_(iht), pool_(pool) {
       if (params.unlimited_stream()) progression = 10000;
       else progression = params_.op_count() * 0.001;
     }
@@ -299,9 +283,11 @@ private:
   /// @brief Experimental parameters
   const ExperimentParams params_;
   /// @brief a barrier for syncing amount clients locally
-  std::barrier<> *barrier_;
+  barrier<> *barrier_;
   /// @brief an IHT instance to use
   IHT* iht_;
+  /// @brief the memorypool to attribute to the IHT
+  shared_ptr<MemoryPool> pool_;
 
   /// @brief The number of operations to do before debug-printing the number of completed operations
   /// This is useful in debugging since I can see around how many operations have been done (if at all) before crashing

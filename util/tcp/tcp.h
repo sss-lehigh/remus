@@ -19,6 +19,7 @@
 #include <cstring>
 #include <stdexcept>
 
+/// The size of each message, sent over the EndpointManager and the SocketManager
 #define TCP_MESSAGE_SIZE 32
 
 namespace tcp {

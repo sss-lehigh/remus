@@ -45,7 +45,7 @@ bazel build main --compilation_mode=dbg --log_level=info && gdb bazel-bin/main
 ```
 
 ```{bash}
-run --send_exp '--experiment_params=think_time: 100 qps_sample_rate: 10 max_qps_second: -1 runtime: 5 unlimited_stream: true op_count: 10000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 100000 region_size: 24 thread_count: 10 node_count: 1 node_id: 0 max_qp: 30' 
+run --send_exp '--experiment_params=qps_sample_rate: 10 max_qps_second: -1 runtime: 5 unlimited_stream: true op_count: 10000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 100000 region_size: 24 thread_count: 10 node_count: 1 node_id: 0 max_qp: 30' 
 ```
 
 ## Common Errors

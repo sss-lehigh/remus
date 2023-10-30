@@ -5,7 +5,6 @@ import "colosseum.proto";
 message AckProto {};
 
 message ExperimentParams {
-    required int32 think_time = 1 [default = 0];
     required int32 qps_sample_rate = 2 [default = 10];
     required int32 max_qps_second = 3 [default = -1];
     required int32 runtime = 4 [default = 10];

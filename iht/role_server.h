@@ -14,7 +14,8 @@ namespace ExperimentManager {
 /// @param cleanup a cleanup script to run every 100ms 
 /// [esl] IMP: cleanup was removed because it is used in the other hashmap but not the IHT
 ///            Thus it is not necessary for a minimal IHT. I left it in the documentation because I'd like 
-///            to revisit implementing a cleanup script to allow for things such as remote deallocation.
+///            to revisit implementing a cleanup function to allow for things such as remote deallocation.
+/// [esl]      TODO: the code in this file is small, it could be moved to main?
 /// @return ok status
 inline void ClientStopBarrier(tcp::SocketManager& socket_handle, int runtime_s) {
   // Sleep while clients are running if there is a set runtime.

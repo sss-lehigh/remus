@@ -21,7 +21,6 @@
 
 #include "role_client.h"
 #include "role_server.h"
-#include "context_manager.h"
 
 #include "../vendor/sss/cli.h"
 
@@ -72,54 +71,50 @@ int main(int argc, char** argv){
     peer_list.push_back(host);
     // Initialize a memory pool
     std::vector<std::thread> mempool_threads;
-    MemoryPool* pool = new MemoryPool(host, std::make_unique<MemoryPool::cm_type>(host.id), false);
+    std::shared_ptr<MemoryPool> pool = std::make_shared<MemoryPool>(host, std::make_unique<MemoryPool::cm_type>(host.id), false);
     uint32_t block_size = 1 << 24;
     sss::Status status_pool = pool->Init(block_size, peer_list);
     OK_OR_FAIL(status_pool);
     pool->RegisterThread();
 
     // Create an iht
-    IHT* iht_ = new IHT(host, pool);
-    ContextManger manager = ContextManger([&](){
-        delete pool;
-        delete iht_;
-    });
-    iht_->InitAsFirst();
+    std::unique_ptr<IHT> iht_ = std::make_unique<IHT>(host);
+    iht_->InitAsFirst(pool);
     if (bulk_operations){
       int scale_size = (CNF_PLIST_SIZE * CNF_ELIST_SIZE) * 2;
       ROME_INFO("Scale is {}", scale_size);
       bool show_passing = false;
       for(int i = 0; i < scale_size; i++){
-        test_output(show_passing, iht_->contains(i), std::nullopt, std::string("Contains ") + std::to_string(i) + std::string(" false"));
-        test_output(show_passing, iht_->insert(i, i), std::nullopt, std::string("Insert ") + std::to_string(i));
-        test_output(show_passing, iht_->contains(i), std::make_optional(i), std::string("Contains ") + std::to_string(i) + std::string(" true"));
+        test_output(show_passing, iht_->contains(pool, i), std::nullopt, std::string("Contains ") + std::to_string(i) + std::string(" false"));
+        test_output(show_passing, iht_->insert(pool, i, i), std::nullopt, std::string("Insert ") + std::to_string(i));
+        test_output(show_passing, iht_->contains(pool, i), std::make_optional(i), std::string("Contains ") + std::to_string(i) + std::string(" true"));
       }
       ROME_INFO(" = 25% Finished = ");
       for(int i = 0; i < scale_size; i++){
-        test_output(show_passing, iht_->contains(i), std::make_optional(i), std::string("Contains ") + std::to_string(i) + std::string(" maintains true"));
+        test_output(show_passing, iht_->contains(pool, i), std::make_optional(i), std::string("Contains ") + std::to_string(i) + std::string(" maintains true"));
       }
       ROME_INFO(" = 50% Finished = ");
       for(int i = 0; i < scale_size; i++){
-        test_output(show_passing, iht_->remove(i), std::make_optional(i), std::string("Removes ") + std::to_string(i));
-        test_output(show_passing, iht_->contains(i), std::nullopt, std::string("Contains ") + std::to_string(i) + std::string(" false"));
+        test_output(show_passing, iht_->remove(pool, i), std::make_optional(i), std::string("Removes ") + std::to_string(i));
+        test_output(show_passing, iht_->contains(pool, i), std::nullopt, std::string("Contains ") + std::to_string(i) + std::string(" false"));
       }
       ROME_INFO(" = 75% Finished = ");
       for(int i = 0; i < scale_size; i++){
-        test_output(show_passing, iht_->contains(i), std::nullopt, std::string("Contains ") + std::to_string(i) + std::string(" maintains false"));
+        test_output(show_passing, iht_->contains(pool, i), std::nullopt, std::string("Contains ") + std::to_string(i) + std::string(" maintains false"));
       }
       ROME_INFO("All test cases finished");
     } else if (test_operations) {
       ROME_INFO("Starting test cases.");
-      test_output(true, iht_->contains(5), std::nullopt, "Contains 5");
-      test_output(true, iht_->contains(4), std::nullopt, "Contains 4");
-      test_output(true, iht_->insert(5, 10), std::nullopt, "Insert 5");
-      test_output(true, iht_->insert(5, 11),  std::make_optional(10), "Insert 5 again should fail");
-      test_output(true, iht_->contains(5),  std::make_optional(10), "Contains 5");
-      test_output(true, iht_->contains(4), std::nullopt, "Contains 4");
-      test_output(true, iht_->remove(5),  std::make_optional(10), "Remove 5");
-      test_output(true, iht_->remove(4), std::nullopt, "Remove 4");
-      test_output(true, iht_->contains(5), std::nullopt, "Contains 5");
-      test_output(true, iht_->contains(4), std::nullopt, "Contains 4");
+      test_output(true, iht_->contains(pool, 5), std::nullopt, "Contains 5");
+      test_output(true, iht_->contains(pool, 4), std::nullopt, "Contains 4");
+      test_output(true, iht_->insert(pool, 5, 10), std::nullopt, "Insert 5");
+      test_output(true, iht_->insert(pool, 5, 11),  std::make_optional(10), "Insert 5 again should fail");
+      test_output(true, iht_->contains(pool, 5),  std::make_optional(10), "Contains 5");
+      test_output(true, iht_->contains(pool, 4), std::nullopt, "Contains 4");
+      test_output(true, iht_->remove(pool, 5),  std::make_optional(10), "Remove 5");
+      test_output(true, iht_->remove(pool, 4), std::nullopt, "Remove 4");
+      test_output(true, iht_->contains(pool, 5), std::nullopt, "Contains 5");
+      test_output(true, iht_->contains(pool, 4), std::nullopt, "Contains 4");
       ROME_INFO("All cases finished");
     } else {
       ROME_INFO("Use main executable not test");
