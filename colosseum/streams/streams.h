@@ -171,4 +171,21 @@ private:
   }
 };
 
+template <typename T> class FixedLengthStream : public Stream<T> {
+public:
+  FixedLengthStream(std::function<T(void)> generator, int length) : generator_(generator), length_(length), count_(0) {}
+
+private:
+  std::function<T(void)> generator_;
+  int length_;
+  int count_;
+  inline sss::StatusVal<T> NextInternal() override {
+    if (length_ >= count_){
+      return {StreamTerminatedStatus(), {}};
+    }
+    count_++;
+    return {sss::Status::Ok(), generator_()};
+  }
+};
+
 } // namespace rome

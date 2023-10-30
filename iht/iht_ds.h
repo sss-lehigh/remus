@@ -351,13 +351,13 @@ public:
       uint64_t bucket = level_hash(key, depth, count);
       // Normal descent
       if (curr->buckets[bucket].lock == P_UNLOCKED){
-          remote_plist bucket_base = static_cast<remote_plist>(curr->buckets[bucket].base);
-          pool->Deallocate<PList>(curr, 1 << (depth - 1));
-          curr = pool->ExtendedRead<PList>(bucket_base, 1 << depth);
-          parent_ptr = bucket_base;
-          depth++;
-          count *= 2;
-          continue;
+        remote_plist bucket_base = static_cast<remote_plist>(curr->buckets[bucket].base);
+        pool->Deallocate<PList>(curr, 1 << (depth - 1));
+        curr = pool->ExtendedRead<PList>(bucket_base, 1 << depth);
+        parent_ptr = bucket_base;
+        depth++;
+        count *= 2;
+        continue;
       }
 
       // Erroneous descent into EList (Think we are at an EList, but it turns out its a PList)
@@ -443,13 +443,13 @@ public:
       uint64_t bucket = level_hash(key, depth, count);
       // Normal descent
       if (curr->buckets[bucket].lock == P_UNLOCKED){
-          remote_plist bucket_base = static_cast<remote_plist>(curr->buckets[bucket].base);
-          pool->Deallocate<PList>(curr, 1 << (depth - 1));
-          curr = pool->ExtendedRead<PList>(bucket_base, 1 << depth);
-          parent_ptr = bucket_base;
-          depth++;
-          count *= 2;
-          continue;
+        remote_plist bucket_base = static_cast<remote_plist>(curr->buckets[bucket].base);
+        pool->Deallocate<PList>(curr, 1 << (depth - 1));
+        curr = pool->ExtendedRead<PList>(bucket_base, 1 << depth);
+        parent_ptr = bucket_base;
+        depth++;
+        count *= 2;
+        continue;
       }
 
       // Erroneous descent into EList (Think we are at an EList, but it turns out its a PList)

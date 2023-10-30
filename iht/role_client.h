@@ -49,14 +49,14 @@ public:
   //        It was the pattern I observed, so it felt safer to just follow it haha
   /// @brief Force the creation of a unique ptr to a client instance
   /// @param server the "server"-peer that is responsible for coordination among clients
-  /// @param endpoint a EndpointManager instance that can be owned by the client. TODO: replace for unique ptr?
+  /// @param ep a EndpointManager instance that can be owned by the client.
   /// @param params the experiment parameters
-  /// @param barrier a barrier to synchonize local clients
+  /// @param barr a barrier to synchonize local clients
   /// @param iht a pointer to an IHT
   /// @return a unique ptr
   static unique_ptr<Client>
-  Create(const MemoryPool::Peer &server, tcp::EndpointManager &endpoint, ExperimentParams& params, barrier<> *barrier, IHT* iht, shared_ptr<MemoryPool> pool) {
-    return unique_ptr<Client>(new Client(server, endpoint, params, barrier, iht, pool));
+  Create(const MemoryPool::Peer &server, tcp::EndpointManager &ep, ExperimentParams& params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<MemoryPool> pool) {
+    return unique_ptr<Client>(new Client(server, ep, params, barr, std::move(iht), pool));
   }
 
   /// @brief Run the client
@@ -135,17 +135,7 @@ public:
       workload_stream = make_unique<rome::EndlessStream<Operation>>(generator);
     } else {
       // Deliver a workload
-      //
-      // [mfs]  This seems problematic.  Making the whole stream ahead of time
-      //        is going to increase the variance between when threads start,
-      //        and it's going to lead to bad cache behavior.  Why isn't there a
-      //        rome::FixedLengthStream?
-      // [esl]  TODO: Implement a FixedLengthStream
-      int WORKLOAD_AMOUNT = client->params_.op_count();
-      for (int j = 0; j < WORKLOAD_AMOUNT; j++) {
-        operations.push_back(generator());
-      }
-      workload_stream = make_unique<rome::TestStream<Operation>>(operations);
+      workload_stream = make_unique<rome::FixedLengthStream<Operation>>(generator, client->params_.op_count());
     }
 
     // Create and start the workload driver (also starts client and lets it
@@ -165,7 +155,6 @@ public:
     // [esl]  I am not a huge fan of this WorkloadDriver. The concept is cool 
     //        and useful, but feels wrong in implementation
     OK_OR_FAIL(driver->Start());
-    // [mfs]
     this_thread::sleep_for(chrono::seconds(runtime));
     ROME_DEBUG("Done here, stop sequence");
     // Wait for all the clients to stop. Then set the done to true to release
@@ -206,7 +195,7 @@ public:
       // [mfs]  I don't understand the purpose of "progression".  Is it just for
       //        getting periodic output?  If so, it's going to hurt the
       //        experiment's latency, so it's probably a bad idea.
-      // [esl]  Periodic output helps me determine if my code is still running or if I've deadlocked
+      // [esl]  Periodic output helps me determine faster if my code is still running or if I've deadlocked
       //        Changing it to ROME_DEBUG to try and avoid hurting latency...
       if (count % progression == 0) {
         ROME_DEBUG("Running Operation {}: contains({})", count, op.key);
@@ -262,14 +251,14 @@ public:
 private:
   /// @brief Private constructor of client
   /// @param server the "server"-peer that is responsible for coordination among clients
-  /// @param endpoint a EndpointManager instance that can be owned by the client. TODO: replace for unique ptr?
+  /// @param endpoint a EndpointManager instance that can be owned by the client.
   /// @param params the experiment parameters
   /// @param barrier a barrier to synchonize local clients
   /// @param iht a pointer to an IHT
   /// @param pool the memory pool capability for the IHT
   /// @return a unique ptr
-  Client(const MemoryPool::Peer &host, tcp::EndpointManager &endpoint, ExperimentParams &params, barrier<> *barrier, IHT* iht, shared_ptr<MemoryPool> pool)
-    : host_(host), endpoint_(endpoint), params_(params), barrier_(barrier), iht_(iht), pool_(pool) {
+  Client(const MemoryPool::Peer &host, tcp::EndpointManager &ep, ExperimentParams &params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<MemoryPool> pool)
+    : host_(host), endpoint_(ep), params_(params), barrier_(barr), iht_(std::move(iht)), pool_(pool) {
       if (params.unlimited_stream()) progression = 10000;
       else progression = params_.op_count() * 0.001;
     }
@@ -285,7 +274,7 @@ private:
   /// @brief a barrier for syncing amount clients locally
   barrier<> *barrier_;
   /// @brief an IHT instance to use
-  IHT* iht_;
+  unique_ptr<IHT> iht_;
   /// @brief the memorypool to attribute to the IHT
   shared_ptr<MemoryPool> pool_;
 

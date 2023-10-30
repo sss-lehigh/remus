@@ -178,7 +178,7 @@ int main(int argc, char **argv) {
           int mempool_index = thread_index % mp;
           std::shared_ptr<MemoryPool> pool = pools[mempool_index];
           MemoryPool::Peer self = peers.at((params.node_id() * mp) + mempool_index);
-          IHT iht = IHT(self);
+          std::unique_ptr<IHT> iht = std::make_unique<IHT>(self);
           // sleep for a short while to ensure the receiving end (SocketManager) is up and running
           // NB: We have no way to ensure the server is running before connecting to it
           // In the future, having some kind of remote_barrier data structure would be much better
@@ -186,11 +186,11 @@ int main(int argc, char **argv) {
           // Get the data from the server to init the IHT
           tcp::message ptr_message;
           endpoint_managers[thread_index].recv_server(&ptr_message);
-          iht.InitFromPointer(remote_ptr<anon_ptr>(ptr_message.get_first()));
+          iht->InitFromPointer(remote_ptr<anon_ptr>(ptr_message.get_first()));
           
           ROME_DEBUG("Creating client");
           // Create and run a client in a thread
-          std::unique_ptr<Client> client = Client::Create(host, endpoint_managers[thread_index], params, &client_sync, &iht, pool);
+          std::unique_ptr<Client> client = Client::Create(host, endpoint_managers[thread_index], params, &client_sync, std::move(iht), pool);
           sss::StatusVal<WorkloadDriverProto> output = Client::Run(std::move(client), 
                                                                    thread_index, 
                                                                    0.5 / (double) (params.node_count() * params.thread_count()));
