@@ -1,6 +1,6 @@
 ### Set up PROTO_SRCS with the names of the protobuf files to compile
 
-protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS metrics.proto colosseum.proto experiment.proto rdma.proto)
+protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS metrics.proto workloaddriver.proto experiment.proto rdma.proto)
 
 ### We're making a library called "protos"
 

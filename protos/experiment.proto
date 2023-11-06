@@ -1,6 +1,6 @@
 syntax = "proto2";
 
-import "colosseum.proto";
+import "workloaddriver.proto";
 
 message AckProto {};
 

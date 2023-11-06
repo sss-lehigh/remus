@@ -1,6 +1,6 @@
 #pragma once
 
-#include <memory>
+#include "../vendor/sss/status.h"
 
 #define TRACE 0
 #define DEBUG 1
@@ -10,11 +10,21 @@
 #define CRITICAL 5
 #define OFF 6
 
+// [mfs]  This gets us a guaranteed log level, even if the build tools didn't
+//        define one.
+#ifndef ROME_LOG_LEVEL
+#warning "ROME_LOG_LEVEL is not defined... defaulting to TRACE"
+#define ROME_LOG_LEVEL TRACE
+#endif
+
+// [mfs]  The *entire* spdlog infrastructure seems to be in use only for the
+//        sake of getting coloring for messages on stdout.  I think we can
+//        remove it without really losing anything.
+
 //! Must be set before including `spdlog/spdlog.h`
 #define SPDLOG_ACTIVE_LEVEL ROME_LOG_LEVEL
 
-// #include "../testutil/status_matcher.h"
-
+#include <memory>
 #include <spdlog/async.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -131,3 +141,34 @@ inline void __rome_init_log__() {
 #else
 #define ROME_ASSERT_DEBUG(...) ((void)0)
 #endif
+
+#define STATUSVAL_OR_DIE(__s)                                                  \
+  if (!(__s.status.t == sss::Ok)) {                                            \
+    ROME_FATAL(__s.status.message.value());                                    \
+  }
+
+#define RDMA_CM_CHECK(func, ...)                                               \
+  {                                                                            \
+    int ret = func(__VA_ARGS__);                                               \
+    if (ret != 0) {                                                            \
+      sss::Status err = {sss::InternalError, ""};                              \
+      err << #func << "(): " << strerror(errno);                               \
+      return err;                                                              \
+    }                                                                          \
+  }
+
+#define RDMA_CM_CHECK_TOVAL(func, ...)                                         \
+  {                                                                            \
+    int ret = func(__VA_ARGS__);                                               \
+    if (ret != 0) {                                                            \
+      sss::Status err = {sss::InternalError, ""};                              \
+      err << #func << "(): " << strerror(errno);                               \
+      return {err, {}};                                                        \
+    }                                                                          \
+  }
+
+#define RDMA_CM_ASSERT(func, ...)                                              \
+  {                                                                            \
+    int ret = func(__VA_ARGS__);                                               \
+    ROME_ASSERT(ret == 0, "{}{}{}", #func, "(): ", strerror(errno));           \
+  }

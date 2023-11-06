@@ -1,11 +1,5 @@
 #pragma once
 
-#define CONTAINS 0
-#define INSERT 1
-#define REMOVE 2
-#define CNF_ELIST_SIZE 7   // 7
-#define CNF_PLIST_SIZE 128 // 128
-
 #include "../util/tcp/tcp.h"
 
 /// @brief a type used for templating remote pointers as anonymous (for exchanging over the network where the types are "lost")
@@ -20,3 +14,9 @@ template <typename K, typename V> struct IHT_Op {
   IHT_Op(int op_type_, K key_, V value_)
       : op_type(op_type_), key(key_), value(value_){};
 };
+
+#define CONTAINS 0
+#define INSERT 1
+#define REMOVE 2
+#define CNF_ELIST_SIZE 7   // 7
+#define CNF_PLIST_SIZE 128 // 128

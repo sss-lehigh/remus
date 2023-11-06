@@ -1,21 +1,17 @@
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
-#include <functional>
 #include <iostream>
-#include <memory>
-#include <ostream>
-#include <type_traits>
-
-#include <spdlog/fmt/fmt.h> // [mfs] For now, use spdlog's vendored fmt...
 
 namespace rome::rdma {
 
-template <typename T> class remote_ptr;
+// Forward declarations
+//
+// TODO: If we had a base type for remote_ptr, we could probably not need this?
 struct nullptr_type {};
-typedef remote_ptr<nullptr_type> remote_nullptr_t;
 
+/// A "smart pointer" to memory on another machine
+///
+/// TODO: This will need more documentation
 template <typename T> class remote_ptr {
 public:
   using element_type = T;
@@ -24,7 +20,7 @@ public:
   using id_type = uint16_t;
   using address_type = uint64_t;
 
-  template <typename U> using rebind = remote_ptr<U>;
+  // template <typename U> using rebind = remote_ptr<U>;
 
   // Constructors
   constexpr remote_ptr() : raw_(0) {}
@@ -41,7 +37,7 @@ public:
   template <typename _T = element_type,
             std::enable_if_t<!std::is_same_v<_T, nullptr_type>>>
   remote_ptr(remote_ptr &&p) : raw_(p.raw_) {}
-  constexpr remote_ptr(const remote_nullptr_t &n) : raw_(0) {}
+  constexpr remote_ptr(const remote_ptr<nullptr_type> &) : raw_(0) {}
 
   // Getters
   uint64_t id() const { return (raw_ & kIdBitmask) >> kAddressBits; }
@@ -49,23 +45,42 @@ public:
   uint64_t raw() const { return raw_; }
 
   // Assignment
-  void operator=(const remote_ptr &p) volatile;
+  void operator=(const remote_ptr &p) volatile { raw_ = p.raw_; }
   template <typename _T = element_type,
             std::enable_if_t<!std::is_same_v<_T, nullptr_type>>>
-  void operator=(const remote_nullptr_t &n) volatile;
+  void operator=(const remote_ptr<nullptr_type> &) volatile {
+    raw_ = 0;
+  }
 
   // Increment operator
-  remote_ptr &operator+=(size_t s);
-  remote_ptr &operator++();
-  remote_ptr operator++(int);
+  remote_ptr &operator+=(size_t s) {
+    const auto address = (raw_ + (sizeof(element_type) * s)) & kAddressBitmask;
+    raw_ = (raw_ & kIdBitmask) | address;
+    return *this;
+  }
+  remote_ptr &operator++() {
+    *this += 1;
+    return *this;
+  }
+  remote_ptr operator++(int) {
+    remote_ptr prev = *this;
+    *this += 1;
+    return prev;
+  }
 
   // Conversion operators
-  explicit operator uint64_t() const;
-  template <typename U> explicit operator remote_ptr<U>() const;
+  explicit operator uint64_t() const { return raw_; }
+  template <typename U> explicit operator remote_ptr<U>() const {
+    return remote_ptr<U>(raw_);
+  }
 
   // Pointer-like functions
-  static constexpr element_type *to_address(const remote_ptr &p);
-  static constexpr remote_ptr pointer_to(element_type &r);
+  static constexpr element_type *to_address(const remote_ptr &p) {
+    return (element_type *)p.address();
+  }
+  static constexpr remote_ptr pointer_to(element_type &p) {
+    return remote_ptr(-1, &p);
+  }
   pointer get() const { return (element_type *)address(); }
   pointer operator->() const noexcept { return (element_type *)address(); }
   reference operator*() const noexcept { return *((element_type *)address()); }
@@ -75,7 +90,9 @@ public:
   friend std::ostream &operator<<(std::ostream &os, const remote_ptr<U> &p);
 
   // Equivalence
-  bool operator==(const volatile remote_nullptr_t &n) const volatile;
+  bool operator==(const volatile remote_ptr<nullptr_type> &) const volatile {
+    return raw_ == 0;
+  }
   bool operator==(remote_ptr &n) { return raw_ == n.raw_; }
   template <typename U>
   friend bool operator==(remote_ptr<U> &p1, remote_ptr<U> &p2);
@@ -102,26 +119,23 @@ private:
   uint64_t raw_;
 };
 
+/// Operator support for printing a remote_ptr<U>
+template <typename U>
+std::ostream &operator<<(std::ostream &os, const remote_ptr<U> &p) {
+  return os << "<id=" << p.id() << ", address=0x" << std::hex << p.address()
+            << std::dec << ">";
+}
+
+/// Operator support for equality tests of remote_ptr<U>
+template <typename U>
+bool operator==(const volatile remote_ptr<U> &p1,
+                const volatile remote_ptr<U> &p2) {
+  return p1.raw_ == p2.raw_;
+}
+
+using remote_nullptr_t = remote_ptr<nullptr_type>;
+
+/// A single global instance of a null remote_ptr
+constexpr remote_nullptr_t remote_nullptr{};
+
 } // namespace rome::rdma
-
-template <typename T> struct fmt::formatter<::rome::rdma::remote_ptr<T>> {
-  typedef ::rome::rdma::remote_ptr<T> remote_ptr;
-  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-    return ctx.end();
-  }
-
-  template <typename FormatContext>
-  auto format(const remote_ptr &input, FormatContext &ctx)
-      -> decltype(ctx.out()) {
-    return format_to(ctx.out(), "(id={}, address=0x{:x})", input.id(),
-                     input.address());
-  }
-};
-
-template <typename T> struct std::hash<rome::rdma::remote_ptr<T>> {
-  std::size_t operator()(const rome::rdma::remote_ptr<T> &ptr) const {
-    return std::hash<uint64_t>()(static_cast<uint64_t>(ptr));
-  }
-};
-
-#include "remote_ptr_impl.h"

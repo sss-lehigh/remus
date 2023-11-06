@@ -1,8 +1,9 @@
 #pragma once
+
 #include <ostream>
 #include <vector>
 
-#include "protos/metrics.pb.h"
+#include <protos/metrics.pb.h>
 
 #include "../vendor/sss/status.h"
 

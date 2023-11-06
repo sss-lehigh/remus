@@ -4,13 +4,9 @@
 #include <optional>
 #include <random>
 
-#include "../colosseum/client_adaptor.h"
-#include "../colosseum/qps_controller.h"
-#include "../colosseum/streams/streams.h"
 #include "../colosseum/workload_driver.h"
-#include "../rdma/connection_manager/connection_manager.h"
-#include "../rdma/memory_pool/memory_pool.h"
-#include "../util/clocks.h"
+#include "../logging/logging.h"
+#include "../rdma/rdma.h"
 
 #include "common.h"
 #include "protos/experiment.pb.h"
@@ -40,8 +36,9 @@ inline bool test_output(bool show_passing, optional<int> actual, optional<int> e
   return true;
 }
 
-class Client : public ClientAdaptor<IHT_Op<int, int>> {
-  typedef IHT_Op<int, int> Operation;
+template <class Operation> class Client {
+  // static_assert(::rome::IsClientAdapter<Client, Operation>);
+
 public:
   // [mfs]  Here and in Server, I don't understand the factory pattern.  It's
   //        not really adding any value.
@@ -65,7 +62,7 @@ public:
   /// @param frac if 0, won't populate. Otherwise, will do this fraction of the
   /// population
   /// @return the resultproto
-  static sss::StatusVal<WorkloadDriverProto>
+  static sss::StatusVal<rome::WorkloadDriverProto>
   Run(unique_ptr<Client> client, int thread_id, double frac) {
     // [mfs]  I was hopeful that this code was going to actually populate the
     //        data structure from *multiple nodes* simultaneously.  It should,
@@ -94,12 +91,8 @@ public:
     // TODO: Signal Handler
     // signal(SIGINT, signal_handler);
 
-    // Setup qps_controller.
-    unique_ptr<rome::LeakyTokenBucketQpsController<util::SystemClock>>
-        qps_controller = rome::LeakyTokenBucketQpsController<util::SystemClock>::Create(
-            client->params_.max_qps_second()); // what is the value here
-
-    vector<Operation> operations = vector<Operation>();
+    // auto *client_ptr = client.get();
+    std::vector<Operation> operations = std::vector<Operation>();
 
     // initialize random number generator and key_range
     int key_range = client->params_.key_ub() - client->params_.key_lb();
@@ -147,10 +140,9 @@ public:
     bool unlimited_stream = client->params_.unlimited_stream();
 
     // [mfs] Again, it looks like Create() is an unnecessary factory
-    // [esl] It is, I wish the WorkloadDriver was a bit more simple to use
-    auto driver = rome::WorkloadDriver<Operation>::Create(
-        std::move(client), std::move(workload_stream), qps_controller.get(),
-        chrono::milliseconds(qps_sample_rate));
+    auto driver = rome::WorkloadDriver<Client, Operation>::Create(
+        std::move(client), std::move(workload_stream),
+        std::chrono::milliseconds(qps_sample_rate));
     // [mfs]  This is quite odd.  The current thread is invoking an async thread
     //        to actually do the work, which means we have lots of extra thread
     //        creation and joining.
@@ -178,7 +170,7 @@ public:
   }
 
   // Start the client
-  sss::Status Start() override {
+  sss::Status Start() {
     ROME_INFO("CLIENT :: Starting client...");
     pool_->RegisterThread(); // TODO? REMOVE?
     // [mfs]  The entire barrier infrastructure is odd.  Nobody is using it to
@@ -191,7 +183,7 @@ public:
   }
 
   // Runs the next operation
-  sss::Status Apply(const Operation &op) override {
+  sss::Status Apply(const Operation &op) {
     count++;
     optional<int> res;
     switch (op.op_type) {
@@ -237,6 +229,25 @@ public:
 
   // A function for communicating with the server that we are done. Will wait
   // until server says it is ok to shut down
+  //
+  // [mfs]  This is really just trying to create a Barrier over RPC.  There's
+  //        nothing wrong with that, in principle, but if all we really need is
+  //        a barrier, then why not just make a barrier?
+  sss::Status Stop() {
+    ROME_INFO("CLIENT :: Stopping client...");
+    if (!master_client_) {
+      // if we aren't the master client we don't need to do the stop sequence.
+      // Just arrive at the barrier
+      //
+      // [mfs]  Why doesn't the master client also arrive at the barrier, before
+      //        acking to the lead node?
+      if (barrier_ != nullptr)
+        barrier_->arrive_and_wait();
+      return sss::Status::Ok();
+    }
+    if (host_.id == self_.id)
+      return sss::Status::Ok(); // if we are the host, we don't need to do the
+                                // stop sequence
   sss::Status Stop() override {
     ROME_DEBUG("CLIENT :: Stopping client...");
 

@@ -1,29 +1,24 @@
-#include <fstream>
-#include <iostream>
-#include <memory>
-#include <ostream>
-#include <stdio.h>
-#include <string>
-#include <thread>
-#include <unistd.h>
+#include "../rdma/memory_pool.h"
 
 #include <google/protobuf/text_format.h>
+#include <protos/experiment.pb.h>
+#include <protos/workloaddriver.pb.h>
+#include <vector>
 
 #include "../logging/logging.h"
-#include "../rdma/connection_manager/connection_manager.h"
-#include "../rdma/memory_pool/memory_pool.h"
+#include "../vendor/sss/cli.h"
 #include "../util/tcp/tcp.h"
 
+#include "../rdma/rdma.h"
 #include "protos/colosseum.pb.h"
 #include "protos/experiment.pb.h"
 
 #include "role_client.h"
 #include "role_server.h"
-
-#include "../vendor/sss/cli.h"
+#include "structures/iht_ds.h"
 
 auto ARGS = {
-    cli::STR_ARG_OPT("--experiment_params", "Experimental parameters", ""),
+    sss::STR_ARG_OPT("--experiment_params", "Experimental parameters", ""),
 };
 
 #define PATH_MAX 4096
@@ -39,7 +34,7 @@ using cm_type = MemoryPool::cm_type;
 int main(int argc, char **argv) {
   ROME_INIT_LOG();
 
-  cli::ArgMap args;
+  sss::ArgMap args;
   // import_args will validate that the newly added args don't conflict with
   // those already added.
   auto res = args.import_args(ARGS);
@@ -64,6 +59,7 @@ int main(int argc, char **argv) {
   //        only way to run the code is via a script that knows the internals of
   //        the ExperimentParams proto.  This needs to be refactored.  It is
   //        especially strange because protobufs are usually meant for
+  //        communication, not for convenient merging of structs.
   // [esl]  TODO: replace for json?
   ExperimentParams params = ExperimentParams();
   bool success =
@@ -168,7 +164,7 @@ int main(int argc, char **argv) {
   //        communicate via protobufs?
   // [esl]  Protobufs were a pain to code with. I think the ClientAdaptor returns a protobuf and I never understood why it didn't just return an object. 
   // TODO:  In the refactoring of the client adaptor, remove dependency on protobufs for a workload object
-  WorkloadDriverProto results[params.thread_count()];
+  rome::WorkloadDriverProto results[params.thread_count()];
   for(int i = 0; i < params.thread_count(); i++){
       threads.emplace_back(std::thread([&](int thread_index){
           int mempool_index = thread_index % mp;
@@ -220,7 +216,7 @@ int main(int argc, char **argv) {
   ResultProto result_proto = ResultProto();
   *result_proto.mutable_params() = params;
   for (int i = 0; i < params.thread_count(); i++) {
-    WorkloadDriverProto *r = result_proto.add_driver();
+    rome::WorkloadDriverProto *r = result_proto.add_driver();
     std::string output;
     results[i].SerializeToString(&output);
     r->MergeFromString(output);
