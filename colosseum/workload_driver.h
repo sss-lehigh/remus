@@ -11,6 +11,7 @@
 #include "../metrics/stopwatch.h"
 #include "../metrics/summary.h"
 #include "../util/duration_util.h"
+#include "../logging/logging.h"
 #include "client_adaptor.h"
 #include "protos/colosseum.pb.h"
 #include "qps_controller.h"

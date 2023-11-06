@@ -180,10 +180,10 @@ private:
   int length_;
   int count_;
   inline sss::StatusVal<T> NextInternal() override {
-    if (length_ >= count_){
+    count_++;
+    if (length_ < count_){
       return {StreamTerminatedStatus(), {}};
     }
-    count_++;
     return {sss::Status::Ok(), generator_()};
   }
 };

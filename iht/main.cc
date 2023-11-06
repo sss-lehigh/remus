@@ -114,7 +114,7 @@ int main(int argc, char **argv) {
       mempool_threads.emplace_back(std::thread([&](int mp_index, int self_index){
           MemoryPool::Peer self = peers.at(self_index);
           ROME_INFO(mp != params.thread_count() ? "Is shared" : "Is not shared");
-          std::shared_ptr<MemoryPool> pool = std::make_shared<MemoryPool>(self, std::make_unique<MemoryPool::cm_type>(self.id), mp != params.thread_count());
+          std::shared_ptr<MemoryPool> pool = std::make_shared<MemoryPool>(self, std::make_unique<MemoryPool::cm_type>(self.id));
           sss::Status status_pool = pool->Init(block_size, peers);
           OK_OR_FAIL(status_pool);
           pools[mp_index] = pool;
@@ -145,10 +145,6 @@ int main(int argc, char **argv) {
           socket_handle.send_to_all(&ptr_message);
           // We are the server
           ExperimentManager::ClientStopBarrier(socket_handle, params.runtime());
-          for(int i = 0; i < mp; i++){
-              // Stop the worker thread of the memory pool
-              pools[i]->KillWorkerThread();
-          }
           ROME_INFO("[SERVER THREAD] -- End of execution; -- ");
       }));
     }
@@ -197,7 +193,7 @@ int main(int argc, char **argv) {
           // [mfs]  It would be good to document how a client can fail, because
           // it seems like if even one client fails, on any machine, the
           //  whole experiment should be invalidated.
-          // [esl] I agree. A strange thing though: I think the output of Client::Run is always OK. 
+          // [esl] I agree. A strange thing though: I think the output of Client::Run is always OK.
           //       Any errors just crash the script, which lead to no results being generated?
           if (output.status.t == sss::StatusType::Ok && output.val.has_value()){
               results[thread_index] = output.val.value();

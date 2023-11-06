@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <infiniband/verbs.h>
 
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
+#include <semaphore>
 
 #include "../../metrics/summary.h"
 #include "../../util/thread_util.h"
@@ -22,7 +24,9 @@
 #include "protos/rdma.pb.h"
 #include "remote_ptr.h"
 
-#define THREAD_MAX 50
+#define THREAD_MAX 10
+// todo: I can't define a vector of semaphores? This makes it hard to reserve the space necessary for the semaphores...
+// https://stackoverflow.com/questions/73449114/how-to-declare-and-initialize-a-vector-of-semaphores-in-c
 
 namespace rome::rdma {
 
@@ -79,8 +83,7 @@ public:
 
   inline MemoryPool(
       const Peer &self,
-      std::unique_ptr<ConnectionManager<channel_type>> connection_manager, 
-      bool is_shared);
+      std::unique_ptr<ConnectionManager<channel_type>> connection_manager);
 
   class DoorbellBatch {
   public:
@@ -227,12 +230,8 @@ public:
     return GetRemotePtr<T>(reinterpret_cast<const T *>(mr_->addr));
   }
 
-  /// @brief Identify an op thread to the service "worker" thread. (Must be done
-  /// before operations can be run)
+  /// @brief Allocate resources (semaphore) for the thread before it can run operations
   void RegisterThread();
-
-  // Do I need this?
-  void KillWorkerThread();
 
 private:
   template <typename T>
@@ -240,23 +239,31 @@ private:
                            size_t chunk_size, remote_ptr<T> prealloc,
                            std::atomic<bool> *kill = nullptr);
 
-  void WorkerThread();
-
   Peer self_;
-  bool is_shared_;
 
+  /// Used to protect the id generator, the thread_ids, and the reordering_semaphores
   std::mutex control_lock_;
+  /// Used to protect the rdma_per_read_ summary statistics thing
   std::mutex rdma_per_read_lock_;
 
+  /// A counter to increment
   uint64_t id_gen = 0;
-  std::unordered_set<uint64_t> wr_ids;
+  /// A mapping of thread id to an index into the reordering_semaphores array. Passed as the wr_id in work requests.
   std::unordered_map<std::thread::id, uint64_t> thread_ids;
-  std::condition_variable cond_vars[THREAD_MAX]; // max of "THREAD_MAX" threads,
-                                                 // can trivially increase
-  std::atomic<bool> mailboxes[THREAD_MAX];
-  bool run_worker = true;
-  std::mutex mutex_vars[THREAD_MAX];
-
+  /// a vector of semaphores, one for each thread that can send an operation. Threads will use this to recover from polling another thread's wr_id
+  std::array<std::binary_semaphore, THREAD_MAX> reordering_semaphores = {
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0)
+  };
+  
   std::unique_ptr<ConnectionManager<channel_type>> connection_manager_;
   std::unique_ptr<rdma_memory_resource> rdma_memory_;
   ibv_mr *mr_;

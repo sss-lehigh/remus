@@ -1,17 +1,16 @@
 {
-    "//think_time":  "Time is in nano seconds [100]",
-    "think_time": 100,
     "qps_sample_rate": 10,
     "max_qps_second": -1,
-    "runtime": 20,
+    "runtime": 10,
     "unlimited_stream": true,
-    "op_count": 1000,
+    "op_count": 0,
     "contains": 80,
     "insert": 10,
     "remove": 10,
     "key_lb": 0,
-    "key_ub": 100000,
-    "region_size": 24,
-    "thread_count": 10,
-    "node_count": 1
+    "key_ub": 10000,
+    "region_size": 25,
+    "thread_count": 4,
+    "node_count": 2,
+    "qp_max": 8
 }

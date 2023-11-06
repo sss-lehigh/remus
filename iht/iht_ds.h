@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <infiniband/verbs.h>
 #include <optional>
@@ -196,10 +197,10 @@ private:
     // 1) pre_hash will first map the type K to size_t
     //    then pre_hash will help distribute non-uniform inputs evenly by applying a finalizer
     // 2) We use count-1 to ensure the bucket count is co-prime with the other plist bucket counts
-    //    B/C of the property: A key maps to a suboptimal set of values (mod 2A) given mod A = Y (where Y is some number)
-    //    This happens because the hashing function maintains divisibility
+    //    B/C of the property: A key maps to a suboptimal set of values when modding by 2A given "k mod A = Y" (where Y becomes the parent bucket)
+    //    This happens because the hashing function maintains divisibility.
     return (level ^ pre_hash(key, level)) %
-           (count - 1); 
+           (count - 1);
   }
 
   /// Rehash function
@@ -213,7 +214,7 @@ private:
     // pow(2, pdepth);
     pcount = pcount * 2;
     // how much bigger than original size we are
-    int plist_size_factor = (pcount / PLIST_SIZE); 
+    int plist_size_factor = (pcount / PLIST_SIZE);
 
     // 2 ^ (depth) ==> in other words (depth:factor). 0:1, 1:2, 2:4, 3:8, 4:16,
     // 5:32.
@@ -221,8 +222,7 @@ private:
     InitPList(new_p, plist_size_factor);
 
     // hash everything from the full elist into it
-    remote_elist parent_bucket =
-        static_cast<remote_elist>(parent->buckets[pidx].base);
+    remote_elist parent_bucket = static_cast<remote_elist>(parent->buckets[pidx].base);
     remote_elist source = is_local(parent_bucket)
                               ? parent_bucket
                               : pool->Read<EList>(parent_bucket);
@@ -296,7 +296,7 @@ public:
       if (!acquire(pool, get_lock(parent_ptr, bucket))){
           // We must re-fetch the PList to ensure freshness of our pointers (1 << depth-1 to adjust size of read with customized ExtendedRead)
           pool->Deallocate<PList>(curr, 1 << (depth - 1)); // deallocate if curr was not ours
-          curr = pool->ExtendedRead<PList>(parent_ptr, 1 << depth);
+          curr = pool->ExtendedRead<PList>(parent_ptr, 1 << (depth - 1));
           continue;
       }
 
@@ -364,7 +364,7 @@ public:
       if (!acquire(pool, get_lock(parent_ptr, bucket))){
           // We must re-fetch the PList to ensure freshness of our pointers (1 << depth-1 to adjust size of read with customized ExtendedRead)
           pool->Deallocate<PList>(curr, 1 << (depth - 1));
-          curr = pool->ExtendedRead<PList>(parent_ptr, 1 << depth);
+          curr = pool->ExtendedRead<PList>(parent_ptr, 1 << (depth - 1));
           continue;
       }
 
@@ -416,13 +416,13 @@ public:
       }
 
       // Need more room so rehash into plist and perma-unlock
+      // todo? Make it possible to prevent the loop by inserting with the current key/value in rehash function call
       remote_plist p = rehash(pool, curr, count, depth, bucket);
-      // keep local curr updated with remote curr
+      // modify the bucket's pointer, keeping local curr updated with remote curr
       curr->buckets[bucket].base = static_cast<remote_baseptr>(p);
-      curr->buckets[bucket].lock = P_UNLOCKED;
-      // modify the bucket's pointer
       change_bucket_pointer(pool, parent_ptr, bucket, static_cast<remote_baseptr>(p));
       // unlock bucket
+      curr->buckets[bucket].lock = P_UNLOCKED;
       unlock(pool, get_lock(parent_ptr, bucket), P_UNLOCKED);
       if (!is_local(bucket_base)) pool->Deallocate<EList>(e);
       // repeat from top, inserting into the bucket we just rehashed
@@ -456,7 +456,7 @@ public:
       if (!acquire(pool, get_lock(parent_ptr, bucket))){
           // We must re-fetch the PList to ensure freshness of our pointers (1 << depth-1 to adjust size of read with customized ExtendedRead)
           pool->Deallocate<PList>(curr, 1 << (depth - 1)); // deallocate if curr was not ours
-          curr = pool->ExtendedRead<PList>(parent_ptr, 1 << depth);
+          curr = pool->ExtendedRead<PList>(parent_ptr, 1 << (depth - 1));
           continue;
       }
 
@@ -518,11 +518,10 @@ public:
 
     // Create a random operation generator that is
     // - evenly distributed among the key range
-    std::uniform_real_distribution<double> dist =
-        std::uniform_real_distribution<double>(0.0, 1.0);
-    std::default_random_engine gen((unsigned)std::time(NULL));
+    std::uniform_real_distribution<double> dist = std::uniform_real_distribution<double>(0.0, 1.0);
+    std::default_random_engine gen((unsigned) std::time(NULL));
     for (int c = 0; c < op_count; c++) {
-      int k = dist(gen) * key_range + key_lb;
+      int k = (dist(gen) * key_range) + key_lb;
       insert(pool, k, value(k));
       // Wait some time before doing next insert...
       std::this_thread::sleep_for(std::chrono::nanoseconds(10));

@@ -157,7 +157,7 @@ Coro RdmaBroker::HandleConnectionRequests() {
       co_await std::suspend_always{};
     } while ((ret != 0 && errno == EAGAIN));
 
-    ROME_DEBUG("({}) Got event: {} (id={})", fmt::ptr(this),
+    ROME_TRACE("({}) Got event: {} (id={})", fmt::ptr(this),
                rdma_event_str(event->event), fmt::ptr(event->id));
     switch (event->event) {
     case RDMA_CM_EVENT_TIMEWAIT_EXIT: // Nothing to do.

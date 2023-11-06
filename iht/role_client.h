@@ -77,6 +77,8 @@ public:
     int op_count = (key_ub - key_lb) * frac;
     ROME_INFO("CLIENT :: Data structure ({}%) is being populated ({} items inserted) by this client", frac * 100, op_count);
     client->pool_->RegisterThread();
+    // arrive at the barrier so we are populating in sync with local clients -- TODO: replace for remote barrier
+    client->barrier_->arrive_and_wait();
     client->iht_->populate(client->pool_, op_count, key_lb, key_ub, [=](int key){ return key; });
     ROME_DEBUG("CLIENT :: Done with populate!");
     // TODO: Sleeping for 1 second to account for difference between remote
@@ -94,9 +96,8 @@ public:
 
     // Setup qps_controller.
     unique_ptr<rome::LeakyTokenBucketQpsController<util::SystemClock>>
-        qps_controller =
-            rome::LeakyTokenBucketQpsController<util::SystemClock>::Create(
-                client->params_.max_qps_second()); // what is the value here
+        qps_controller = rome::LeakyTokenBucketQpsController<util::SystemClock>::Create(
+            client->params_.max_qps_second()); // what is the value here
 
     vector<Operation> operations = vector<Operation>();
 
@@ -143,6 +144,7 @@ public:
     int32_t runtime = client->params_.runtime();
     int32_t qps_sample_rate = client->params_.qps_sample_rate();
     barrier<> *barr = client->barrier_;
+    bool unlimited_stream = client->params_.unlimited_stream();
 
     // [mfs] Again, it looks like Create() is an unnecessary factory
     // [esl] It is, I wish the WorkloadDriver was a bit more simple to use
@@ -155,6 +157,8 @@ public:
     // [esl]  I am not a huge fan of this WorkloadDriver. The concept is cool 
     //        and useful, but feels wrong in implementation
     OK_OR_FAIL(driver->Start());
+    // TODO: The workload driver has no way for me to sleep on a condition variable and wait on the result
+    // TODO: It would be nice to redesign the dependency anyways, so maybe this won't need to be fixed
     this_thread::sleep_for(chrono::seconds(runtime));
     ROME_DEBUG("Done here, stop sequence");
     // Wait for all the clients to stop. Then set the done to true to release
@@ -176,7 +180,7 @@ public:
   // Start the client
   sss::Status Start() override {
     ROME_INFO("CLIENT :: Starting client...");
-    pool_->RegisterThread();
+    pool_->RegisterThread(); // TODO? REMOVE?
     // [mfs]  The entire barrier infrastructure is odd.  Nobody is using it to
     //        know when to get time, and it's completely per-node.
     // [esl]  I think the Workload driver gets time, which is why I think its a good idea to synchronize the threads
@@ -260,7 +264,7 @@ private:
   Client(const MemoryPool::Peer &host, tcp::EndpointManager &ep, ExperimentParams &params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<MemoryPool> pool)
     : host_(host), endpoint_(ep), params_(params), barrier_(barr), iht_(std::move(iht)), pool_(pool) {
       if (params.unlimited_stream()) progression = 10000;
-      else progression = params_.op_count() * 0.001;
+      else progression = max(20.0, params_.op_count() * params_.thread_count() * 0.001);
     }
 
   int count = 0;

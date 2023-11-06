@@ -147,11 +147,11 @@ def main(args):
                 payload += "iht_test --send_bulk"
             elif FLAGS.send_exp:
                 payload += "iht"
+                # Adding experiment flags
+                payload += " --experiment_params " + make_one_line(process_exp_flags(node_id))
             else:
                 print("Must specify whether testing methods '--send_test', doing bulk operations '--send_bulk', or sending experiment '--send_exp'")
                 exit(1)
-            # Adding experiment flags
-            payload += " --experiment_params " + make_one_line(process_exp_flags(node_id))
             # Tuple: (Creating Command | Output File Name)
             commands.append((' '.join([ssh_login, quote(payload)]), nodename))
             if FLAGS.send_exp:
@@ -159,6 +159,8 @@ def main(args):
                 local_dir = os.path.join("./results", FLAGS.experiment_name + "-stats", nodename + "-" + FLAGS.exp_result)
                 copy = f"scp {ssh_login[4:]}:{filepath} {local_dir}"
                 commands_copy.append((copy, nodename))
+                continue # do for all nodes
+            break # break -- just running the first node when testing
     # Execute the commands and let us know we've finished
     execute(commands, "w+")
     execute(commands_copy, "a")

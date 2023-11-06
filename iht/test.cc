@@ -71,18 +71,29 @@ int main(int argc, char** argv){
     peer_list.push_back(host);
     // Initialize a memory pool
     std::vector<std::thread> mempool_threads;
-    std::shared_ptr<MemoryPool> pool = std::make_shared<MemoryPool>(host, std::make_unique<MemoryPool::cm_type>(host.id), false);
+    std::shared_ptr<MemoryPool> pool = std::make_shared<MemoryPool>(host, std::make_unique<MemoryPool::cm_type>(host.id));
     uint32_t block_size = 1 << 24;
     sss::Status status_pool = pool->Init(block_size, peer_list);
     OK_OR_FAIL(status_pool);
-    pool->RegisterThread();
 
     // Create an iht
     std::unique_ptr<IHT> iht_ = std::make_unique<IHT>(host);
     iht_->InitAsFirst(pool);
-    if (bulk_operations){
-      int scale_size = (CNF_PLIST_SIZE * CNF_ELIST_SIZE) * 2;
-      ROME_INFO("Scale is {}", scale_size);
+    if (test_operations){
+      pool->RegisterThread();
+      ROME_INFO("Starting basic test cases.");
+      test_output(true, iht_->contains(pool, 5), std::nullopt, "Contains 5");
+      test_output(true, iht_->contains(pool, 4), std::nullopt, "Contains 4");
+      test_output(true, iht_->insert(pool, 5, 10), std::nullopt, "Insert 5");
+      test_output(true, iht_->insert(pool, 5, 11),  std::make_optional(10), "Insert 5 again should fail");
+      test_output(true, iht_->contains(pool, 5),  std::make_optional(10), "Contains 5");
+      test_output(true, iht_->contains(pool, 4), std::nullopt, "Contains 4");
+      test_output(true, iht_->remove(pool, 5),  std::make_optional(10), "Remove 5");
+      test_output(true, iht_->remove(pool, 4), std::nullopt, "Remove 4");
+      test_output(true, iht_->contains(pool, 5), std::nullopt, "Contains 5");
+      test_output(true, iht_->contains(pool, 4), std::nullopt, "Contains 4");
+      int scale_size = (CNF_PLIST_SIZE * CNF_ELIST_SIZE) * 4;
+      ROME_INFO("All basic test cases finished, starting bulk tests. Scale is {}", scale_size);
       bool show_passing = false;
       for(int i = 0; i < scale_size; i++){
         test_output(show_passing, iht_->contains(pool, i), std::nullopt, std::string("Contains ") + std::to_string(i) + std::string(" false"));
@@ -103,23 +114,50 @@ int main(int argc, char** argv){
         test_output(show_passing, iht_->contains(pool, i), std::nullopt, std::string("Contains ") + std::to_string(i) + std::string(" maintains false"));
       }
       ROME_INFO("All test cases finished");
-    } else if (test_operations) {
-      ROME_INFO("Starting test cases.");
-      test_output(true, iht_->contains(pool, 5), std::nullopt, "Contains 5");
-      test_output(true, iht_->contains(pool, 4), std::nullopt, "Contains 4");
-      test_output(true, iht_->insert(pool, 5, 10), std::nullopt, "Insert 5");
-      test_output(true, iht_->insert(pool, 5, 11),  std::make_optional(10), "Insert 5 again should fail");
-      test_output(true, iht_->contains(pool, 5),  std::make_optional(10), "Contains 5");
-      test_output(true, iht_->contains(pool, 4), std::nullopt, "Contains 4");
-      test_output(true, iht_->remove(pool, 5),  std::make_optional(10), "Remove 5");
-      test_output(true, iht_->remove(pool, 4), std::nullopt, "Remove 4");
-      test_output(true, iht_->contains(pool, 5), std::nullopt, "Contains 5");
-      test_output(true, iht_->contains(pool, 4), std::nullopt, "Contains 4");
-      ROME_INFO("All cases finished");
+    } else if (bulk_operations) {
+      int THREAD_COUNT = 10;
+      std::vector<std::thread> threads(0);
+      std::barrier<> barr(THREAD_COUNT);
+      for (int t = 0; t < THREAD_COUNT; t++){
+          threads.push_back(std::thread([&](int id){
+              pool->RegisterThread();
+              barr.arrive_and_wait();
+              auto start = chrono::high_resolution_clock::now();
+              if (id == 0) ROME_INFO("Starting populating");
+              for (int ops = 0; ops < 50000; ops++){
+                  // Everybody is trying to insert the same data.
+                  iht_->insert(pool, ops, ops * 2);
+              }
+              barr.arrive_and_wait();
+              if (id == 0) ROME_INFO("Done populating, start workload");
+              auto populate_checkpoint = chrono::high_resolution_clock::now();
+              for (int ops = 0; ops < 100000; ops++){
+                  auto res = iht_->contains(pool, ops);
+                  // assert bottom half is present and top half is absent
+                  if (ops < 50000){
+                      assert(res.has_value() && res.value() == ops * 2);
+                  } else {
+                      assert(!res.has_value());
+                  }
+              }
+              barr.arrive_and_wait();
+              if (id == 0){
+                auto end = chrono::high_resolution_clock::now();
+                auto start_to_checkpoint = chrono::duration_cast<chrono::milliseconds>(populate_checkpoint - start);
+                auto checkpoint_to_end = chrono::duration_cast<chrono::milliseconds>(end - populate_checkpoint);
+                auto total_dur = chrono::duration_cast<chrono::milliseconds>(end - start);
+                ROME_WARN("This test used for correctness, not to be used for benchmarking, use --send_exp");
+                ROME_INFO("Inserts:{}ms Contains:{}ms Total:{}ms", start_to_checkpoint.count(), checkpoint_to_end.count(), total_dur.count());
+              }
+          }, t));
+      }
+      // Join threads
+      for(int t = 0; t < THREAD_COUNT; t++){
+          threads.at(t).join();
+      }
     } else {
       ROME_INFO("Use main executable not test");
     }
-    pool->KillWorkerThread();
 
     ROME_INFO("[EXPERIMENT] -- End of execution; -- ");
     return 0;

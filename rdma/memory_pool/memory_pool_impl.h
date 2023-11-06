@@ -1,13 +1,16 @@
 #pragma once
 
 #include <asm-generic/errno-base.h>
+#include <chrono>
 #include <infiniband/verbs.h>
 
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <thread>
+#include <semaphore>
 
 #include "../../util/thread_util.h"
 #include "memory_pool.h"
@@ -125,9 +128,8 @@ MemoryPool::DoorbellBatchBuilder::Build() {
 
 MemoryPool::MemoryPool(
     const Peer &self,
-    std::unique_ptr<ConnectionManager<channel_type>> connection_manager, bool is_shared)
+    std::unique_ptr<ConnectionManager<channel_type>> connection_manager)
     : self_(self),
-      is_shared_(is_shared),
       connection_manager_(std::move(connection_manager)),
       rdma_per_read_("rdma_per_read", "ops", 10000) {}
 
@@ -168,49 +170,7 @@ sss::Status MemoryPool::Init(uint32_t capacity,
     conn_info_.emplace(
         p.id, conn_info_t{conn.val.value(), got.val.value().rkey(), mr_->lkey});
   }
-
-  if (is_shared_){
-    std::thread t = std::thread([this]{ 
-      WorkerThread(); 
-    }); // TODO: Can I lower/raise the priority of this thread?
-    t.detach();
-  }
   return {sss::Ok, {}};
-}
-
-void MemoryPool::KillWorkerThread() {
-  this->run_worker = false;
-  // Notify all mailboxes
-  for (int i = 0; i < THREAD_MAX; i++) {
-    std::unique_lock lck(this->mutex_vars[i]);
-    this->mailboxes[i] = true;
-    this->cond_vars[i].notify_one();
-  }
-}
-
-void MemoryPool::WorkerThread(){
-    ROME_DEBUG("Worker thread");
-    while(this->run_worker){
-      for(auto it : this->conn_info_){
-        // TODO: Load balance the connections we check. Threads should have a way to let us know what is worth checking
-        // Also might no be an issue? Polling isn't expensive
-
-        // Poll from conn
-        conn_info_t info = it.second;
-        ibv_wc wcs[THREAD_MAX];
-        int poll = ibv_poll_cq(info.conn->id()->send_cq, THREAD_MAX, wcs);
-        if (poll == 0) continue;
-        ROME_ASSERT(poll > 0, "ibv_poll_cq(): {}", strerror(errno));
-        // We polled something :)
-        for(int i = 0; i < poll; i++){
-          ROME_ASSERT(wcs[i].status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", ibv_wc_status_str(wcs[i].status));
-          // notify wcs[i].wr_id;
-          std::unique_lock lck(this->mutex_vars[wcs[i].wr_id]);
-          this->mailboxes[wcs[i].wr_id] = true;
-          this->cond_vars[wcs[i].wr_id].notify_one();
-        }
-      }
-    }
 }
 
 void MemoryPool::RegisterThread() {
@@ -220,8 +180,8 @@ void MemoryPool::RegisterThread() {
     ROME_FATAL("Cannot register the same thread twice");
     return;
   }
-  if (this->id_gen == THREAD_MAX) {
-    ROME_FATAL("Increase THREAD_MAX of memory pool");
+  if (this->id_gen >= THREAD_MAX){
+    ROME_FATAL("Hit upper limit on THREAD_MAX. todo: fix this condition");
     return;
   }
   this->thread_ids.insert(std::make_pair(mid, this->id_gen));
@@ -272,7 +232,7 @@ remote_ptr<T> MemoryPool::ExtendedRead(remote_ptr<T> ptr, int size,
     prealloc = Allocate<T>(size);
   ReadInternal(
       ptr, 0, sizeof(T) * size, sizeof(T) * size, prealloc,
-      kill); // TODO: What happens if I decrease chunk size (* size to sizeT)
+      kill); // TODO: What happens if I decrease chunk size (sizeof(T) * size --> sizeT)
   return prealloc;
 }
 
@@ -336,26 +296,31 @@ void MemoryPool::ReadInternal(remote_ptr<T> ptr, size_t offset, size_t bytes,
 
   ibv_send_wr *bad;
   RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, wrs, &bad);
+
+  // Poll until we get something
+  ibv_wc wc;
+  int poll = 0;
+  for (; poll == 0; poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc)){}
+  ROME_ASSERT(
+      poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
+      (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
   
-  if (is_shared_){
-    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-    while (!this->mailboxes[index_as_id]){
-      this->cond_vars[index_as_id].wait(lck);
-    }
-    this->mailboxes[index_as_id] = false;
-    rdma_per_read_lock_.lock();
-    rdma_per_read_ << num_chunks;
-    rdma_per_read_lock_.unlock();
-  } else {
-    // Poll until we get something
-    ibv_wc wc;
-    int poll = 0;
-    for (; poll == 0; poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc)){}
-    ROME_ASSERT(
-        poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
-        (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
-    rdma_per_read_ << num_chunks;
+  // todo: re-evaluate if this method of synchorization is the best pattern
+  // Ideas:
+  // 1) We could poll as many wc as possible. In between polls, we could try to acquire our semaphore.
+  // 2) [CURRENT] After polling 1 wc, we release the proper semaphore and wait for someone to release us
+  if (wc.wr_id != index_as_id) {
+    // if it's not our wc
+    // first we release the propery semaphore
+    reordering_semaphores[wc.wr_id].release();
+    // and then acquire our own
+    reordering_semaphores[index_as_id].acquire();
   }
+
+  // Update rdma per read
+  rdma_per_read_lock_.lock();
+  rdma_per_read_ << num_chunks;
+  rdma_per_read_lock_.unlock();
 }
 
 template <typename T>
@@ -401,20 +366,20 @@ void MemoryPool::Write(remote_ptr<T> ptr, const T &val,
   ibv_send_wr *bad = nullptr;
   RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
 
-  if (is_shared_){
-    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-    while (!this->mailboxes[index_as_id]) {
-      this->cond_vars[index_as_id].wait(lck);
-    }
-    this->mailboxes[index_as_id] = false;
-  } else {
-      // Poll until we get something
-      ibv_wc wc;
-      auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-      while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
-        poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-      }
-      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), (std::stringstream() << ptr).str());
+  // Poll until we get something
+  ibv_wc wc;
+  auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+  while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
+    poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+  }
+  ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), (std::stringstream() << ptr).str());
+
+  if (wc.wr_id != index_as_id) {
+    // if it's not our wc
+    // first we release the propery semaphore
+    reordering_semaphores[wc.wr_id].release();
+    // and then acquire our own
+    reordering_semaphores[index_as_id].acquire();
   }
 
   if (prealloc == remote_nullptr) {
@@ -451,22 +416,23 @@ T MemoryPool::AtomicSwap(remote_ptr<T> ptr, uint64_t swap, uint64_t hint) {
   ibv_send_wr *bad = nullptr;
   while (true) {
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
-
-    if (is_shared_){
-      std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-      while (!this->mailboxes[index_as_id]) {
-        this->cond_vars[index_as_id].wait(lck);
-      }
-      this->mailboxes[index_as_id] = false;
-    } else {
-      // Poll until we get something
-      ibv_wc wc;
-      auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-      while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
-        poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-      }
-      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+    
+    // Poll until we get something
+    ibv_wc wc;
+    auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+    while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
+      poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
     }
+    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+
+    if (wc.wr_id != index_as_id) {
+      // if it's not our wc
+      // first we release the propery semaphore
+      reordering_semaphores[wc.wr_id].release();
+      // and then acquire our own
+      reordering_semaphores[index_as_id].acquire();
+    }
+
     // ROME_TRACE("Swap: expected={:x}, swap={:x}, prev={:x} (id={})",
     //           send_wr_.wr.atomic.compare_add, (uint64_t)swap, *prev_,
     //           self_.id);
@@ -507,20 +473,21 @@ T MemoryPool::CompareAndSwap(remote_ptr<T> ptr, uint64_t expected,
 
   ibv_send_wr *bad = nullptr;
   RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
-  
-  if (is_shared_){
-    std::unique_lock<std::mutex> lck(this->mutex_vars[index_as_id]);
-    while (!this->mailboxes[index_as_id]) {
-      this->cond_vars[index_as_id].wait(lck);
-    }
-    this->mailboxes[index_as_id] = false;
-  } else {
-    ibv_wc wc;
-    auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-    while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
-      poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-    }
-    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+
+  // Poll until we get something
+  ibv_wc wc;
+  auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+  while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
+    poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+  }
+  ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+
+  if (wc.wr_id != index_as_id) {
+    // if it's not our wc
+    // first we release the propery semaphore
+    reordering_semaphores[wc.wr_id].release();
+    // and then acquire our own
+    reordering_semaphores[index_as_id].acquire();
   }
 
   // ROME_TRACE("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}  (id={})", expected, swap, *prev_, static_cast<uint64_t>(self_.id));

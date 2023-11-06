@@ -1,5 +1,7 @@
 # CMDs
 
+Ethan's guide to some long commands for copying-pasting. TODO: Replace for an easier interface
+
 Generate a Makefile, compile_commands.json (for clangd) and debug mode (can change to release if running benchmarks). And then compile!
 
 cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_BUILD_TYPE=Debug ..
@@ -29,13 +31,13 @@ python launch.py --experiment_name=exp --nodry_run --from_param_config=exp_conf.
 
 ## Manual Normal
 
-LD_LIBRARY_PATH=./build:./build/protos ./iht/iht --send_exp --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 89 insert: 10 remove: 1 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 1 node_count: 1 qp_max: 1 node_id: 0 "
+LD_LIBRARY_PATH=./build:./build/protos ./iht/iht --send_exp --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 2 node_count: 1 qp_max: 1 node_id: 0 "
 
 ## Manual for GDB
 
 LD_LIBRARY_PATH=./build:./build/protos gdb ./iht/iht
 
-run --send_exp --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 89 insert: 1 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 1 node_count: 1 qp_max: 1 node_id: 0 "
+run --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 4 node_count: 1 qp_max: 1 node_id: 0 "
 
 ## Testing
 
