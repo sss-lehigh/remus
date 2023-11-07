@@ -1,13 +1,12 @@
 ### Standard cmake stuff: minimum version, project name
 
 cmake_minimum_required(VERSION 3.18)
-project(Rome LANGUAGES CXX VERSION 0.0.0)
+project(IHT_Rome LANGUAGES CXX VERSION 0.0.0)
 
 ### Flags that the user can override
 
-set(LOG_LEVEL "INFO" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
+set(LOG_LEVEL "DEBUG" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
 set(CXX_STANDARD 23 CACHE STRING "Uses C++20 or 23")
-
 
 ### Make sure we have the required packages
 
@@ -45,21 +44,41 @@ endif()
 message(STATUS "Using CXX_STANDARD=${CXX_STANDARD}")
 set(CMAKE_CXX_STANDARD ${CXX_STANDARD})
 
+### Declare the subfolders to recurse into before building the executable
+add_subdirectory(protos)
+
 ### Declare the things that get built to create rome
 
 # NB: This must come before target_compile_definitions(rome ...) and
 #     target_link_libraries(rome ...)
-add_library(rome SHARED rdma/rdma_broker.cc rdma/rdma_device.cc rdma/rdma_memory.cc util/thread_pool.cc metrics/stopwatch.cc)
+
+add_executable(iht_rome iht/main.cc)
+add_executable(iht_rome_test iht/test.cc)
+
+### Link with dependencies
+find_package(fmt 8.1...<8.2 REQUIRED) # defines fmt::fmt
+include_directories(${fmt_INCLUDE_DIRS})
+message(STATUS "Using fmt version ${fmt_VERSION}")
+
+find_package(spdlog 1.9...<1.10 REQUIRED) #defines spdlog::spdlog
+message(STATUS "Using spdlog version ${spdlog_VERSION}")
+
+target_link_libraries(iht_rome PRIVATE fmt::fmt)
+target_link_libraries(iht_rome PRIVATE spdlog::spdlog)
+target_link_libraries(iht_rome_test PRIVATE fmt::fmt)
+target_link_libraries(iht_rome_test PRIVATE spdlog::spdlog)
 
 ### Set up additional compiler and linker flags
 
-target_include_directories(rome PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
+target_include_directories(iht_rome PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
 # NB: -D flag for ROME_LOG_LEVEL
-target_compile_definitions(rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
+target_compile_definitions(iht_rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
+# Use this to turn on warnings during compilation
+# target_compile_options(iht_rome PUBLIC -Wall -Wextra -Werror)
 # NB: `protos` is a library we make by recursing into the `protos` subfolder
-target_link_libraries(rome PUBLIC protos rdma::ibverbs rdma::cm)
+target_link_libraries(iht_rome PUBLIC protos rdma::ibverbs rdma::cm)
 
-### Declare the subfolders to recurse into
-
-add_subdirectory(protos)
-add_subdirectory(iht)
+# Do the same for the iht_rome_test executable
+target_include_directories(iht_rome_test PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
+target_compile_definitions(iht_rome_test PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
+target_link_libraries(iht_rome_test PUBLIC protos rdma::ibverbs rdma::cm)

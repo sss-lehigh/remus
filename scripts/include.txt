@@ -1,2 +1,1 @@
-rome/
-rdma_iht/
+iht_rdma_minimal/

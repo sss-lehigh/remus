@@ -17,7 +17,8 @@ enum StatusType {
   InvalidArgument,
   ResourceExhausted,
   Aborted,
-  OutOfRange
+  OutOfRange,
+  StreamTerminated
 };
 
 struct Status {
@@ -36,6 +37,7 @@ struct Status {
   }
 };
 
+// TODO: Tranform this into a variant?
 template <class T> struct StatusVal {
   Status status;
   std::optional<T> val;

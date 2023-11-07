@@ -4,6 +4,7 @@ import subprocess
 import os
 from typing import List
 import csv
+import sys
 
 def domain_name(nodetype):
     """Function to get domain name"""
@@ -11,34 +12,32 @@ def domain_name(nodetype):
     node_h = ['apt.emulab.net', 'cse.lehigh.edu', 'clemson.cloudlab.us', 'utah.cloudlab.us', 'utah.cloudlab.us', 'utah.cloudlab.us', 'utah.cloudlab.us']
     return node_h[node_i.index(nodetype)]
 
-
+flags.DEFINE_string('ssh_keyfile', '~/.ssh/id_rsa', 'Path to ssh file for authentication')
+flags.DEFINE_string('ssh_user', 'esl225', 'Username for login')
+flags.DEFINE_string('nodefile', '../../scripts/nodefiles/r320.csv', 'Path to csv with the node names')
+flags.DEFINE_bool('dry_run', required=False, default=False, help='Print the commands instead of running them')
 
 # Define FLAGS to represet the flags
 FLAGS = flags.FLAGS
-
-flags.DEFINE_string('ssh_keyfile', '~/.ssh/id_rsa', 'Path to ssh file for authentication')
-flags.DEFINE_string('ssh_user', 'esl225', 'Username for login')
-flags.DEFINE_string('nodefile', '../../rome/scripts/nodefiles/r320.csv', 'Path to csv with the node names')
-flags.DEFINE_bool('dry_run', required=False, default=False, help='Print the commands instead of running them')
-
+FLAGS(sys.argv)   # need to explicitly to tell flags library to parse argv before you can access FLAGS.xxx
 
 def quote(string):
     return f"'{string}'"
 
+# Create a function that will create a file and run the given command using that file as stout
+def __run__(cmd):
+    if FLAGS.dry_run:
+        print(cmd)
+    else:
+        try:
+            subprocess.run(cmd, shell=True, check=True, stderr=None, stdout=None)
+            print("Successful Execution")
+            return
+        except subprocess.CalledProcessError:
+            print("Invalid Execution")
+
 def execute(commands):
     """For each command in commands, start a process"""
-    # Create a function that will create a file and run the given command using that file as stout
-    def __run__(cmd):
-        if FLAGS.dry_run:
-            print(cmd)
-        else:
-            try:
-                subprocess.run(cmd, shell=True, check=True, stderr=None, stdout=None)
-                print("Successful Execution")
-                return
-            except subprocess.CalledProcessError:
-                print("Invalid Execution")
-
     processes: List[Process] = []
     for cmd, file in commands:
         # Start a thread
@@ -59,7 +58,7 @@ def main(args):
             # Construct ssh command and payload
             ssh_login = f"ssh -i {FLAGS.ssh_keyfile} {FLAGS.ssh_user}@{nodealias}.{domain_name(nodetype)}"
             # !!! The purpose here is to shutdown running instances of the program if its gets stuck somewhere !!!
-            payload = f"/usr/bin/pkill -15 bazelisk"
+            payload = f"/usr/bin/killall -15 iht_rome; /usr/bin/killall -15 iht_rome_test"
             # Tuple: (Creating Command | Output File Name)
             commands.append((' '.join([ssh_login, quote(payload)]), nodename))
     # Execute the commands and let us know we've finished
