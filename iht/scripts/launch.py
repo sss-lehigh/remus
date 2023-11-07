@@ -139,14 +139,14 @@ def main(args):
             # Construct ssh command and payload
             ssh_login = f"ssh -i {FLAGS.ssh_keyfile} {FLAGS.ssh_user}@{nodealias}.{domain_name(nodetype)}"
             bazel_path = f"/users/{FLAGS.ssh_user}/go/bin/bazelisk"
-            payload = f"cd {FLAGS.bin_dir} && cmake . && make && LD_LIBRARY_PATH=.:./protos ./iht/"
+            payload = f"cd {FLAGS.bin_dir} && cmake . && make && LD_LIBRARY_PATH=.:./protos ./"
             # Adding run-type
             if FLAGS.send_test:
-                payload += "iht_test --send_test"
+                payload += "iht_rome_test --send_test"
             elif FLAGS.send_bulk:
-                payload += "iht_test --send_bulk"
+                payload += "iht_rome_test --send_bulk"
             elif FLAGS.send_exp:
-                payload += "iht"
+                payload += "iht_rome"
                 # Adding experiment flags
                 payload += " --experiment_params " + make_one_line(process_exp_flags(node_id))
             else:

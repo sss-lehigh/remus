@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <vector>
 #include <cstdint>
 #include <deque>
 #include <experimental/memory_resource>
@@ -402,19 +404,7 @@ private:
   /// A mapping of thread id to an index into the reordering_semaphores array. Passed as the wr_id in work requests.
   std::unordered_map<std::thread::id, uint64_t> thread_ids;
   /// a vector of semaphores, one for each thread that can send an operation. Threads will use this to recover from polling another thread's wr_id
-  std::array<std::binary_semaphore, THREAD_MAX> reordering_semaphores = {
-      std::binary_semaphore(0),
-      std::binary_semaphore(0),
-      std::binary_semaphore(0),
-      std::binary_semaphore(0),
-      std::binary_semaphore(0),
-      std::binary_semaphore(0),
-      std::binary_semaphore(0),
-      std::binary_semaphore(0),
-      std::binary_semaphore(0),
-      std::binary_semaphore(0)
-  };
-  // std::vector<std::atomic<int>> reordering_counters;
+  std::array<std::atomic<int>, 20> reordering_counters;
 
   std::unique_ptr<CM> connection_manager_;
   std::unique_ptr<rdma_memory_resource> rdma_memory_;
@@ -506,7 +496,9 @@ public:
       return;
     }
     this->thread_ids.insert(std::make_pair(mid, this->id_gen));
+    this->reordering_counters[this->id_gen] = 0;
     this->id_gen++;
+    // this->reordering_counters.resize(this->id_gen);
     control_lock_.unlock();
   }
 
@@ -608,21 +600,21 @@ public:
     send_wr_.wr.rdma.rkey = info.rkey;
 
     ibv_send_wr *bad = nullptr;
+    // set the counter to the number of work completions we expect
+    reordering_counters[index_as_id] = 1;
+    // make the send
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
-    // Poll until we get something
+    // TODO: [esl] poll for more than 1
+    // Poll until we match on the condition
     ibv_wc wc;
-    auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-    while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
-      poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-    }
-    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), (std::stringstream() << ptr).str());
-
-    if (wc.wr_id != index_as_id) {
-      // if it's not our wc
-      // first we release the propery semaphore
-      reordering_semaphores[wc.wr_id].release();
-      // and then acquire our own
-      reordering_semaphores[index_as_id].acquire();
+    while (reordering_counters[index_as_id] != 0) {
+      int poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+      if (poll == 0 || (poll < 0 && errno == EAGAIN))
+        continue;
+      // Assert a good result
+      ROME_ASSERT(wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), (std::stringstream() << ptr).str());
+      int old = reordering_counters[wc.wr_id].fetch_sub(1);
+      ROME_ASSERT(old >= 1, "Broken synchronization");
     }
 
     if (prealloc == remote_nullptr) {
@@ -663,22 +655,20 @@ public:
 
     ibv_send_wr *bad = nullptr;
     while (true) {
+      // set the counter to the number of work completions we expect
+      reordering_counters[index_as_id] = 1;
       RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
       
-      // Poll until we get something
+      // Poll until we match on the condition
       ibv_wc wc;
-      auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-      while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
-        poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-      }
-      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
-
-      if (wc.wr_id != index_as_id) {
-        // if it's not our wc
-        // first we release the propery semaphore
-        reordering_semaphores[wc.wr_id].release();
-        // and then acquire our own
-        reordering_semaphores[index_as_id].acquire();
+      while (reordering_counters[index_as_id] != 0) {
+        int poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+        if (poll == 0 || (poll < 0 && errno == EAGAIN))
+          continue;
+        // Assert a good result
+        ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+        int old = reordering_counters[wc.wr_id].fetch_sub(1);
+        ROME_ASSERT(old >= 1, "Broken synchronization");
       }
 
       if (*prev_ == send_wr_.wr.atomic.compare_add)
@@ -724,22 +714,20 @@ public:
     send_wr_.wr.atomic.swap = swap;
 
     ibv_send_wr *bad = nullptr;
+    // set the counter to the number of work completions we expect
+    reordering_counters[index_as_id] = 1;
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
 
-    // Poll until we get something
+    // Poll until we match on the condition
     ibv_wc wc;
-    auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-    while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
-      poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
-    }
-    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
-
-    if (wc.wr_id != index_as_id) {
-      // if it's not our wc
-      // first we release the propery semaphore
-      reordering_semaphores[wc.wr_id].release();
-      // and then acquire our own
-      reordering_semaphores[index_as_id].acquire();
+    while (reordering_counters[index_as_id] != 0) {
+      int poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+      if (poll == 0 || (poll < 0 && errno == EAGAIN))
+        continue;
+      // Assert a good result
+      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+      int old = reordering_counters[wc.wr_id].fetch_sub(1);
+      ROME_ASSERT(old >= 1, "Broken synchronization");
     }
 
     // ROME_TRACE("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}  (id={})", expected, swap, *prev_, static_cast<uint64_t>(self_.id));
@@ -801,27 +789,20 @@ private:
     }
 
     ibv_send_wr *bad;
+    // set the counter to the number of work completions we expect
+    reordering_counters[index_as_id] = num_chunks;
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, wrs, &bad);
 
-    // Poll until we get something
+    // Poll until we match on the condition
     ibv_wc wc;
-    int poll = 0;
-    for (; poll == 0; poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc)){}
-    // [mfs] removed kill
-    ROME_ASSERT(
-        poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
-        (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
-    
-    // todo: re-evaluate if this method of synchorization is the best pattern
-    // Ideas:
-    // 1) We could poll as many wc as possible. In between polls, we could try to acquire our semaphore.
-    // 2) [CURRENT] After polling 1 wc, we release the proper semaphore and wait for someone to release us
-    if (wc.wr_id != index_as_id) {
-      // if it's not our wc
-      // first we release the propery semaphore
-      reordering_semaphores[wc.wr_id].release();
-      // and then acquire our own
-      reordering_semaphores[index_as_id].acquire();
+    while (reordering_counters[index_as_id] != 0) {
+      int poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+      if (poll == 0 || (poll < 0 && errno == EAGAIN))
+        continue;
+      // Assert a good result
+      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
+      int old = reordering_counters[wc.wr_id].fetch_sub(1);
+      ROME_ASSERT(old >= 1, "Broken synchronization");
     }
 
     // Update rdma per read

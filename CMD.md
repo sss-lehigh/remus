@@ -31,22 +31,22 @@ python launch.py --experiment_name=exp --nodry_run --from_param_config=exp_conf.
 
 ## Manual Normal
 
-LD_LIBRARY_PATH=./build:./build/protos ./iht/iht --send_exp --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 2 node_count: 1 qp_max: 1 node_id: 0 "
+LD_LIBRARY_PATH=./build:./build/protos ./iht_rome --send_exp --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 2 node_count: 1 qp_max: 1 node_id: 0 "
 
 ## Manual for GDB
 
-LD_LIBRARY_PATH=./build:./build/protos gdb ./iht/iht
+LD_LIBRARY_PATH=./build:./build/protos gdb ./iht_rome
 
 run --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 4 node_count: 1 qp_max: 1 node_id: 0 "
 
 ## Testing
 
-LD_LIBRARY_PATH=.:./protos ./iht/iht_test --send_test
+LD_LIBRARY_PATH=.:./protos ./iht_rome_test --send_test
 
-LD_LIBRARY_PATH=.:./protos gdb ./iht/iht_test
+LD_LIBRARY_PATH=.:./protos gdb ./iht_rome_test
 run --send_test
 
-LD_LIBRARY_PATH=.:./protos ./iht/iht_test --send_bulk
+LD_LIBRARY_PATH=.:./protos ./iht_rome_test --send_bulk
 
-LD_LIBRARY_PATH=.:./protos gdb ./iht/iht_test
+LD_LIBRARY_PATH=.:./protos gdb ./iht_rome_test
 run --send_bulk
