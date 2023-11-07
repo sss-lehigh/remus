@@ -1,29 +1,13 @@
 #pragma once
 
-#include <atomic>
-#include <cstdint>
-#include <cstring>
-#include <functional>
-#include <infiniband/verbs.h>
-#include <optional>
-
-#include "../logging/logging.h"
-#include "../rdma/channel/sync_accessor.h"
-#include "../rdma/connection_manager/connection.h"
-#include "../rdma/connection_manager/connection_manager.h"
-#include "../rdma/memory_pool/memory_pool.h"
-#include "../rdma/rdma_memory.h"
+#include "../rdma/rdma.h"
 #include "common.h"
 
-using ::rome::rdma::ConnectionManager;
-using ::rome::rdma::MemoryPool;
-using ::rome::rdma::remote_nullptr;
-using ::rome::rdma::remote_ptr;
-using ::rome::rdma::RemoteObjectProto;
+using namespace rome::rdma;
 
 template <class K, class V, int ELIST_SIZE, int PLIST_SIZE> class RdmaIHT {
 private:
-  MemoryPool::Peer self_;
+  Peer self_;
 
   /// State of a bucket
   /// E_LOCKED - The bucket is in use by a thread. The bucket points to an EList
@@ -131,7 +115,7 @@ private:
   }
 
   /// Acquire a lock on the bucket. Will prevent others from modifying it
-  bool acquire(std::shared_ptr<MemoryPool> pool, remote_lock lock) {
+  bool acquire(std::shared_ptr<rdma_capability> pool, remote_lock lock) {
     // Spin while trying to acquire the lock
     while (true) {
       // Can this be a CAS on an address within a PList?
@@ -147,7 +131,7 @@ private:
   /// @brief Unlock a lock ==> the reverse of acquire
   /// @param lock the lock to unlock
   /// @param unlock_status what should the end lock status be.
-  inline void unlock(std::shared_ptr<MemoryPool> pool, remote_lock lock, uint64_t unlock_status) {
+  inline void unlock(std::shared_ptr<rdma_capability> pool, remote_lock lock, uint64_t unlock_status) {
     remote_lock temp = pool->Allocate<lock_type>();
     pool->Write<lock_type>(lock, unlock_status, temp);
     // Have to deallocate "8" of them to account for alignment
@@ -171,7 +155,7 @@ private:
   // [mfs] I don't really understand this
   // [esl] Is supposed to be a short-hand for manipulating the EList/PList pointer within a bucket.
   //       I tried to update my documentation to make that more clear
-  inline void change_bucket_pointer(std::shared_ptr<MemoryPool> pool, remote_plist list_start,
+  inline void change_bucket_pointer(std::shared_ptr<rdma_capability> pool, remote_plist list_start,
                                     uint64_t bucket, remote_baseptr baseptr) {
     remote_ptr<remote_baseptr> bucket_ptr = get_baseptr(list_start, bucket);
     // [mfs] Can this address manipulation be hidden?
@@ -209,7 +193,7 @@ private:
   /// @param pcount The number of elements in `parent`
   /// @param pdepth The depth of `parent`
   /// @param pidx   The index in `parent` of the bucket to rehash
-  remote_plist rehash(std::shared_ptr<MemoryPool> pool, remote_plist parent, size_t pcount, size_t pdepth,
+  remote_plist rehash(std::shared_ptr<rdma_capability> pool, remote_plist parent, size_t pcount, size_t pdepth,
                       size_t pidx) {
     // pow(2, pdepth);
     pcount = pcount * 2;
@@ -242,9 +226,7 @@ private:
   }
 
 public:
-  using conn_type = MemoryPool::conn_type;
-
-  RdmaIHT(MemoryPool::Peer self) : self_(self) {
+  RdmaIHT(Peer self) : self_(self) {
     // I want to make sure we are choosing PLIST_SIZE and ELIST_SIZE to best use the space (b/c of alignment)
     if ((PLIST_SIZE * sizeof(plist_pair_t)) % 64 != 0) {
       ROME_WARN("Suboptimal PLIST_SIZE b/c PList aligned to 64 bytes");
@@ -257,7 +239,7 @@ public:
     /// @brief Create a fresh iht
     /// @param pool the capability to init the IHT with
     /// @return the iht root pointer
-    remote_ptr<anon_ptr> InitAsFirst(std::shared_ptr<MemoryPool> pool){
+    remote_ptr<anon_ptr> InitAsFirst(std::shared_ptr<rdma_capability> pool){
         remote_plist iht_root = pool->Allocate<PList>();
         InitPList(iht_root, 1);
         this->root = iht_root;
@@ -274,7 +256,7 @@ public:
   /// @param pool the capability providing one-sided RDMA
   /// @param key the key to search on
   /// @return an optional containing the value, if the key exists
-  std::optional<V> contains(std::shared_ptr<MemoryPool> pool, K key) {
+  std::optional<V> contains(std::shared_ptr<rdma_capability> pool, K key) {
     // start at root
     remote_plist curr = pool->Read<PList>(root);
     remote_plist parent_ptr = root;
@@ -342,7 +324,7 @@ public:
   /// @param key the key to insert
   /// @param value the value to associate with the key
   /// @return an empty optional if the insert was successful. Otherwise it's the value at the key.
-  std::optional<V> insert(std::shared_ptr<MemoryPool> pool, K key, V value) {
+  std::optional<V> insert(std::shared_ptr<rdma_capability> pool, K key, V value) {
     // start at root
     remote_plist curr = pool->Read<PList>(root);
     remote_plist parent_ptr = root;
@@ -434,7 +416,7 @@ public:
   /// @param pool the capability providing one-sided RDMA
   /// @param key the key to remove at
   /// @return an optional containing the old value if the remove was successful. Otherwise an empty optional.
-  std::optional<V> remove(std::shared_ptr<MemoryPool> pool, K key) {
+  std::optional<V> remove(std::shared_ptr<rdma_capability> pool, K key) {
     // start at root
     remote_plist curr = pool->Read<PList>(root);
     remote_plist parent_ptr = root;
@@ -512,7 +494,7 @@ public:
   /// @param key_ub the upper bound for the key range
   /// @param value the value to associate with each key. Currently, we have
   /// asserts for result to be equal to the key. Best to set value equal to key!
-  void populate(std::shared_ptr<MemoryPool> pool, int op_count, K key_lb, K key_ub, std::function<K(V)> value) {
+  void populate(std::shared_ptr<rdma_capability> pool, int op_count, K key_lb, K key_ub, std::function<K(V)> value) {
     // Populate only works when we have numerical keys
     K key_range = key_ub - key_lb;
 

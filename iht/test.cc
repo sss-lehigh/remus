@@ -1,41 +1,31 @@
-#include <fstream>
-#include <google/protobuf/message.h>
-#include <iostream>
-#include <memory>
-#include <optional>
-#include <ostream>
-#include <stdio.h>
-#include <string>
-#include <thread>
-#include <unistd.h>
+#include "../rdma/memory_pool.h"
 
 #include <google/protobuf/text_format.h>
+#include <protos/experiment.pb.h>
+#include <protos/workloaddriver.pb.h>
+#include <vector>
 
 #include "../logging/logging.h"
-#include "../rdma/connection_manager/connection_manager.h"
-#include "../rdma/memory_pool/memory_pool.h"
-#include "../util/tcp/tcp.h"
-
-#include "protos/colosseum.pb.h"
-#include "protos/experiment.pb.h"
-
-#include "role_client.h"
-#include "role_server.h"
-
 #include "../vendor/sss/cli.h"
 
+#include "../rdma/rdma.h"
+
+#include "common.h"
+#include "role_client.h"
+#include "role_server.h"
+#include "iht_ds.h"
+
 auto ARGS = {
-    cli::BOOL_ARG_OPT("--send_bulk",
+    sss::BOOL_ARG_OPT("--send_bulk",
                       "If to run bulk operations. (More for benchmarking)"),
-    cli::BOOL_ARG_OPT("--send_test",
+    sss::BOOL_ARG_OPT("--send_test",
                       "If to test the functionality of the methods."),
 };
 
 #define PATH_MAX 4096
 #define PORT_NUM 18000
 
-using rome::rdma::MemoryPool;
-using cm_type = MemoryPool::cm_type;
+using namespace rome::rdma;
 
 // The optimial number of memory pools is mp=min(t, MAX_QP/n) where n is the number of nodes and t is the number of threads
 // To distribute mp (memory pools) across t threads, it is best for t/mp to be a whole number
@@ -43,7 +33,7 @@ using cm_type = MemoryPool::cm_type;
 int main(int argc, char** argv){
     ROME_INIT_LOG();
 
-    cli::ArgMap args;
+    sss::ArgMap args;
     // import_args will validate that the newly added args don't conflict with
     // those already added.
     auto res = args.import_args(ARGS);
@@ -66,15 +56,14 @@ int main(int argc, char** argv){
 
     // Create a single peer
     volatile bool done = false; // (Should be atomic?)
-    MemoryPool::Peer host = MemoryPool::Peer(0, "node0", PORT_NUM + 1);
-    std::vector<MemoryPool::Peer> peer_list = std::vector<MemoryPool::Peer>(0);
+    Peer host = Peer(0, "node0", PORT_NUM + 1);
+    std::vector<Peer> peer_list = std::vector<Peer>(0);
     peer_list.push_back(host);
     // Initialize a memory pool
     std::vector<std::thread> mempool_threads;
-    std::shared_ptr<MemoryPool> pool = std::make_shared<MemoryPool>(host, std::make_unique<MemoryPool::cm_type>(host.id));
+    std::shared_ptr<rdma_capability> pool = std::make_shared<rdma_capability>(host);
     uint32_t block_size = 1 << 24;
-    sss::Status status_pool = pool->Init(block_size, peer_list);
-    OK_OR_FAIL(status_pool);
+    pool->init_pool(block_size, peer_list);
 
     // Create an iht
     std::unique_ptr<IHT> iht_ = std::make_unique<IHT>(host);

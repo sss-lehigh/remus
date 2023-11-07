@@ -1,8 +1,8 @@
 #include <algorithm>
 #include <atomic>
 
-#include "../rdma/connection_manager/connection_manager.h"
-#include "../rdma/memory_pool/memory_pool.h"
+#include "../rdma/rdma.h"
+#include "../logging/logging.h"
 #include "common.h"
 #include "iht_ds.h"
 #include "protos/experiment.pb.h"

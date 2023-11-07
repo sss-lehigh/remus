@@ -17,6 +17,7 @@
 #include <protos/rdma.pb.h>
 
 #include <spdlog/fmt/fmt.h> // [mfs] Used in remote_ptr... factor away?
+#include <vector>
 
 #include "../logging/logging.h"
 #include "../metrics/summary.h"
@@ -24,6 +25,8 @@
 
 #include "peer.h"
 #include "remote_ptr.h"
+
+#define THREAD_MAX 10
 
 // [mfs]  The entire dependency on fmt boils down to this template, used in one
 //        assertion?
@@ -195,7 +198,7 @@ public:
       return {sss::InternalError, "Failed to register memory region"};
     }
     memory_regions_.emplace(id, std::move(mr));
-    ROME_DEBUG("Memory region registered: {} @ {} to {} (length={})", id,
+    ROME_TRACE("Memory region registered: {} @ {} to {} (length={})", id,
                fmt::ptr(base), fmt::ptr(base + length), length);
     return sss::Status::Ok();
   }
@@ -238,7 +241,7 @@ public:
             bytes, "/proc/sys/vm/nr_hugepages", pd)),
         head_(rdma_memory_->raw() + bytes) {
     std::memset(alignments_.data(), 0, sizeof(alignments_));
-    ROME_DEBUG("rdma_memory_resource: {} to {} (length={})",
+    ROME_TRACE("rdma_memory_resource: {} to {} (length={})",
                fmt::ptr(rdma_memory_->raw()), fmt::ptr(head_.load()), bytes);
   }
 
@@ -390,20 +393,34 @@ private:
   };
 
   Peer self_;
-
-  // TODO:  This shouldn't be a class-wide field if we want multithreading.
-  //        Check [el]'s fork for an alternative.
-  volatile uint64_t *prev_ = nullptr;
+  /// Used to protect the id generator and the thread_ids
+  std::mutex control_lock_;
+  /// Used to protect the rdma_per_read_ summary statistics thing
+  std::mutex rdma_per_read_lock_;
+  /// A counter to increment
+  uint64_t id_gen = 0;
+  /// A mapping of thread id to an index into the reordering_semaphores array. Passed as the wr_id in work requests.
+  std::unordered_map<std::thread::id, uint64_t> thread_ids;
+  /// a vector of semaphores, one for each thread that can send an operation. Threads will use this to recover from polling another thread's wr_id
+  std::array<std::binary_semaphore, THREAD_MAX> reordering_semaphores = {
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0),
+      std::binary_semaphore(0)
+  };
+  // std::vector<std::atomic<int>> reordering_counters;
 
   std::unique_ptr<CM> connection_manager_;
   std::unique_ptr<rdma_memory_resource> rdma_memory_;
   ibv_mr *mr_;
 
   std::unordered_map<uint16_t, conn_info_t> conn_info_;
-
-  // TODO:  This shouldn't be a class-wide field if we want multithreading.
-  //        Check [el]'s fork for an alternative.
-  ibv_send_wr send_wr_{};
 
   rome::metrics::Summary<size_t> rdma_per_read_;
 
@@ -477,6 +494,22 @@ public:
     return {sss::Ok, {}};
   }
 
+  void RegisterThread() {
+    control_lock_.lock();
+    std::thread::id mid = std::this_thread::get_id();
+    if (this->thread_ids.find(mid) != this->thread_ids.end()) {
+      ROME_FATAL("Cannot register the same thread twice");
+      return;
+    }
+    if (this->id_gen >= THREAD_MAX){
+      ROME_FATAL("Hit upper limit on THREAD_MAX. todo: fix this condition");
+      return;
+    }
+    this->thread_ids.insert(std::make_pair(mid, this->id_gen));
+    this->id_gen++;
+    control_lock_.unlock();
+  }
+
   /// Allocate some memory from the local RDMA heap
   template <typename T> remote_ptr<T> Allocate(size_t size = 1) {
     auto ret = remote_ptr<T>(
@@ -509,7 +542,7 @@ public:
                              remote_ptr<T> prealloc = remote_nullptr) {
     if (prealloc == remote_nullptr)
       prealloc = Allocate<T>(size);
-    // TODO: What happens if I decrease chunk size (* size to sizeT)
+    // TODO: What happens if I decrease chunk size (sizeT * size --> sizeT)
     ReadInternal(ptr, 0, sizeof(T) * size, sizeof(T) * size, prealloc);
     return prealloc;
   }
@@ -532,8 +565,10 @@ public:
   template <typename T>
   void Write(remote_ptr<T> ptr, const T &val,
              remote_ptr<T> prealloc = remote_nullptr) {
-    ROME_DEBUG("Write: {:x} @ {}", (uint64_t)val, ptr);
     auto info = conn_info_.at(ptr.id());
+
+    // [esl] Getting the thread's index to determine it's owned flag
+    uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
 
     // [mfs] I have a few concerns about this code:
     // -  Why do we need to allocate?  Why can't we just use `val`?  Is it
@@ -547,11 +582,11 @@ public:
     if (prealloc == remote_nullptr) {
       auto alloc = rdma_allocator<T>(rdma_memory_.get());
       local = alloc.allocate();
-      ROME_DEBUG("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
+      ROME_TRACE("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
                  (uint64_t)local);
     } else {
       local = std::to_address(prealloc);
-      ROME_DEBUG("Preallocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
+      ROME_TRACE("Preallocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
                  (uint64_t)local);
     }
 
@@ -563,6 +598,8 @@ public:
     sge.length = sizeof(T);
     sge.lkey = mr_->lkey;
 
+    ibv_send_wr send_wr_{};
+    send_wr_.wr_id = index_as_id;
     send_wr_.num_sge = 1;
     send_wr_.sg_list = &sge;
     send_wr_.opcode = IBV_WR_RDMA_WRITE;
@@ -572,20 +609,26 @@ public:
 
     ibv_send_wr *bad = nullptr;
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
+    // Poll until we get something
     ibv_wc wc;
     auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
     while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
       poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+    }
+    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), (std::stringstream() << ptr).str());
+
+    if (wc.wr_id != index_as_id) {
+      // if it's not our wc
+      // first we release the propery semaphore
+      reordering_semaphores[wc.wr_id].release();
+      // and then acquire our own
+      reordering_semaphores[index_as_id].acquire();
     }
 
     if (prealloc == remote_nullptr) {
       auto alloc = rdma_allocator<T>(rdma_memory_.get());
       alloc.deallocate(local);
     }
-    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS,
-                "ibv_poll_cq(): {} ({})",
-                (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)),
-                (std::stringstream() << ptr).str());
   }
 
   /// Do a 64-bit swap over RDMA
@@ -596,11 +639,19 @@ public:
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
 
-    ibv_sge sge{};
-    sge.addr = reinterpret_cast<uint64_t>(prev_);
-    sge.length = sizeof(uint64_t);
-    sge.lkey = mr_->lkey;
+    // [esl] Getting the thread's index to determine it's owned flag
+    uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
 
+    auto alloc = rdma_allocator<uint64_t>(rdma_memory_.get());
+    // [esl] There is probably a better way to avoid allocating every time we do this call (maybe be preallocating the space thread_local)
+    volatile uint64_t *prev_ = alloc.allocate();
+
+    ibv_sge sge{.addr = reinterpret_cast<uint64_t>(prev_),
+                .length = sizeof(uint64_t),
+                .lkey = mr_->lkey};
+
+    ibv_send_wr send_wr_{};
+    send_wr_.wr_id = index_as_id;
     send_wr_.num_sge = 1;
     send_wr_.sg_list = &sge;
     send_wr_.opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
@@ -613,22 +664,30 @@ public:
     ibv_send_wr *bad = nullptr;
     while (true) {
       RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
+      
+      // Poll until we get something
       ibv_wc wc;
       auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
       while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
         poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
       }
-      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
-                  (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
 
-      ROME_DEBUG("Swap: expected={:x}, swap={:x}, prev={:x} (id={})",
-                 send_wr_.wr.atomic.compare_add, (uint64_t)swap, *prev_,
-                 self_.id);
+      if (wc.wr_id != index_as_id) {
+        // if it's not our wc
+        // first we release the propery semaphore
+        reordering_semaphores[wc.wr_id].release();
+        // and then acquire our own
+        reordering_semaphores[index_as_id].acquire();
+      }
+
       if (*prev_ == send_wr_.wr.atomic.compare_add)
         break;
       send_wr_.wr.atomic.compare_add = *prev_;
     };
-    return T(*prev_);
+    T ret = T(*prev_);
+    alloc.deallocate((uint64_t *) prev_, 8);
+    return ret;
   }
 
   /// Do a 64-bit CAS over RDMA
@@ -639,12 +698,22 @@ public:
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
 
+    // [esl] Getting the thread's index to determine it's owned flag
+    uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
+
+    auto alloc = rdma_allocator<uint64_t>(rdma_memory_.get());
+    // [esl] There is probably a better way to avoid allocating every time we do this call (maybe be preallocating the space thread_local)
+    volatile uint64_t *prev_ = alloc.allocate();
+    
     // TODO: would the code be clearer if all of the ibv_* initialization
     // throughout this file used the new syntax?
+    // [esl] I agree, i think its much cleaner
     ibv_sge sge{.addr = reinterpret_cast<uint64_t>(prev_),
                 .length = sizeof(uint64_t),
                 .lkey = mr_->lkey};
 
+    ibv_send_wr send_wr_{};
+    send_wr_.wr_id = index_as_id;
     send_wr_.num_sge = 1;
     send_wr_.sg_list = &sge;
     send_wr_.opcode = IBV_WR_ATOMIC_CMP_AND_SWP;
@@ -656,16 +725,27 @@ public:
 
     ibv_send_wr *bad = nullptr;
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
+
+    // Poll until we get something
     ibv_wc wc;
     auto poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
     while (poll == 0 || (poll < 0 && errno == EAGAIN)) {
       poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
     }
-    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
-                (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
-    ROME_DEBUG("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}  (id={})",
-               expected, swap, *prev_, static_cast<uint64_t>(self_.id));
-    return T(*prev_);
+    ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+
+    if (wc.wr_id != index_as_id) {
+      // if it's not our wc
+      // first we release the propery semaphore
+      reordering_semaphores[wc.wr_id].release();
+      // and then acquire our own
+      reordering_semaphores[index_as_id].acquire();
+    }
+
+    // ROME_TRACE("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}  (id={})", expected, swap, *prev_, static_cast<uint64_t>(self_.id));
+    T ret = T(*prev_);
+    alloc.deallocate((uint64_t *)prev_, 8);
+    return ret;
   }
 
   template <typename T> inline remote_ptr<T> GetRemotePtr(const T *ptr) const {
@@ -691,9 +771,13 @@ private:
 
     auto info = conn_info_.at(ptr.id());
 
+    // [esl] Getting the thread's index to determine it's owned flag
+    uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
+
     T *local = std::to_address(prealloc);
     ibv_sge sges[num_chunks];
     ibv_send_wr wrs[num_chunks];
+
     for (int i = 0; i < num_chunks; ++i) {
       auto chunk_offset = offset + i * chunk_size;
       sges[i].addr = reinterpret_cast<uint64_t>(local) + chunk_offset;
@@ -704,6 +788,7 @@ private:
       }
       sges[i].lkey = mr_->lkey;
 
+      wrs[i].wr_id = index_as_id;
       wrs[i].num_sge = 1;
       wrs[i].sg_list = &sges[i];
       wrs[i].opcode = IBV_WR_RDMA_READ;
@@ -717,22 +802,42 @@ private:
 
     ibv_send_wr *bad;
     RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, wrs, &bad);
+
+    // Poll until we get something
     ibv_wc wc;
     int poll = 0;
-
-    // [mfs] Removed "kill"
-    for (; poll == 0; poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc))
-      ;
+    for (; poll == 0; poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc)){}
+    // [mfs] removed kill
     ROME_ASSERT(
         poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
         (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
+    
+    // todo: re-evaluate if this method of synchorization is the best pattern
+    // Ideas:
+    // 1) We could poll as many wc as possible. In between polls, we could try to acquire our semaphore.
+    // 2) [CURRENT] After polling 1 wc, we release the proper semaphore and wait for someone to release us
+    if (wc.wr_id != index_as_id) {
+      // if it's not our wc
+      // first we release the propery semaphore
+      reordering_semaphores[wc.wr_id].release();
+      // and then acquire our own
+      reordering_semaphores[index_as_id].acquire();
+    }
 
+    // Update rdma per read
+    rdma_per_read_lock_.lock();
     rdma_per_read_ << num_chunks;
+    rdma_per_read_lock_.unlock();
   }
 
   // [mfs]  According to [el], it is possible to post multiple requests on the
   //        same qp, and they'll finish in order, so we definitely will want a
   //        way to let that happen.
+  // [esl] Just to cite my sources:
+  // https://www.rdmamojo.com/2013/07/26/libibverbs-thread-safe-level/ (Thread safe)
+  // https://www.rdmamojo.com/2013/01/26/ibv_post_send/ (Ordering guarantee, for RC only)
+  //    "In RC QP, there is a PSN (Packet Serial Number) that guarantees the order of the messages"
+  // https://www.rdmamojo.com/2013/06/01/which-queue-pair-type-to-use/ (Ordering guarantee also mentioned her)
 };
 
 } // namespace rome::rdma::internal

@@ -9,18 +9,13 @@
 
 #pragma once
 
+
 #include <future>
 #include <protos/workloaddriver.pb.h>
 
 #include "../metrics/counter.h"
 #include "../metrics/stopwatch.h"
 #include "../metrics/summary.h"
-#include "../util/duration_util.h"
-#include "../logging/logging.h"
-#include "client_adaptor.h"
-#include "protos/colosseum.pb.h"
-#include "qps_controller.h"
-#include "streams/stream.h"
 
 namespace rome {
 
@@ -121,6 +116,24 @@ public:
 private:
   std::function<T(void)> generator_;
   inline sss::StatusVal<T> NextInternal() override {
+    return {sss::Status::Ok(), generator_()};
+  }
+};
+
+
+template <typename T> class FixedLengthStream : public Stream<T> {
+public:
+  FixedLengthStream(std::function<T(void)> generator, int length) : generator_(generator), length_(length), count_(0) {}
+
+private:
+  std::function<T(void)> generator_;
+  int length_;
+  int count_;
+  inline sss::StatusVal<T> NextInternal() override {
+    count_++;
+    if (length_ < count_){
+      return {StreamTerminatedStatus(), {}};
+    }
     return {sss::Status::Ok(), generator_()};
   }
 };

@@ -89,5 +89,10 @@ public:
     auto got = conn_or.val.value()->channel()->Deliver<T>();
     return got;
   }
+
+  /// [el] Register a thread means allocating resources to that specific thread that allows them to synchronize with each other
+  void RegisterThread(){
+    pool.RegisterThread();
+  }
 };
 } // namespace rome::rdma

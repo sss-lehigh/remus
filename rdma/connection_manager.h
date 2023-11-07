@@ -12,6 +12,7 @@
 #include <rdma/rdma_verbs.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <fcntl.h>
 
 #include "../logging/logging.h"
 #include "../vendor/sss/status.h"
@@ -326,13 +327,13 @@ class ConnectionManager {
 
 public:
   ~ConnectionManager() {
-    ROME_DEBUG("Shutting down: {}", fmt::ptr(this));
+    ROME_TRACE("Shutting down: {}", fmt::ptr(this));
     Acquire(my_id_);
     // Shutdown()
     accepting_ = false;
     // end Shutdown()
 
-    ROME_DEBUG("Stopping broker...");
+    ROME_TRACE("Stopping broker...");
     if (broker_ != nullptr)
       auto s = broker_->Stop();
 
@@ -401,13 +402,13 @@ public:
                       "Received connect request without private data.");
     uint32_t peer_id =
         *reinterpret_cast<const uint32_t *>(event->param.conn.private_data);
-    ROME_DEBUG("[OnConnectRequest] (Node {}) Got connection request from: {}",
+    ROME_TRACE("[OnConnectRequest] (Node {}) Got connection request from: {}",
                my_id_, peer_id);
 
     if (peer_id != my_id_) {
       // Attempt to acquire lock when not originating from same node
       if (!Acquire(peer_id)) {
-        ROME_DEBUG("Lock acquisition failed: {}", mu_);
+        ROME_TRACE("Lock acquisition failed: {}", mu_);
         rdma_reject(event->id, nullptr, 0);
         rdma_destroy_ep(id);
         rdma_ack_cm_event(event);
@@ -426,7 +427,7 @@ public:
         message = message + std::to_string(my_id_) + ") Connection already " +
                   (conn != established_.end() ? "established" : "requested") +
                   ": " + std::to_string(peer_id);
-        ROME_DEBUG(message);
+        ROME_TRACE(message);
         return;
       }
 
@@ -460,7 +461,7 @@ public:
         established_.emplace(peer_id, new Connection(my_id_, peer_id, id));
     ROME_ASSERT_DEBUG(it.second, "Insertion failed");
 
-    ROME_DEBUG("[OnConnectRequest] (Node {}) peer={}, id={}", my_id_, peer_id,
+    ROME_TRACE("[OnConnectRequest] (Node {}) peer={}, id={}", my_id_, peer_id,
                fmt::ptr(id));
     RDMA_CM_ASSERT(rdma_accept, id,
                    peer_id == my_id_ ? nullptr : &context->conn_param);
@@ -486,7 +487,7 @@ public:
     // [mfs] How could this ever be the case?
     if (auto conn = established_.find(peer_id);
         conn != established_.end() && conn->second->id() == id) {
-      ROME_DEBUG("(Node {}) Disconnected from node {}", my_id_, peer_id);
+      ROME_TRACE("(Node {}) Disconnected from node {}", my_id_, peer_id);
       established_.erase(peer_id);
     }
     Release();
@@ -542,7 +543,7 @@ public:
         ee << strerror(errno) << " (" << errno << ")";
         return {ee, {}};
       }
-      ROME_DEBUG("[Connect] (Node {}) Trying to connect to: {} (id={})", my_id_,
+      ROME_TRACE("[Connect] (Node {}) Trying to connect to: {} (id={})", my_id_,
                  peer_id, fmt::ptr(id));
 
       if (peer_id == my_id_)
@@ -573,7 +574,7 @@ public:
         while (result < 0 && errno == EAGAIN) {
           result = rdma_get_cm_event(id->channel, &event);
         }
-        ROME_DEBUG("[Connect] (Node {}) Got event: {} (id={})", my_id_,
+        ROME_TRACE("[Connect] (Node {}) Got event: {} (id={})", my_id_,
                    rdma_event_str(event->event), fmt::ptr(id));
 
         switch (event->event) {
@@ -586,7 +587,7 @@ public:
 
             // Since we are initiating the disconnection, we must get and ack
             // the event.
-            ROME_DEBUG("[Connect] (Node {}) Disconnecting: (id={})", my_id_,
+            ROME_TRACE("[Connect] (Node {}) Disconnecting: (id={})", my_id_,
                        fmt::ptr(id));
             RDMA_CM_CHECK_TOVAL(rdma_disconnect, id);
             rdma_cm_event *event;
@@ -600,7 +601,7 @@ public:
             rdma_destroy_event_channel(event_channel);
 
             if (is_established) {
-              ROME_DEBUG("[Connect] Already connected: {}", peer_id);
+              ROME_TRACE("[Connect] Already connected: {}", peer_id);
               return {sss::Status::Ok(), conn->second.get()};
             } else {
               sss::Status err = {sss::Unavailable, "[Connect (Node "};
@@ -612,7 +613,7 @@ public:
           // If this code block is reached, then the connection established by
           // this call is the first successful connection to be established and
           // therefore we must add it to the set of established connections.
-          ROME_DEBUG(
+          ROME_TRACE(
               "Connected: dev={}, addr={}, port={}", id->verbs->device->name,
               inet_ntoa(reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(id))
                             ->sin_addr),
@@ -716,7 +717,7 @@ private:
     for (int expected = kUnlocked;
          !mu_.compare_exchange_weak(expected, peer_id); expected = kUnlocked) {
       if (expected == my_id_) {
-        ROME_DEBUG("[Acquire] (Node {}) Giving up lock acquisition: actual={}, "
+        ROME_TRACE("[Acquire] (Node {}) Giving up lock acquisition: actual={}, "
                    "swap={}",
                    my_id_, expected, peer_id);
         return false;
@@ -757,7 +758,7 @@ private:
 
   sss::StatusVal<Connection *> ConnectLoopback(rdma_cm_id *id) {
     ROME_ASSERT_DEBUG(id->qp != nullptr, "No QP associated with endpoint");
-    ROME_DEBUG("Connecting loopback...");
+    ROME_TRACE("Connecting loopback...");
     ibv_qp_attr attr;
     int attr_mask;
 

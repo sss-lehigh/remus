@@ -12,6 +12,7 @@
 #include <rdma/rdma_cma.h>
 #include <string>
 #include <vector>
+#include <fcntl.h>
 
 #include "../logging/logging.h"
 #include "../vendor/sss/status.h"
@@ -240,7 +241,7 @@ private:
         // std::this_thread::sleep_for(std::chrono::milliseconds(10))
       } while ((ret != 0 && errno == EAGAIN));
 
-      ROME_DEBUG("({}) Got event: {} (id={})", fmt::ptr(this),
+      ROME_TRACE("({}) Got event: {} (id={})", fmt::ptr(this),
                  rdma_event_str(event->event), fmt::ptr(event->id));
       switch (event->event) {
       case RDMA_CM_EVENT_TIMEWAIT_EXIT: // Nothing to do.
@@ -258,7 +259,7 @@ private:
         rdma_ack_cm_event(event);
 
         num_connections_.fetch_add(1);
-        ROME_DEBUG("({}) Num connections: {}", fmt::ptr(this),
+        ROME_TRACE("({}) Num connections: {}", fmt::ptr(this),
                    num_connections_);
       } break;
       case RDMA_CM_EVENT_DISCONNECTED: {
@@ -269,7 +270,7 @@ private:
         // `num_connections_` will only reach zero once all connections have
         // received their disconnect messages.
         num_connections_.fetch_add(-1);
-        ROME_DEBUG("({}) Num connections: {}", fmt::ptr(this),
+        ROME_TRACE("({}) Num connections: {}", fmt::ptr(this),
                    num_connections_);
       } break;
       case RDMA_CM_EVENT_DEVICE_REMOVAL:

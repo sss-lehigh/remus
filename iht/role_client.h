@@ -15,10 +15,9 @@
 #include "common.h"
 // #include "structures/test_map.h"
 
-using ::rome::ClientAdaptor;
-using ::rome::WorkloadDriver;
-using ::rome::WorkloadDriverProto;
-using ::rome::rdma::MemoryPool;
+using rome::WorkloadDriver;
+using rome::WorkloadDriverProto;
+using namespace rome::rdma;
 using namespace std;
 
 // [mfs] This should really be defined somewhere else
@@ -52,7 +51,7 @@ public:
   /// @param iht a pointer to an IHT
   /// @return a unique ptr
   static unique_ptr<Client>
-  Create(const MemoryPool::Peer &server, tcp::EndpointManager &ep, ExperimentParams& params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<MemoryPool> pool) {
+  Create(const Peer &server, tcp::EndpointManager &ep, ExperimentParams& params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool) {
     return unique_ptr<Client>(new Client(server, ep, params, barr, std::move(iht), pool));
   }
 
@@ -234,21 +233,6 @@ public:
   //        nothing wrong with that, in principle, but if all we really need is
   //        a barrier, then why not just make a barrier?
   sss::Status Stop() {
-    ROME_INFO("CLIENT :: Stopping client...");
-    if (!master_client_) {
-      // if we aren't the master client we don't need to do the stop sequence.
-      // Just arrive at the barrier
-      //
-      // [mfs]  Why doesn't the master client also arrive at the barrier, before
-      //        acking to the lead node?
-      if (barrier_ != nullptr)
-        barrier_->arrive_and_wait();
-      return sss::Status::Ok();
-    }
-    if (host_.id == self_.id)
-      return sss::Status::Ok(); // if we are the host, we don't need to do the
-                                // stop sequence
-  sss::Status Stop() override {
     ROME_DEBUG("CLIENT :: Stopping client...");
 
     // send the ack to let the server know that we are done
@@ -272,7 +256,7 @@ private:
   /// @param iht a pointer to an IHT
   /// @param pool the memory pool capability for the IHT
   /// @return a unique ptr
-  Client(const MemoryPool::Peer &host, tcp::EndpointManager &ep, ExperimentParams &params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<MemoryPool> pool)
+  Client(const Peer &host, tcp::EndpointManager &ep, ExperimentParams &params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool)
     : host_(host), endpoint_(ep), params_(params), barrier_(barr), iht_(std::move(iht)), pool_(pool) {
       if (params.unlimited_stream()) progression = 10000;
       else progression = max(20.0, params_.op_count() * params_.thread_count() * 0.001);
@@ -281,7 +265,7 @@ private:
   int count = 0;
 
   /// @brief Represents the host peer
-  const MemoryPool::Peer host_;
+  const Peer host_;
   /// @brief Represents an endpoint to be used for communication with the host peer
   tcp::EndpointManager endpoint_;
   /// @brief Experimental parameters
@@ -291,7 +275,7 @@ private:
   /// @brief an IHT instance to use
   unique_ptr<IHT> iht_;
   /// @brief the memorypool to attribute to the IHT
-  shared_ptr<MemoryPool> pool_;
+  shared_ptr<rdma_capability> pool_;
 
   /// @brief The number of operations to do before debug-printing the number of completed operations
   /// This is useful in debugging since I can see around how many operations have been done (if at all) before crashing

@@ -53,6 +53,20 @@ add_subdirectory(protos)
 #     target_link_libraries(rome ...)
 
 add_executable(iht_rome iht/main.cc)
+add_executable(iht_rome_test iht/test.cc)
+
+### Link with dependencies
+find_package(fmt 8.1...<8.2 REQUIRED) # defines fmt::fmt
+include_directories(${fmt_INCLUDE_DIRS})
+message(STATUS "Using fmt version ${fmt_VERSION}")
+
+find_package(spdlog 1.9...<1.10 REQUIRED) #defines spdlog::spdlog
+message(STATUS "Using spdlog version ${spdlog_VERSION}")
+
+target_link_libraries(iht_rome PRIVATE fmt::fmt)
+target_link_libraries(iht_rome PRIVATE spdlog::spdlog)
+target_link_libraries(iht_rome_test PRIVATE fmt::fmt)
+target_link_libraries(iht_rome_test PRIVATE spdlog::spdlog)
 
 ### Set up additional compiler and linker flags
 
@@ -63,3 +77,8 @@ target_compile_definitions(iht_rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
 # target_compile_options(iht_rome PUBLIC -Wall -Wextra -Werror)
 # NB: `protos` is a library we make by recursing into the `protos` subfolder
 target_link_libraries(iht_rome PUBLIC protos rdma::ibverbs rdma::cm)
+
+# Do the same for the iht_rome_test executable
+target_include_directories(iht_rome_test PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
+target_compile_definitions(iht_rome_test PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
+target_link_libraries(iht_rome_test PUBLIC protos rdma::ibverbs rdma::cm)

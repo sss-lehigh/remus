@@ -7,15 +7,13 @@
 
 #include "../logging/logging.h"
 #include "../vendor/sss/cli.h"
-#include "../util/tcp/tcp.h"
 
 #include "../rdma/rdma.h"
-#include "protos/colosseum.pb.h"
-#include "protos/experiment.pb.h"
 
+#include "common.h"
 #include "role_client.h"
 #include "role_server.h"
-#include "structures/iht_ds.h"
+#include "iht_ds.h"
 
 auto ARGS = {
     sss::STR_ARG_OPT("--experiment_params", "Experimental parameters", ""),
@@ -24,8 +22,7 @@ auto ARGS = {
 #define PATH_MAX 4096
 #define PORT_NUM 18000
 
-using rome::rdma::MemoryPool;
-using cm_type = MemoryPool::cm_type;
+using namespace rome::rdma;
 
 // The optimial number of memory pools is mp=min(t, MAX_QP/n) where n is the number of nodes and t is the number of threads
 // To distribute mp (memory pools) across t threads, it is best for t/mp to be a whole number
@@ -85,14 +82,14 @@ int main(int argc, char **argv) {
 
   // Start initializing a vector of peers
   volatile bool done = false; // (TODO: Should be atomic?)
-  std::vector<MemoryPool::Peer> peers;
+  std::vector<Peer> peers;
   for(uint16_t n = 0; n < mp * params.node_count(); n++){
       // Create the ip_peer (really just node name)
       std::string ippeer = "node";
       std::string node_id = std::to_string((int) n / mp);
       ippeer.append(node_id);
       // Create the peer and add it to the list
-      MemoryPool::Peer next = MemoryPool::Peer(n, ippeer, PORT_NUM + n + 1);
+      Peer next = Peer(n, ippeer, PORT_NUM + n + 1);
       peers.push_back(next);
   }
   // Print the peers included in this experiment
@@ -100,19 +97,18 @@ int main(int argc, char **argv) {
   for(int i = 0; i < peers.size(); i++){
       ROME_DEBUG("Peer list {}:{}@{}", i, peers.at(i).id, peers.at(i).address);
   }
-  MemoryPool::Peer host = peers.at(0);
+  Peer host = peers.at(0);
   // Initialize memory pools into an array
   std::vector<std::thread> mempool_threads;
-  std::shared_ptr<MemoryPool> pools[mp];
+  std::shared_ptr<rdma_capability> pools[mp];
   // Create multiple memory pools to be shared (have to use threads since Init is blocking)
   uint32_t block_size = 1 << params.region_size();
   for(int i = 0; i < mp; i++){
       mempool_threads.emplace_back(std::thread([&](int mp_index, int self_index){
-          MemoryPool::Peer self = peers.at(self_index);
-          ROME_INFO(mp != params.thread_count() ? "Is shared" : "Is not shared");
-          std::shared_ptr<MemoryPool> pool = std::make_shared<MemoryPool>(self, std::make_unique<MemoryPool::cm_type>(self.id));
-          sss::Status status_pool = pool->Init(block_size, peers);
-          OK_OR_FAIL(status_pool);
+          Peer self = peers.at(self_index);
+          ROME_DEBUG(mp != params.thread_count() ? "Is shared" : "Is not shared");
+          std::shared_ptr<rdma_capability> pool = std::make_shared<rdma_capability>(self);
+          pool->init_pool(block_size, peers);
           pools[mp_index] = pool;
       }, i, (params.node_id() * mp) + i));
   }
@@ -168,8 +164,8 @@ int main(int argc, char **argv) {
   for(int i = 0; i < params.thread_count(); i++){
       threads.emplace_back(std::thread([&](int thread_index){
           int mempool_index = thread_index % mp;
-          std::shared_ptr<MemoryPool> pool = pools[mempool_index];
-          MemoryPool::Peer self = peers.at((params.node_id() * mp) + mempool_index);
+          std::shared_ptr<rdma_capability> pool = pools[mempool_index];
+          Peer self = peers.at((params.node_id() * mp) + mempool_index);
           std::unique_ptr<IHT> iht = std::make_unique<IHT>(self);
           // sleep for a short while to ensure the receiving end (SocketManager) is up and running
           // NB: We have no way to ensure the server is running before connecting to it
@@ -182,8 +178,8 @@ int main(int argc, char **argv) {
           
           ROME_DEBUG("Creating client");
           // Create and run a client in a thread
-          std::unique_ptr<Client> client = Client::Create(host, endpoint_managers[thread_index], params, &client_sync, std::move(iht), pool);
-          sss::StatusVal<WorkloadDriverProto> output = Client::Run(std::move(client), 
+          std::unique_ptr<Client<IHT_Op<int, int>>> client = Client<IHT_Op<int, int>>::Create(host, endpoint_managers[thread_index], params, &client_sync, std::move(iht), pool);
+          sss::StatusVal<WorkloadDriverProto> output = Client<IHT_Op<int, int>>::Run(std::move(client), 
                                                                    thread_index, 
                                                                    0.5 / (double) (params.node_count() * params.thread_count()));
           // [mfs]  It would be good to document how a client can fail, because

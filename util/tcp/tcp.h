@@ -1,11 +1,9 @@
 /**
- * @file tcp.h
  * @author Ethan Lavi
  * @brief A simple communication primitive for exchanging information within a network. Utilizes a server-client approach to broadcast entire messages
- * @version 0.0.0
- * @date 2023-10-04
- * 
  */
+// ! I think this file should be refactored into a RDMA barrier and some other internode message-passing that doesn't rely on protobufs.
+// ! For now, it serves as a temporary and cleaner API for these things while they are in development
 
 #pragma once
 
