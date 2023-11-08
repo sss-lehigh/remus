@@ -1,7 +1,6 @@
 #pragma once
 
 #include <atomic>
-#include <vector>
 #include <cstdint>
 #include <deque>
 #include <experimental/memory_resource>
@@ -14,6 +13,7 @@
 #include <sys/mman.h>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 #include <protos/metrics.pb.h>
 #include <protos/rdma.pb.h>
@@ -401,9 +401,11 @@ private:
   std::mutex rdma_per_read_lock_;
   /// A counter to increment
   uint64_t id_gen = 0;
-  /// A mapping of thread id to an index into the reordering_semaphores array. Passed as the wr_id in work requests.
+  /// A mapping of thread id to an index into the reordering_semaphores array.
+  /// Passed as the wr_id in work requests.
   std::unordered_map<std::thread::id, uint64_t> thread_ids;
-  /// a vector of semaphores, one for each thread that can send an operation. Threads will use this to recover from polling another thread's wr_id
+  /// a vector of semaphores, one for each thread that can send an operation.
+  /// Threads will use this to recover from polling another thread's wr_id
   std::array<std::atomic<int>, 20> reordering_counters;
 
   std::unique_ptr<CM> connection_manager_;
@@ -491,7 +493,7 @@ public:
       ROME_FATAL("Cannot register the same thread twice");
       return;
     }
-    if (this->id_gen >= THREAD_MAX){
+    if (this->id_gen >= THREAD_MAX) {
       ROME_FATAL("Hit upper limit on THREAD_MAX. todo: fix this condition");
       return;
     }
@@ -612,7 +614,9 @@ public:
       if (poll == 0 || (poll < 0 && errno == EAGAIN))
         continue;
       // Assert a good result
-      ROME_ASSERT(wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), (std::stringstream() << ptr).str());
+      ROME_ASSERT(wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})",
+                  (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)),
+                  (std::stringstream() << ptr).str());
       int old = reordering_counters[wc.wr_id].fetch_sub(1);
       ROME_ASSERT(old >= 1, "Broken synchronization");
     }
@@ -635,7 +639,8 @@ public:
     uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
 
     auto alloc = rdma_allocator<uint64_t>(rdma_memory_.get());
-    // [esl] There is probably a better way to avoid allocating every time we do this call (maybe be preallocating the space thread_local)
+    // [esl] There is probably a better way to avoid allocating every time we do
+    // this call (maybe be preallocating the space thread_local)
     volatile uint64_t *prev_ = alloc.allocate();
 
     ibv_sge sge{.addr = reinterpret_cast<uint64_t>(prev_),
@@ -658,7 +663,7 @@ public:
       // set the counter to the number of work completions we expect
       reordering_counters[index_as_id] = 1;
       RDMA_CM_ASSERT(ibv_post_send, info.conn->id()->qp, &send_wr_, &bad);
-      
+
       // Poll until we match on the condition
       ibv_wc wc;
       while (reordering_counters[index_as_id] != 0) {
@@ -666,7 +671,9 @@ public:
         if (poll == 0 || (poll < 0 && errno == EAGAIN))
           continue;
         // Assert a good result
-        ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+        ROME_ASSERT(
+            poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
+            (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
         int old = reordering_counters[wc.wr_id].fetch_sub(1);
         ROME_ASSERT(old >= 1, "Broken synchronization");
       }
@@ -676,7 +683,7 @@ public:
       send_wr_.wr.atomic.compare_add = *prev_;
     };
     T ret = T(*prev_);
-    alloc.deallocate((uint64_t *) prev_, 8);
+    alloc.deallocate((uint64_t *)prev_, 8);
     return ret;
   }
 
@@ -692,9 +699,10 @@ public:
     uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
 
     auto alloc = rdma_allocator<uint64_t>(rdma_memory_.get());
-    // [esl] There is probably a better way to avoid allocating every time we do this call (maybe be preallocating the space thread_local)
+    // [esl] There is probably a better way to avoid allocating every time we do
+    // this call (maybe be preallocating the space thread_local)
     volatile uint64_t *prev_ = alloc.allocate();
-    
+
     // TODO: would the code be clearer if all of the ibv_* initialization
     // throughout this file used the new syntax?
     // [esl] I agree, i think its much cleaner
@@ -725,12 +733,14 @@ public:
       if (poll == 0 || (poll < 0 && errno == EAGAIN))
         continue;
       // Assert a good result
-      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
+                  (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
       int old = reordering_counters[wc.wr_id].fetch_sub(1);
       ROME_ASSERT(old >= 1, "Broken synchronization");
     }
 
-    // ROME_TRACE("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}  (id={})", expected, swap, *prev_, static_cast<uint64_t>(self_.id));
+    // ROME_TRACE("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}
+    // (id={})", expected, swap, *prev_, static_cast<uint64_t>(self_.id));
     T ret = T(*prev_);
     alloc.deallocate((uint64_t *)prev_, 8);
     return ret;
@@ -800,7 +810,9 @@ private:
       if (poll == 0 || (poll < 0 && errno == EAGAIN))
         continue;
       // Assert a good result
-      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}", (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
+      ROME_ASSERT(
+          poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
+          (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
       int old = reordering_counters[wc.wr_id].fetch_sub(1);
       ROME_ASSERT(old >= 1, "Broken synchronization");
     }
@@ -815,10 +827,13 @@ private:
   //        same qp, and they'll finish in order, so we definitely will want a
   //        way to let that happen.
   // [esl] Just to cite my sources:
-  // https://www.rdmamojo.com/2013/07/26/libibverbs-thread-safe-level/ (Thread safe)
-  // https://www.rdmamojo.com/2013/01/26/ibv_post_send/ (Ordering guarantee, for RC only)
-  //    "In RC QP, there is a PSN (Packet Serial Number) that guarantees the order of the messages"
-  // https://www.rdmamojo.com/2013/06/01/which-queue-pair-type-to-use/ (Ordering guarantee also mentioned her)
+  // https://www.rdmamojo.com/2013/07/26/libibverbs-thread-safe-level/ (Thread
+  // safe) https://www.rdmamojo.com/2013/01/26/ibv_post_send/ (Ordering
+  // guarantee, for RC only)
+  //    "In RC QP, there is a PSN (Packet Serial Number) that guarantees the
+  //    order of the messages"
+  // https://www.rdmamojo.com/2013/06/01/which-queue-pair-type-to-use/ (Ordering
+  // guarantee also mentioned her)
 };
 
 } // namespace rome::rdma::internal

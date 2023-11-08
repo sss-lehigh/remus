@@ -2,7 +2,8 @@
 
 #include "../util/tcp/tcp.h"
 
-/// @brief a type used for templating remote pointers as anonymous (for exchanging over the network where the types are "lost")
+/// @brief a type used for templating remote pointers as anonymous (for
+/// exchanging over the network where the types are "lost")
 struct anon_ptr {};
 
 /// @brief  IHT_Op is used by the Client Adaptor to pass in operations to Apply,

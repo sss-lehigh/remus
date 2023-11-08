@@ -1,4 +1,5 @@
 #pragma once
+
 #include <array>
 #include <cmath>
 #include <protos/metrics.pb.h>

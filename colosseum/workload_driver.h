@@ -9,7 +9,6 @@
 
 #pragma once
 
-
 #include <future>
 #include <protos/workloaddriver.pb.h>
 
@@ -120,10 +119,10 @@ private:
   }
 };
 
-
 template <typename T> class FixedLengthStream : public Stream<T> {
 public:
-  FixedLengthStream(std::function<T(void)> generator, int length) : generator_(generator), length_(length), count_(0) {}
+  FixedLengthStream(std::function<T(void)> generator, int length)
+      : generator_(generator), length_(length), count_(0) {}
 
 private:
   std::function<T(void)> generator_;
@@ -131,7 +130,7 @@ private:
   int count_;
   inline sss::StatusVal<T> NextInternal() override {
     count_++;
-    if (length_ < count_){
+    if (length_ < count_) {
       return {StreamTerminatedStatus(), {}};
     }
     return {sss::Status::Ok(), generator_()};

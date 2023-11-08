@@ -47,9 +47,8 @@ inline void __rome_init_log__() {
       static_cast<spdlog::level::level_enum>(ROME_LOG_LEVEL));
   __rome_log__->set_pattern("[%Y-%m-%d %H:%M%S thread:%t] [%^%l%$] [%@] %v");
   ::spdlog::set_default_logger(std::move(__rome_log__));
-  SPDLOG_INFO(
-      "Logging level: {}",
-      ::spdlog::level::to_string_view(::spdlog::default_logger()->level()));
+  SPDLOG_INFO("Logging level: {}", ::spdlog::level::to_string_view(
+                                       ::spdlog::default_logger()->level()));
 }
 
 #if ROME_LOG_LEVEL == OFF

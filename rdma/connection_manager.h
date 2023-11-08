@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <cstdint>
 #include <cstring>
+#include <fcntl.h>
 #include <infiniband/verbs.h>
 #include <limits>
 #include <memory>
@@ -12,7 +13,6 @@
 #include <rdma/rdma_verbs.h>
 #include <unordered_map>
 #include <unordered_set>
-#include <fcntl.h>
 
 #include "../logging/logging.h"
 #include "../vendor/sss/status.h"
@@ -159,8 +159,15 @@ public:
         // Prepare the response.
         //
         // [mfs] It looks like there's a lot of copying baked into the API?
-        // [esl] I was getting an error with the code that was previously here. The optional was throwing a bad_optional_access exception. I think the optional had to be constructed with a value. It might be better to refactor Message to make it moveable and construct in a series of steps instead of one long statement...
-        sss::StatusVal<Message> res = {sss::Status::Ok(), std::make_optional(Message{std::make_unique<uint8_t[]>(wc.byte_len), wc.byte_len})};
+        // [esl] I was getting an error with the code that was previously here.
+        // The optional was throwing a bad_optional_access exception. I think
+        // the optional had to be constructed with a value. It might be better
+        // to refactor Message to make it moveable and construct in a series of
+        // steps instead of one long statement...
+        sss::StatusVal<Message> res = {
+            sss::Status::Ok(),
+            std::make_optional(Message{std::make_unique<uint8_t[]>(wc.byte_len),
+                                       wc.byte_len})};
         std::memcpy(res.val->buffer.get(), recv_next_, wc.byte_len);
         ROME_TRACE("{} {}", res.val->buffer.get(), res.val->length);
 
@@ -813,4 +820,4 @@ private:
     return {{sss::Status::Ok()}, established_[my_id_].get()};
   }
 };
-} // namespace rome::rdma
+} // namespace rome::rdma::internal

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <fcntl.h>
 #include <infiniband/verbs.h>
 #include <memory>
 #include <netdb.h>
@@ -12,7 +13,6 @@
 #include <rdma/rdma_cma.h>
 #include <string>
 #include <vector>
-#include <fcntl.h>
 
 #include "../logging/logging.h"
 #include "../vendor/sss/status.h"
@@ -305,4 +305,4 @@ private:
   }
 };
 
-} // namespace rome::rdma
+} // namespace rome::rdma::internal
