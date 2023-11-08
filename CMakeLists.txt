@@ -1,24 +1,21 @@
-### Standard cmake stuff: minimum version, project name
-
+# Declare boilerplat cmake stuff: minimum version, project name
 cmake_minimum_required(VERSION 3.18)
 project(IHT_Rome LANGUAGES CXX VERSION 0.0.0)
 
-### Flags that the user can override
-
+# Declare flags that the user can override
 set(LOG_LEVEL "DEBUG" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
 set(CXX_STANDARD 23 CACHE STRING "Uses C++20 or 23")
 
-### Make sure we have the required packages
-
+# Ensure that the protobuf compiler is available
 find_package(Protobuf REQUIRED)
 message(STATUS "Using protobuf version ${Protobuf_VERSION}")
-# NB: Our custom rule for finding ibverbs and rdmacm prints a message.  It's in
-#     the `cmake` subfolder, so we need to add that to the module path.
+
+# Use a custom rule (in `cmake/`) to find the ibverbs and rdmacm libraries.
+# NB: The rule prints a message, so we don't need a `message()` here
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(RDMA REQUIRED)
 
-### Make sure the LOG_LEVEL is correct
-
+# Ensure the LOG_LEVEL is correct
 set(LOG_LEVELS "TRACE;DEBUG;INFO;WARN;ERROR;CRITICAL;OFF")
 foreach(L ${LOG_LEVELS})
     if("${LOG_LEVEL}" STREQUAL "${L}")
@@ -30,8 +27,7 @@ if(NOT DEFINED CORRECT_LOG_LEVEL)
 endif()
 message(STATUS "Using LOG_LEVEL=${LOG_LEVEL}")
 
-### Make sure the C++ version is correct
-
+# Ensure requested C++ is modern enough, then turn on that CXX standard
 set(CXX_STANDARDS "20;23")
 foreach(S ${CXX_STANDARDS})
     if("${CXX_STANDARD}" STREQUAL "${S}")
@@ -44,41 +40,26 @@ endif()
 message(STATUS "Using CXX_STANDARD=${CXX_STANDARD}")
 set(CMAKE_CXX_STANDARD ${CXX_STANDARD})
 
-### Declare the subfolders to recurse into before building the executable
+# Compile `protos/*.proto` into headers and a static library (.a), putting them
+# all in the `protos` subfolder of the build tree.
 add_subdirectory(protos)
 
-### Declare the things that get built to create rome
-
-# NB: This must come before target_compile_definitions(rome ...) and
-#     target_link_libraries(rome ...)
-
+# Now declare the executables to build
 add_executable(iht_rome iht/main.cc)
 add_executable(iht_rome_test iht/test.cc)
 
-### Link with dependencies
-find_package(fmt 8.1...<8.2 REQUIRED) # defines fmt::fmt
-include_directories(${fmt_INCLUDE_DIRS})
-message(STATUS "Using fmt version ${fmt_VERSION}")
-
-find_package(spdlog 1.9...<1.10 REQUIRED) #defines spdlog::spdlog
-message(STATUS "Using spdlog version ${spdlog_VERSION}")
-
-target_link_libraries(iht_rome PRIVATE fmt::fmt)
-target_link_libraries(iht_rome PRIVATE spdlog::spdlog)
-target_link_libraries(iht_rome_test PRIVATE fmt::fmt)
-target_link_libraries(iht_rome_test PRIVATE spdlog::spdlog)
-
-### Set up additional compiler and linker flags
-
+# Make the vendored spdlog library easier to include
 target_include_directories(iht_rome PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
-# NB: -D flag for ROME_LOG_LEVEL
-target_compile_definitions(iht_rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
-# Use this to turn on warnings during compilation
-# target_compile_options(iht_rome PUBLIC -Wall -Wextra -Werror)
-# NB: `protos` is a library we make by recursing into the `protos` subfolder
-target_link_libraries(iht_rome PUBLIC protos rdma::ibverbs rdma::cm)
-
-# Do the same for the iht_rome_test executable
 target_include_directories(iht_rome_test PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
+
+# Set up the logging level
+target_compile_definitions(iht_rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
 target_compile_definitions(iht_rome_test PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
+
+# Use these if you want to turn on warnings during compilation
+# target_compile_options(iht_rome PUBLIC -Wall -Wextra -Werror)
+# target_compile_options(iht_rome_test PUBLIC -Wall -Wextra -Werror)
+
+# Declare libraries that the targets depend upon
+target_link_libraries(iht_rome PUBLIC protos rdma::ibverbs rdma::cm)
 target_link_libraries(iht_rome_test PUBLIC protos rdma::ibverbs rdma::cm)
