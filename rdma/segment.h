@@ -157,6 +157,7 @@ public:
   sss::Status RegisterMemoryRegion(std::string id, ibv_pd *const pd, int offset,
                                    int length) {
     if (!ValidateRegion(offset, length)) {
+      std::terminate();
       sss::Status err = {sss::FailedPrecondition,
                          "Requested memory region invalid: "};
       err << id;
@@ -166,6 +167,7 @@ public:
     auto iter = memory_regions_.find(id);
     if (iter != memory_regions_.end()) {
       sss::Status err = {sss::AlreadyExists, "Memory region exists: {}"};
+      std::terminate();
       err << id;
       return err;
     }
@@ -175,6 +177,7 @@ public:
                  offset;
     auto mr = ibv_mr_unique_ptr(ibv_reg_mr(pd, base, length, kDefaultAccess));
     if (mr == nullptr) {
+      std::terminate();
       return {sss::InternalError, "Failed to register memory region"};
     }
     memory_regions_.emplace(id, std::move(mr));
@@ -200,11 +203,21 @@ public:
 private:
   // Validates that the given offset and length are not ill formed w.r.t. to the
   // capacity of this memory.
+  //
+  // [mfs] Why can't we use unsigned ints for offset and length?
   bool ValidateRegion(int offset, int length) {
-    if (offset < 0 || length < 0)
+    if (offset < 0) {
+      ROME_DEBUG("ValidateRegion :: offset < 0");
       return false;
-    if (offset + length > capacity_)
+    }
+    if (length < 0) {
+      ROME_DEBUG("ValidateRegion :: length < 0");
       return false;
+    }
+    if (offset + length > capacity_) {
+      ROME_DEBUG("ValidateRegion :: offset + length > capacity_");
+      return false;
+    }
     return true;
   }
 };
