@@ -240,14 +240,8 @@ public:
       : rm_(kCapacity, channel_id->pd), id_(channel_id),
         send_cap_(kCapacity / 2), recv_cap_(kCapacity / 2), src_id_(src_id),
         dst_id_(dst_id) {
-    OK_OR_FAIL(rm_.RegisterMemoryRegion(kSendId, 0, send_cap_));
-    OK_OR_FAIL(rm_.RegisterMemoryRegion(kRecvId, send_cap_, recv_cap_));
-    auto t1 = rm_.GetMemoryRegion(kSendId);
-    STATUSVAL_OR_DIE(t1);
-    send_mr_ = t1.val.value();
-    auto t2 = rm_.GetMemoryRegion(kRecvId);
-    STATUSVAL_OR_DIE(t2);
-    recv_mr_ = t2.val.value();
+    send_mr_ = (rm_.RegisterMemoryRegion(kSendId, 0, send_cap_));
+    recv_mr_ = (rm_.RegisterMemoryRegion(kRecvId, send_cap_, recv_cap_));
     send_base_ = reinterpret_cast<uint8_t *>(send_mr_->addr);
     send_next_ = send_base_;
     recv_base_ = reinterpret_cast<uint8_t *>(recv_mr_->addr);

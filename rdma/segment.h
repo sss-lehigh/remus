@@ -130,7 +130,7 @@ public:
                       MAP_FAILED,
                   "mmap failed.");
     }
-    OK_OR_FAIL(RegisterMemoryRegion(kDefaultId, pd, 0, capacity_));
+    RegisterMemoryRegion(kDefaultId, pd, 0, capacity_);
   }
 
   RdmaMemory(const RdmaMemory &) = delete;
@@ -148,28 +148,25 @@ public:
   // Creates a new memory region associated with the given protection domain
   // `pd` at the provided offset and with the given length. If a region with the
   // same `id` already exists then it returns `AlreadyExists`.
-  sss::Status RegisterMemoryRegion(std::string id, int offset, int length) {
+  ibv_mr *RegisterMemoryRegion(std::string id, int offset, int length) {
     return RegisterMemoryRegion(id, GetDefaultMemoryRegion()->pd, offset,
                                 length);
   }
 
   /// This should be fail-stop.  Then we can return the `mr`...
-  sss::Status RegisterMemoryRegion(std::string id, ibv_pd *const pd, int offset,
-                                   int length) {
+  ibv_mr *RegisterMemoryRegion(std::string id, ibv_pd *const pd, int offset,
+                               int length) {
+    using namespace std::string_literals;
+
     if (!ValidateRegion(offset, length)) {
+      ROME_FATAL("RegisterMemoryRegion :: validation failed for "s + id)
       std::terminate();
-      sss::Status err = {sss::FailedPrecondition,
-                         "Requested memory region invalid: "};
-      err << id;
-      return err;
     }
 
     auto iter = memory_regions_.find(id);
     if (iter != memory_regions_.end()) {
-      sss::Status err = {sss::AlreadyExists, "Memory region exists: {}"};
+      ROME_FATAL("RegisterMemoryRegion :: region already registered: "s + id);
       std::terminate();
-      err << id;
-      return err;
     }
 
     auto *base = reinterpret_cast<uint8_t *>(std::visit(
@@ -177,13 +174,14 @@ public:
                  offset;
     auto mr = ibv_mr_unique_ptr(ibv_reg_mr(pd, base, length, kDefaultAccess));
     if (mr == nullptr) {
+      ROME_FATAL("RegisterMemoryRegion :: ibv_reg_mr failed")
       std::terminate();
-      return {sss::InternalError, "Failed to register memory region"};
     }
+    auto res = mr.get();
     memory_regions_.emplace(id, std::move(mr));
     ROME_TRACE("Memory region registered: {} @ {} to {} (length={})", id,
                fmt::ptr(base), fmt::ptr(base + length), length);
-    return sss::Status::Ok();
+    return res;
   }
 
   ibv_mr *GetDefaultMemoryRegion() const {
