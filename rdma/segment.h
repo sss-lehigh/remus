@@ -148,12 +148,6 @@ public:
   // Creates a new memory region associated with the given protection domain
   // `pd` at the provided offset and with the given length. If a region with the
   // same `id` already exists then it returns `AlreadyExists`.
-  ibv_mr *RegisterMemoryRegion(std::string id, int offset, int length) {
-    return RegisterMemoryRegion(id, GetDefaultMemoryRegion()->pd, offset,
-                                length);
-  }
-
-  /// This should be fail-stop.  Then we can return the `mr`...
   ibv_mr *RegisterMemoryRegion(std::string id, ibv_pd *const pd, int offset,
                                int length) {
     using namespace std::string_literals;
