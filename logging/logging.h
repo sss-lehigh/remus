@@ -99,6 +99,8 @@ inline void __rome_init_log__() {
 #define ROME_CRITICAL(...) ((void)0)
 #endif
 
+// [mfs]  This looks like it is incorrect.  LOG_LEVEL==OFF will lead to an
+//        undefined symbol, when we probably still want a call to abort()?
 #if ROME_LOG_LEVEL != OFF
 #define ROME_FATAL(...)                                                        \
   SPDLOG_CRITICAL(__VA_ARGS__);                                                \
