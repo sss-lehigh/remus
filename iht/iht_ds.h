@@ -1,5 +1,7 @@
 #pragma once
 
+#include <random>
+
 #include "../rdma/rdma.h"
 #include "common.h"
 
