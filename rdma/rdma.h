@@ -18,8 +18,7 @@ class rdma_capability {
 
 public:
   explicit rdma_capability(const Peer &self)
-      : //    cm(my_id),
-        pool(self, std::unique_ptr<internal::ConnectionManager>(
+      : pool(self, std::unique_ptr<internal::ConnectionManager>(
                        new internal::ConnectionManager((self.id)))) {}
 
   // TODO: Why can't we merge this into the constructor?
@@ -71,7 +70,7 @@ public:
     RETURN_STATUSVAL_ON_ERROR(conn_or);
 
     // Send the proto over
-    return conn_or.val.value()->channel()->Send(proto);
+    return conn_or.val.value()->Send(proto);
   }
 
   template <class T> sss::StatusVal<T> Recv(const Peer &from) {
@@ -86,7 +85,7 @@ public:
     // [mfs]  Since the connection is shared, I need to get a better
     //        understanding on how this data gets into a buffer that is
     //        allocated and owned by the current thread.
-    auto got = conn_or.val.value()->channel()->Deliver<T>();
+    auto got = conn_or.val.value()->Deliver<T>();
     return got;
   }
 

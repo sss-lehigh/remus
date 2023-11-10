@@ -1,308 +1,329 @@
 #pragma once
 
 #include <arpa/inet.h>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <fcntl.h>
 #include <infiniband/verbs.h>
 #include <limits>
 #include <memory>
 #include <netdb.h>
-#include <random>
+#include <optional>
 #include <rdma/rdma_cma.h>
 #include <rdma/rdma_verbs.h>
+#include <string>
 #include <unordered_map>
-#include <unordered_set>
+#include <vector>
 
 #include "../logging/logging.h"
 #include "../vendor/sss/status.h"
-#include "broker.h"
+#include "connection.h"
 #include "memory_pool.h"
 
 #define LOOPBACK_PORT_NUM 1
 
 namespace rome::rdma::internal {
 
-// Contains a copy of a received message by a `RdmaChannel` for the caller of
-// `RdmaChannel::TryDeliver`.
-//
-// [mfs]  This could be put inside of TwoSidedRdmaMessenger, because it's only
-//        used in this file?
-struct Message {
-  std::unique_ptr<uint8_t[]> buffer;
-  size_t length;
-};
+class ConnectionManager {
 
-///
-///
-/// NB: This was formerly called TwoSidedRdmaMessenger
-class TwoSidedRdmaMessenger {
-  // [mfs] TODO: Make these arguments to the ctor?
-  static constexpr const uint32_t kCapacity = 1ul << 12;
-  static constexpr const uint32_t kRecvMaxBytes = 1ul << 8;
-  static_assert(kCapacity % 2 == 0, "Capacity must be divisible by two.");
-
-  RdmaMemory rm_;           // Remotely accessible memory for send/recv buffers.
-  rdma_cm_id *id_;          // (unowned) pointer to the QP for sends/rcvs
-  ibv_mr *send_mr_;         // Memory region identified by `kSendId`
-  const int send_cap_;      // Capacity (in bytes) of the send buffer
-  uint8_t *send_base_;      // Base address of send buffer
-  uint8_t *send_next_;      // Next un-posted address within send buffer
-  uint32_t send_total_ = 0; // Number of sends that were performed
-  ibv_mr *recv_mr_;         // Memory region identified by `kRecvId`
-  const int recv_cap_;      // Capacity (in bytes) of recv buffer
-  uint8_t *recv_base_;      // Base address of recv buffer
-  uint8_t *recv_next_;      // Next unposted address within recv buffer
-  uint32_t recv_total_ = 0; // Completed receives; helps track completion
-
-public:
-  explicit TwoSidedRdmaMessenger(rdma_cm_id *id)
-      : rm_(kCapacity, std::nullopt, id->pd), id_(id), send_cap_(kCapacity / 2),
-        recv_cap_(kCapacity / 2) {
-    OK_OR_FAIL(rm_.RegisterMemoryRegion(kSendId, 0, send_cap_));
-    OK_OR_FAIL(rm_.RegisterMemoryRegion(kRecvId, send_cap_, recv_cap_));
-    auto t1 = rm_.GetMemoryRegion(kSendId);
-    STATUSVAL_OR_DIE(t1);
-    send_mr_ = t1.val.value();
-    auto t2 = rm_.GetMemoryRegion(kRecvId);
-    STATUSVAL_OR_DIE(t2);
-    recv_mr_ = t2.val.value();
-    send_base_ = reinterpret_cast<uint8_t *>(send_mr_->addr);
-    send_next_ = send_base_;
-    recv_base_ = reinterpret_cast<uint8_t *>(recv_mr_->addr);
-    recv_next_ = recv_base_;
-    PrepareRecvBuffer();
-  }
-
-  sss::Status SendMessage(const Message &msg) {
-    // The proto we send may not be larger than the maximum size received at the
-    // peer. We assume that everyone uses the same value, so we check what we
-    // know locally instead of doing something fancy to ask the remote node.
-    if (msg.length >= kRecvMaxBytes) {
-      sss::Status err = {sss::ResourceExhausted, ""};
-      err << "Message too large: expected<=" << kRecvMaxBytes
-          << ", actual=" << msg.length;
-      return err;
-    }
-
-    // If the new message will not fit in remaining memory, then we reset the
-    // head pointer to the beginning.
-    auto tail = send_next_ + msg.length;
-    auto end = send_base_ + send_cap_;
-    if (tail > end) {
-      send_next_ = send_base_;
-    }
-    std::memcpy(send_next_, msg.buffer.get(), msg.length);
-
-    // Copy the proto into the send buffer.
-    ibv_sge sge;
-    std::memset(&sge, 0, sizeof(sge));
-    sge.addr = reinterpret_cast<uint64_t>(send_next_);
-    sge.length = msg.length;
-    sge.lkey = send_mr_->lkey;
-
-    // Note that we use a custom `ibv_send_wr` here since we want to add an
-    // immediate. Otherwise we could have just used `rdma_post_send()`.
-    ibv_send_wr wr;
-    std::memset(&wr, 0, sizeof(wr));
-    wr.send_flags = IBV_SEND_SIGNALED;
-    wr.num_sge = 1;
-    wr.sg_list = &sge;
-    wr.opcode = IBV_WR_SEND_WITH_IMM;
-    wr.wr_id = send_total_++;
-
-    ibv_send_wr *bad_wr;
-    {
-      int ret = ibv_post_send(id_->qp, &wr, &bad_wr);
-      if (ret != 0) {
-        sss::Status err = {sss::InternalError, ""};
-        err << "ibv_post_send(): " << strerror(errno);
-        return err;
-      }
-    }
-
-    // Assumes that the CQ associated with the SQ is synchronous.
-    ibv_wc wc;
-    int comps = rdma_get_send_comp(id_, &wc);
-    while (comps < 0 && errno == EAGAIN) {
-      comps = rdma_get_send_comp(id_, &wc);
-    }
-
-    if (comps < 0) {
-      sss::Status e = {sss::InternalError, {}};
-      return e << "rdma_get_send_comp: {}" << strerror(errno);
-    } else if (wc.status != IBV_WC_SUCCESS) {
-      sss::Status e = {sss::InternalError, {}};
-      return e << "rdma_get_send_comp(): " << ibv_wc_status_str(wc.status);
-    }
-
-    send_next_ += msg.length;
-    return sss::Status::Ok();
-  }
-
-  // Attempts to deliver a sent message by checking for completed receives and
-  // then returning a `Message` containing a copy of the received buffer.
-  sss::StatusVal<Message> TryDeliverMessage() {
-    ibv_wc wc;
-    auto ret = rdma_get_recv_comp(id_, &wc);
-    if (ret < 0 && errno != EAGAIN) {
-      sss::Status e = {sss::InternalError, {}};
-      e << "rdma_get_recv_comp: " << strerror(errno);
-      return {e, {}};
-    } else if (ret < 0 && errno == EAGAIN) {
-      return {{sss::Unavailable, "Retry"}, {}};
-    } else {
-      switch (wc.status) {
-      case IBV_WC_WR_FLUSH_ERR:
-        return {{sss::Aborted, "QP in error state"}, {}};
-      case IBV_WC_SUCCESS: {
-        // Prepare the response.
-        //
-        // [mfs] It looks like there's a lot of copying baked into the API?
-        // [esl] I was getting an error with the code that was previously here.
-        // The optional was throwing a bad_optional_access exception. I think
-        // the optional had to be constructed with a value. It might be better
-        // to refactor Message to make it moveable and construct in a series of
-        // steps instead of one long statement...
-        sss::StatusVal<Message> res = {
-            sss::Status::Ok(),
-            std::make_optional(Message{std::make_unique<uint8_t[]>(wc.byte_len),
-                                       wc.byte_len})};
-        std::memcpy(res.val->buffer.get(), recv_next_, wc.byte_len);
-        ROME_TRACE("{} {}", res.val->buffer.get(), res.val->length);
-
-        // If the tail reached the end of the receive buffer then all posted
-        // wrs have been consumed and we can post new ones.
-        // `PrepareRecvBuffer` also handles resetting `recv_next_` to point to
-        // the base address of the receive buffer.
-        recv_total_++;
-        recv_next_ += kRecvMaxBytes;
-        if (recv_next_ > recv_base_ + (recv_cap_ - kRecvMaxBytes)) {
-          PrepareRecvBuffer();
+  /// A broker handles the connection setup using the RDMA CM library. It is
+  /// single threaded but communicates with all other brokers in the system to
+  /// exchange information regarding the underlying RDMA memory configurations.
+  ///
+  /// TODO: The edits to this (avoid coroutines) are not tested
+  ///
+  /// TODO: This is templated on the CM to break a circular dependence without
+  ///       resorting to virtual methods.  There's probably a better approach?
+  class RdmaBroker {
+    /// Produce a vector of active ports, or None if none are found
+    static std::optional<std::vector<int>>
+    FindActivePorts(ibv_context *context) {
+      // Find the first active port, failing if none exists.
+      ibv_device_attr dev_attr;
+      ibv_query_device(context, &dev_attr);
+      std::vector<int> ports;
+      for (int i = 1; i <= dev_attr.phys_port_cnt; ++i) {
+        ibv_port_attr port_attr;
+        ibv_query_port(context, i, &port_attr);
+        if (port_attr.state != IBV_PORT_ACTIVE) {
+          continue;
+        } else {
+          ports.push_back(i);
         }
-        return res;
       }
-      default: {
-        sss::Status err = {sss::InternalError, {}};
-        err << "rdma_get_recv_comp(): " << ibv_wc_status_str(wc.status);
-        return {err, {}};
-      }
-      }
+      if (ports.empty())
+        return {};
+      else
+        return ports;
     }
-  }
 
-private:
-  // Memory region IDs.
-  static constexpr char kSendId[] = "send";
-  static constexpr char kRecvId[] = "recv";
+    // Returns a vector of device name and active port pairs that are accessible
+    // on this machine, or None if no devices are found
+    //
+    // TODO: this function name is misleading... It is stateful, since it
+    // *opens* devices.  This means that its return value doesn't tell the whole
+    // story.
+    static std::optional<std::vector<std::pair<std::string, int>>>
+    GetAvailableDevices() {
+      int num_devices;
+      auto **device_list = ibv_get_device_list(&num_devices);
+      if (num_devices <= 0)
+        return {};
+      std::vector<std::pair<std::string, int>> active;
+      for (int i = 0; i < num_devices; ++i) {
+        auto *context = ibv_open_device(device_list[i]);
+        if (context) {
+          auto ports = FindActivePorts(context);
+          if (!ports.has_value())
+            continue;
+          for (auto p : ports.value()) {
+            active.emplace_back(context->device->name, p);
+          }
+        }
+      }
 
-  // Reset the receive buffer and post `ibv_recv_wr` on the RQ. This should only
-  // be called when all posted receives have corresponding completions,
-  // otherwise there may be a race on memory by posted recvs.
-  void PrepareRecvBuffer() {
-    ROME_ASSERT(recv_total_ % (recv_cap_ / kRecvMaxBytes) == 0,
-                "Unexpected number of completions from RQ");
-    // Prepare the recv buffer for incoming messages with the assumption that
-    // the maximum received message will be `max_recv_` bytes long.
-    for (auto curr = recv_base_;
-         curr <= recv_base_ + (recv_cap_ - kRecvMaxBytes);
-         curr += kRecvMaxBytes) {
-      RDMA_CM_ASSERT(rdma_post_recv, id_, nullptr, curr, kRecvMaxBytes,
-                     recv_mr_);
+      ibv_free_device_list(device_list);
+      return active;
     }
-    recv_next_ = recv_base_;
-  }
-};
 
-// Contains the necessary information for communicating between nodes. This
-// class wraps a unique pointer to the `rdma_cm_id` that holds the QP used for
-// communication, along with the `RdmaChannel` that represents the memory used
-// for 2-sided message-passing.
-class Connection {
-  class RdmaChannel {
+    std::string address_;
+    uint16_t port_;
 
-    TwoSidedRdmaMessenger messenger;
+    // Flag to indicate that the worker thread should terminate.
+    std::atomic<bool> terminate_;
 
-    // A pointer to the QP used to post sends and receives.
-    rdma_cm_id *id_; //! NOT OWNED
+    /// The worker thread that listens and responds to incoming messages.
+    struct thread_deleter {
+      void operator()(std::thread *thread) {
+        thread->join();
+        free(thread);
+      }
+    };
+    std::unique_ptr<std::thread, thread_deleter> runner_;
+
+    // Status of the broker at any given time.
+    //
+    // [mfs] I don't think we need this
+    sss::Status status_;
+
+    // RDMA CM related members.
+    rdma_event_channel *listen_channel_;
+    rdma_cm_id *listen_id_;
+
+    // The total number of connections made by this broker.
+    std::atomic<uint32_t> num_connections_;
+
+    // Maintains connections that are forwarded by the broker.
+    ConnectionManager *receiver_; //! NOT OWNED
 
   public:
-    ~RdmaChannel() {}
-    explicit RdmaChannel(rdma_cm_id *id) : messenger(id), id_(id) {}
+    ~RdmaBroker() {
+      [[maybe_unused]] auto s = Stop();
+      rdma_destroy_ep(listen_id_);
+    }
 
-    // No copy or move.
-    RdmaChannel(const RdmaChannel &c) = delete;
-    RdmaChannel(RdmaChannel &&c) = delete;
+    // Creates a new broker on the given `device` and `port` using the provided
+    // `receiver`. If the initialization fails, then the status is propagated to
+    // the caller. Otherwise, a unique pointer to the newly created `RdmaBroker`
+    // is returned.
+    static std::unique_ptr<RdmaBroker>
+    Create(std::optional<std::string_view> address,
+           std::optional<uint16_t> port, ConnectionManager *receiver) {
+      // TODO: This method is fail-stop in the caller, so instead it should be
+      // fail-stop here
+
+      auto *broker = new RdmaBroker(receiver);
+      auto status = broker->Init(address, port);
+      if (status.t == sss::Ok) {
+        return std::unique_ptr<RdmaBroker>(broker);
+      } else {
+        ROME_ERROR("{}: {}:{}", status.message.value(), address.value_or(""),
+                   port.value_or(-1));
+        return nullptr;
+      }
+    }
+
+    RdmaBroker(const RdmaBroker &) = delete;
+    RdmaBroker(RdmaBroker &&) = delete;
 
     // Getters.
-    rdma_cm_id *id() const { return id_; }
+    std::string address() const { return address_; }
+    uint16_t port() const { return port_; }
+    ibv_pd *pd() const { return listen_id_->pd; }
 
-    template <typename ProtoType> sss::Status Send(const ProtoType &proto) {
-      Message msg{std::make_unique<uint8_t[]>(proto.ByteSizeLong()),
-                  proto.ByteSizeLong()};
-      proto.SerializeToArray(msg.buffer.get(), msg.length);
-      return messenger.SendMessage(msg);
+    // When shutting down the broker we must be careful. First, we signal to the
+    // connection request handler that we are not accepting new requests.
+    sss::Status Stop() {
+      terminate_ = true;
+      runner_.reset();
+      return status_;
     }
 
   private:
-    template <typename ProtoType> sss::StatusVal<ProtoType> TryDeliver() {
-      auto msg_or = messenger.TryDeliverMessage();
-      if (msg_or.status.t == sss::Ok) {
-        ProtoType proto;
-        proto.ParseFromArray(msg_or.val.value().buffer.get(),
-                             msg_or.val.value().length);
-        return {sss::Status::Ok(), proto};
-      } else {
-        return {msg_or.status, {}};
+    static constexpr int kMaxRetries = 100;
+
+    RdmaBroker(ConnectionManager *receiver)
+        : terminate_(false), status_(sss::Status::Ok()),
+          listen_channel_(nullptr), listen_id_(nullptr), num_connections_(0),
+          receiver_(receiver) {}
+
+    // Start the broker listening on the given `device` and `port`. If `port` is
+    // `nullopt`, then the first available port is used.
+    sss::Status Init(std::optional<std::string_view> address,
+                     std::optional<uint16_t> port) {
+      // TODO: This method is fail-stop in the caller, so instead it should be
+      // fail-stop here
+
+      // Check that devices exist before trying to set things up.
+      auto devices = GetAvailableDevices();
+      if (!devices.has_value())
+        return {sss::NotFound, "no devices found"}; // No devices found...
+      // [mfs] Does the above call do anything?  Weird...
+
+      rdma_addrinfo hints, *resolved;
+
+      // Get the local connection information.
+      std::memset(&hints, 0, sizeof(hints));
+      hints.ai_flags = RAI_PASSIVE;
+      hints.ai_port_space = RDMA_PS_TCP;
+
+      auto port_str =
+          port.has_value() ? std::to_string(htons(port.value())) : "";
+      int gai_ret = rdma_getaddrinfo(
+          address.has_value() ? address.value().data() : nullptr,
+          port_str.data(), &hints, &resolved);
+      if (gai_ret != 0) {
+        sss::Status err = {sss::InternalError, "rdma_getaddrinfo(): "};
+        err << gai_strerror(gai_ret);
+        return err;
+      }
+
+      // Create an endpoint to receive incoming requests on.
+      ibv_qp_init_attr init_attr;
+      std::memset(&init_attr, 0, sizeof(init_attr));
+      init_attr.cap.max_send_wr = init_attr.cap.max_recv_wr = 16;
+      init_attr.cap.max_send_sge = init_attr.cap.max_recv_sge = 1;
+      init_attr.cap.max_inline_data = 0;
+      init_attr.sq_sig_all = 1;
+      auto err = rdma_create_ep(&listen_id_, resolved, nullptr, &init_attr);
+      rdma_freeaddrinfo(resolved);
+      if (err) {
+        sss::Status err = {sss::InternalError, "rdma_create_ep(): "};
+        err << strerror(errno);
+        return err;
+      }
+
+      // Migrate the new endpoint to an async channel
+      listen_channel_ = rdma_create_event_channel();
+      RDMA_CM_CHECK(rdma_migrate_id, listen_id_, listen_channel_);
+      RDMA_CM_CHECK(fcntl, listen_id_->channel->fd, F_SETFL,
+                    fcntl(listen_id_->channel->fd, F_GETFL) | O_NONBLOCK);
+
+      // Start listening for incoming requests on the endpoint.
+      RDMA_CM_CHECK(rdma_listen, listen_id_, 0);
+
+      address_ = std::string(inet_ntoa(
+          reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(listen_id_))
+              ->sin_addr));
+
+      port_ = rdma_get_src_port(listen_id_);
+      ROME_INFO("Listening: {}:{}", address_, port_);
+
+      runner_.reset(new std::thread([&]() { this->Run(); }));
+
+      return sss::Status::Ok();
+    }
+
+    void HandleConnectionRequests() {
+      rdma_cm_event *event = nullptr;
+      int ret;
+      while (true) {
+        do {
+          // If we are shutting down, and there are no connections left then we
+          // should finish.
+          if (terminate_)
+            return;
+
+          // Attempt to read from `listen_channel_`
+          ret = rdma_get_cm_event(listen_channel_, &event);
+          if (ret != 0 && errno != EAGAIN) {
+            status_ = {sss::InternalError, "rdma_get_cm_event(): "};
+            status_ << strerror(errno);
+            return;
+          }
+          std::this_thread::yield(); // TODO: is this right?
+
+          // It was this at top, then an await/suspend here
+          // std::this_thread::sleep_for(std::chrono::milliseconds(10))
+        } while ((ret != 0 && errno == EAGAIN));
+
+        ROME_TRACE("({}) Got event: {} (id={})", fmt::ptr(this),
+                   rdma_event_str(event->event), fmt::ptr(event->id));
+        switch (event->event) {
+        case RDMA_CM_EVENT_TIMEWAIT_EXIT: // Nothing to do.
+          rdma_ack_cm_event(event);
+          break;
+        case RDMA_CM_EVENT_CONNECT_REQUEST: {
+          rdma_cm_id *id = event->id;
+          receiver_->OnConnectRequest(id, event);
+          break;
+        }
+        case RDMA_CM_EVENT_ESTABLISHED: {
+          rdma_cm_id *id = event->id;
+          // Now that we've established the connection, we can transition to
+          // using it to communicate with the other node
+          rdma_ack_cm_event(event);
+
+          num_connections_.fetch_add(1);
+          ROME_TRACE("({}) Num connections: {}", fmt::ptr(this),
+                     num_connections_);
+        } break;
+        case RDMA_CM_EVENT_DISCONNECTED: {
+          rdma_cm_id *id = event->id;
+          rdma_ack_cm_event(event);
+          receiver_->OnDisconnect(id);
+
+          // `num_connections_` will only reach zero once all connections have
+          // received their disconnect messages.
+          num_connections_.fetch_add(-1);
+          ROME_TRACE("({}) Num connections: {}", fmt::ptr(this),
+                     num_connections_);
+        } break;
+        case RDMA_CM_EVENT_DEVICE_REMOVAL:
+          // TODO: Cleanup
+          ROME_ERROR("event: {}, error: {}\n", rdma_event_str(event->event),
+                     event->status);
+          break;
+        case RDMA_CM_EVENT_ADDR_ERROR:
+        case RDMA_CM_EVENT_ROUTE_ERROR:
+        case RDMA_CM_EVENT_UNREACHABLE:
+        case RDMA_CM_EVENT_ADDR_RESOLVED:
+        case RDMA_CM_EVENT_REJECTED:
+        case RDMA_CM_EVENT_CONNECT_ERROR:
+          // These signals are sent to a connecting endpoint, so we should not
+          // see them here. If they appear, abort.
+          ROME_FATAL("Unexpected signal: {}", rdma_event_str(event->event));
+        default:
+          ROME_FATAL("Not implemented");
+        }
+
+        // TODO: is this right?  It used to be co_await suspend_always
+        std::this_thread::yield();
+        // co_await std::suspend_always{}; // Suspend after handling a given
+        // message.
       }
     }
 
-  public:
-    template <typename ProtoType> sss::StatusVal<ProtoType> Deliver() {
-      auto p = this->TryDeliver<ProtoType>();
-      while (p.status.t == sss::Unavailable) {
-        p = this->TryDeliver<ProtoType>();
-      }
-      return p;
+    void Run() {
+      HandleConnectionRequests();
+      ROME_TRACE("Finished: {}",
+                 (status_.t == sss::Ok) ? "Ok" : status_.message.value());
     }
   };
 
-  // [mfs] These should probably be template parameters
-  static constexpr size_t kMemoryPoolMessengerCapacity = 1 << 12;
-  static constexpr size_t kMemoryPoolMessageSize = 1 << 8;
-
-  uint32_t src_id_;
-  uint32_t dst_id_;
-
-  // Remotely accessible memory that is used for 2-sided message-passing.
-  //
-  // [mfs] What does "2-sided" mean here?
-  //
-  // [mfs]  Since we only ever instantiate this with one type from messenger.h,
-  //        why not just hard-code it?
-  RdmaChannel channel_;
-
-public:
-  Connection()
-      : src_id_(std::numeric_limits<uint32_t>::max()),
-        dst_id_(std::numeric_limits<uint32_t>::max()), channel_(nullptr) {}
-  Connection(uint32_t src_id, uint32_t dst_id, rdma_cm_id *channel_id)
-      : src_id_(src_id), dst_id_(dst_id), channel_(channel_id) {}
-
-  Connection(const Connection &) = delete;
-  Connection(Connection &&c) = delete;
-  // : src_id_(c.src_id_), dst_id_(c.dst_id_),
-  //   channel_(std::move(c.channel_)) {}
-
-  uint32_t src_id() const { return src_id_; }
-  uint32_t dst_id() const { return dst_id_; }
-  rdma_cm_id *id() const { return channel_.id(); }
-  RdmaChannel *channel() { return &channel_; }
-};
-
-/// [mfs] This should be a has-a RdmaReceiverInterface, since I was able to make
-///       the inheritance private.
-class ConnectionManager {
   // Whether or not to stop handling requests.
   //
   // [mfs] Why volatile instead of atomic?
@@ -315,7 +336,7 @@ class ConnectionManager {
   sss::Status status_;
 
   uint32_t my_id_;
-  std::unique_ptr<RdmaBroker<ConnectionManager>> broker_;
+  std::unique_ptr<RdmaBroker> broker_;
 
   // Maintains connection information for a given Internet address. A connection
   // manager only maintains a single connection per node. Nodes are identified
@@ -344,36 +365,10 @@ public:
     if (broker_ != nullptr)
       auto s = broker_->Stop();
 
-    auto cleanup = [this](auto &iter) {
-      // A loopback connection is made manually, so we do not need to deal with
-      // the regular `rdma_cm` handling. Similarly, we avoid destroying the
-      // event channel below since it is destroyed along with the id.
-      auto id = iter.second->id();
-      if (iter.first != my_id_) {
-        rdma_disconnect(id);
-        rdma_cm_event *event;
-        auto result = rdma_get_cm_event(id->channel, &event);
-        while (result == 0) {
-          RDMA_CM_ASSERT(rdma_ack_cm_event, event);
-          result = rdma_get_cm_event(id->channel, &event);
-        }
-      }
+    for (auto &iter : established_) {
+      iter.second->cleanup(iter.first, my_id_);
+    }
 
-      // We only allocate contexts for connections that were created by the
-      // `RdmaReceiver` callbacks. Otherwise, we created an event channel so
-      // that we could asynchronously connect (and avoid distributed deadlock).
-      auto *context = id->context;
-      auto *channel = id->channel;
-      rdma_destroy_ep(id);
-
-      if (iter.first != my_id_ && context != nullptr) {
-        free(context);
-      } else if (iter.first != my_id_) {
-        rdma_destroy_event_channel(channel);
-      }
-    };
-
-    std::for_each(established_.begin(), established_.end(), cleanup);
     Release();
   }
 
@@ -381,12 +376,14 @@ public:
       : accepting_(false), my_id_(my_id), broker_(nullptr), mu_(kUnlocked) {}
 
   sss::Status Start(std::string_view addr, std::optional<uint16_t> port) {
+    // TODO: This method is fail-stop in the caller, so instead it should be
+    // fail-stop here
     if (accepting_) {
       return {sss::InternalError, "Cannot start broker twice"};
     }
     accepting_ = true;
 
-    broker_ = RdmaBroker<ConnectionManager>::Create(addr, port, this);
+    broker_ = RdmaBroker::Create(addr, port, this);
     if (broker_ == nullptr) {
       return {sss::InternalError, "Failed to create broker"};
     }
@@ -482,6 +479,8 @@ public:
   //        in the caller (broker), and then this code would only need to manage
   //        the established_ map?  If not, could the map operation come first,
   //        and then the caller calls rdma_disconnect (et al.)?
+  //
+  // TODO: why does this deal with an rdma_cm_id instead of a Connection?
   void OnDisconnect(rdma_cm_id *id) {
     // This disconnection originated from the peer, so we simply disconnect the
     // local endpoint and clean it up.
@@ -493,7 +492,7 @@ public:
     Acquire(peer_id);
     // [mfs] How could this ever be the case?
     if (auto conn = established_.find(peer_id);
-        conn != established_.end() && conn->second->id() == id) {
+        conn != established_.end() && conn->second->matches(id)) {
       ROME_TRACE("(Node {}) Disconnected from node {}", my_id_, peer_id);
       established_.erase(peer_id);
     }
@@ -672,6 +671,7 @@ public:
     }
   }
 
+  // TODO: Are errors always fatal here?
   sss::StatusVal<Connection *> GetConnection(uint32_t peer_id) {
     while (!Acquire(my_id_)) {
       std::this_thread::yield();
