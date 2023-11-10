@@ -31,7 +31,7 @@ python launch.py --experiment_name=exp --nodry_run --from_param_config=exp_conf.
 
 ## Manual Normal
 
-LD_LIBRARY_PATH=./build:./build/protos ./iht_rome --send_exp --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 2 node_count: 1 qp_max: 1 node_id: 0 "
+LD_LIBRARY_PATH=./build:./build/protos ./iht_rome --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 2 node_count: 2 qp_max: 1 node_id: 0 "
 
 ## Manual for GDB
 
