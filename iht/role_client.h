@@ -9,6 +9,7 @@
 #include "../rdma/rdma.h"
 
 #include "common.h"
+#include "experiment.h"
 #include "protos/experiment.pb.h"
 // #include "structures/hashtable.h"
 #include "iht_ds.h"
@@ -51,7 +52,7 @@ public:
   /// @param iht a pointer to an IHT
   /// @return a unique ptr
   static unique_ptr<Client>
-  Create(const Peer &server, tcp::EndpointManager &ep, ExperimentParams& params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool) {
+  Create(const Peer &server, tcp::EndpointManager &ep, BenchmarkParams& params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool) {
     return unique_ptr<Client>(new Client(server, ep, params, barr, std::move(iht), pool));
   }
 
@@ -69,7 +70,7 @@ public:
     //        the same machine, which probably means all of the elists and
     //        plists will always be on the same machine.
     // [esl]  A remote barrier is defintely needed to make sure this all happens at the same time...
-    int key_lb = client->params_.key_lb(), key_ub = client->params_.key_ub();
+    int key_lb = client->params_.key_lb, key_ub = client->params_.key_ub;
     int op_count = (key_ub - key_lb) * frac;
     ROME_INFO("CLIENT :: Data structure ({}%) is being populated ({} items inserted) by this client", frac * 100, op_count);
     client->pool_->RegisterThread();
@@ -90,23 +91,18 @@ public:
     // TODO: Signal Handler
     // signal(SIGINT, signal_handler);
 
-    // auto *client_ptr = client.get();
     std::vector<Operation> operations = std::vector<Operation>();
-
-    // initialize random number generator and key_range
-    int key_range = client->params_.key_ub() - client->params_.key_lb();
 
     // Create a random operation generator that is
     // - evenly distributed among the key range
     // - within the specified ratios for operations
     uniform_int_distribution<int> op_dist = uniform_int_distribution<int>(1, 100);
-    uniform_int_distribution<int> k_dist = uniform_int_distribution<int>(client->params_.key_lb(), client->params_.key_ub());
+    uniform_int_distribution<int> k_dist = uniform_int_distribution<int>(key_lb, key_ub);
 
     // Ensuring each node has a different seed value
-    default_random_engine gen(client->params_.node_id() * client->params_.thread_count() + thread_id);
-    int lb = client->params_.key_lb();
-    int contains = client->params_.contains();
-    int insert = client->params_.insert();
+    default_random_engine gen(client->params_.node_id * client->params_.thread_count + thread_id);
+    int contains = client->params_.contains;
+    int insert = client->params_.insert;
     function<Operation(void)> generator = [&]() {
       int rng = op_dist(gen);
       int k = k_dist(gen);
@@ -124,24 +120,23 @@ public:
     // Generate two streams based on what the user wants (operation count or
     // timed stream)
     unique_ptr<rome::Stream<Operation>> workload_stream;
-    if (client->params_.unlimited_stream()) {
+    if (client->params_.unlimited_stream) {
       workload_stream = make_unique<rome::EndlessStream<Operation>>(generator);
     } else {
       // Deliver a workload
-      workload_stream = make_unique<rome::FixedLengthStream<Operation>>(generator, client->params_.op_count());
+      workload_stream = make_unique<rome::FixedLengthStream<Operation>>(generator, client->params_.op_count);
     }
 
     // Create and start the workload driver (also starts client and lets it
     // run).
-    int32_t runtime = client->params_.runtime();
-    int32_t qps_sample_rate = client->params_.qps_sample_rate();
+    int32_t runtime = client->params_.runtime;
     barrier<> *barr = client->barrier_;
-    bool unlimited_stream = client->params_.unlimited_stream();
+    bool unlimited_stream = client->params_.unlimited_stream;
 
     // [mfs] Again, it looks like Create() is an unnecessary factory
     auto driver = rome::WorkloadDriver<Client, Operation>::Create(
         std::move(client), std::move(workload_stream),
-        std::chrono::milliseconds(qps_sample_rate));
+        std::chrono::milliseconds(10));
     // [mfs]  This is quite odd.  The current thread is invoking an async thread
     //        to actually do the work, which means we have lots of extra thread
     //        creation and joining.
@@ -256,10 +251,10 @@ private:
   /// @param iht a pointer to an IHT
   /// @param pool the memory pool capability for the IHT
   /// @return a unique ptr
-  Client(const Peer &host, tcp::EndpointManager &ep, ExperimentParams &params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool)
+  Client(const Peer &host, tcp::EndpointManager &ep, BenchmarkParams &params, barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool)
     : host_(host), endpoint_(ep), params_(params), barrier_(barr), iht_(std::move(iht)), pool_(pool) {
-      if (params.unlimited_stream()) progression = 10000;
-      else progression = max(20.0, params_.op_count() * params_.thread_count() * 0.001);
+      if (params.unlimited_stream) progression = 10000;
+      else progression = max(20.0, params_.op_count * params_.thread_count * 0.01);
     }
 
   int count = 0;
@@ -269,7 +264,7 @@ private:
   /// @brief Represents an endpoint to be used for communication with the host peer
   tcp::EndpointManager endpoint_;
   /// @brief Experimental parameters
-  const ExperimentParams params_;
+  const BenchmarkParams params_;
   /// @brief a barrier for syncing amount clients locally
   barrier<> *barrier_;
   /// @brief an IHT instance to use
