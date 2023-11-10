@@ -10,13 +10,16 @@
 
 #pragma once
 
+#include "../../logging/logging.h"
 #include <arpa/inet.h>
+#include <chrono>
 #include <cstring>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdexcept>
 #include <stdlib.h>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -80,7 +83,10 @@ class SocketManager {
 private:
   /// @brief Throw an exception with an error message
   /// @param message the message to print
-  void error(const char *message) { throw std::runtime_error(message); }
+  void error(const char *message) {
+    ROME_WARN(strerror(errno));
+    throw std::runtime_error(message);
+  }
 
   // socket for accepting new connections
   int sockfd = -1;
@@ -229,7 +235,10 @@ class EndpointManager {
 private:
   /// @brief Throw an exception with an error message
   /// @param message the message to print
-  void error(const char *message) { throw std::runtime_error(message); }
+  void error(const char *message) {
+    ROME_WARN(strerror(errno));
+    throw std::runtime_error(message);
+  }
 
   // Socket for communication with the server
   int sockfd = -1;
@@ -314,9 +323,10 @@ public:
     }
     // Connect to socket
     result = connect(sockfd, (struct sockaddr *)&address, sizeof(address));
-    if (result == -1) {
-      close(sockfd);
-      error("Cannot connect to foreign socket");
+    while (result != 0) {
+      // will spin as many times as necessary until can connect to server
+      std::this_thread::sleep_for(std::chrono::milliseconds(250));
+      result = connect(sockfd, (struct sockaddr *)&address, sizeof(address));
     }
   }
 
@@ -327,4 +337,5 @@ public:
     }
   }
 };
+// end namespace
 } // namespace tcp
