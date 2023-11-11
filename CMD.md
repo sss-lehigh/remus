@@ -9,37 +9,46 @@ make
 
 ## Syncing files
 
-Send folders recorded in scripts/include.txt (and not in scripts/exclude.txt) to cloudlab
+Send everything in iht_rdma_minimal (but not in scripts/exclude.txt) to cloudlab
 
-python rexec.py --nodefile=nodefiles/r320.csv --remote_user=esl225 --remote_root=/users/esl225 --local_root=/Users/ethan/Research/librome_iht --sync
+python sync.py -u esl225
 
-## Make clean
+OR
 
-python rexec.py --nodefile=nodefiles/r320.csv --remote_user=esl225 --remote_root=/users/esl225 --local_root=/Users/ethan/Research/librome_iht --sync --cmd="cd iht_rdma_minimal && make clean"
+sh sync.sh -u esl225
+
+(use -h to get usage for sync)
 
 ## Installing dependencies
 
-Send folders recorded in scripts/include.txt to cloudlab and install dependencies
+Sync first and then install dependencies
 
-python rexec.py --nodefile=nodefiles/r320.csv --remote_user=esl225 --remote_root=/users/esl225 --local_root=/Users/ethan/Research/librome_iht --sync --cmd="cd iht_rdma_minimal && sh cloudlab_depend.sh"
+python sync.py -u esl225 -i
+sh sync.sh -u esl225 -i
 
 ## Running
 
-Start running the IHT
+### Start running the IHT (benchmark)
 
-python launch.py --experiment_name=exp --nodry_run --from_param_config=exp_conf.json --send_exp --bin_dir=iht_rdma_minimal
+python launch.py -u esl225 -e exp --runtype bench --from_param_config exp_conf.json
 
-## Manual Normal
+If running correctness tests, use --runtype test or --runtype concurrent_test
 
-LD_LIBRARY_PATH=./build:./build/protos ./iht_rome --send_exp --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 2 node_count: 1 qp_max: 1 node_id: 0 "
+### Stopping the IHT if it stalls/deadlocks
 
-## Manual for GDB
+python shutdown.py -u esl225
+
+### Manual Normal
+
+LD_LIBRARY_PATH=./build:./build/protos ./iht_rome --node_id 0 --runtime 10 --op_count 0 --contains 80 --insert 10 --remove 10 --key_lb 0 --key_ub 10000 --region_size 25 --thread_count 1 --node_count 1 --qp_max 1 --unlimited_stream
+
+### Manual for GDB
 
 LD_LIBRARY_PATH=./build:./build/protos gdb ./iht_rome
 
-run --experiment_params "qps_sample_rate: 10 max_qps_second: -1 runtime: 10 unlimited_stream: true op_count: 1000 contains: 80 insert: 10 remove: 10 key_lb: 0 key_ub: 10000 region_size: 25 thread_count: 4 node_count: 1 qp_max: 1 node_id: 0 "
+run --node_id 0 --runtime 10 --op_count 0 --contains 80 --insert 10 --remove 10 --key_lb 0 --key_ub 10000 --region_size 25 --thread_count 1 --node_count 1 --qp_max 1 --unlimited_stream
 
-## Testing
+### Manual Testing
 
 LD_LIBRARY_PATH=.:./protos ./iht_rome_test --send_test
 
