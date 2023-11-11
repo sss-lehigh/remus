@@ -1,7 +1,5 @@
 #include "../rdma/memory_pool.h"
 
-#include <google/protobuf/text_format.h>
-#include <protos/experiment.pb.h>
 #include <protos/workloaddriver.pb.h>
 #include <vector>
 
@@ -11,12 +9,38 @@
 #include "../rdma/rdma.h"
 
 #include "common.h"
-#include "iht_ds.h"
+#include "experiment.h"
 #include "role_client.h"
 #include "role_server.h"
 
 auto ARGS = {
-    sss::STR_ARG_OPT("--experiment_params", "Experimental parameters", ""),
+    sss::I64_ARG(
+        "--node_id",
+        "The node's id. (nodeX in cloudlab should have X in this option)"),
+    sss::I64_ARG(
+        "--runtime",
+        "How long to run the experiment for. Only valid if unlimited_stream"),
+    sss::BOOL_ARG_OPT(
+        "--unlimited_stream",
+        "If the stream should be endless, stopping after runtime"),
+    sss::I64_ARG(
+        "--op_count",
+        "How many operations to run. Only valid if not unlimited_stream"),
+    sss::I64_ARG("--region_size", "How big the region should be in 2^x bytes"),
+    sss::I64_ARG("--thread_count",
+                 "How many threads to spawn with the operations"),
+    sss::I64_ARG("--node_count", "How many nodes are in the experiment"),
+    sss::I64_ARG(
+        "--qp_max",
+        "The max number of queue pairs to allocate for the experiment."),
+    sss::I64_ARG("--contains", "Percentage of operations are contains, "
+                               "(contains + insert + remove = 100)"),
+    sss::I64_ARG("--insert", "Percentage of operations are inserts, (contains "
+                             "+ insert + remove = 100)"),
+    sss::I64_ARG("--remove", "Percentage of operations are removes, (contains "
+                             "+ insert + remove = 100)"),
+    sss::I64_ARG("--key_lb", "The lower limit of the key range for operations"),
+    sss::I64_ARG("--key_ub", "The upper limit of the key range for operations"),
 };
 
 #define PATH_MAX 4096
@@ -49,46 +73,33 @@ int main(int argc, char **argv) {
   }
 
   // Extract the args to variables
-  std::string experiment_parms = args.sget("--experiment_params");
+  BenchmarkParams params = BenchmarkParams(args);
 
-  // Use the args to set up the experiment
-  //
-  // [mfs]  There is no documentation for ExperimentParams.  This means that the
-  //        only way to run the code is via a script that knows the internals of
-  //        the ExperimentParams proto.  This needs to be refactored.  It is
-  //        especially strange because protobufs are usually meant for
-  //        communication, not for convenient merging of structs.
-  // [esl]  TODO: replace for json?
-  ExperimentParams params = ExperimentParams();
-  bool success =
-      google::protobuf::TextFormat::MergeFromString(experiment_parms, &params);
-  ROME_ASSERT(success, "Couldn't parse protobuf");
   // Check node count
-  if (params.node_count() <= 0 || params.thread_count() <= 0) {
+  if (params.node_count <= 0 || params.thread_count <= 0) {
     ROME_INFO("Cannot start experiment. Node/thread count was found to be 0");
     exit(1);
   }
   // Check we are in this experiment
-  if (params.node_id() >= params.node_count()) {
+  if (params.node_id >= params.node_count) {
     ROME_INFO("Not in this experiment. Exiting");
     exit(0);
   }
 
   // Determine the number of memory pools to use in the experiment
   // Each memory pool represents
-  int mp = std::min(params.thread_count(),
-                    (int)std::floor(params.qp_max() / params.node_count()));
+  int mp = std::min(params.thread_count,
+                    (int)std::floor(params.qp_max / params.node_count));
   if (mp == 0)
     mp = 1; // Make sure if node_count > qp_max, we don't end up with 0 memory
             // pools
 
   ROME_INFO("Distributing {} MemoryPools across {} threads", mp,
-            params.thread_count());
+            params.thread_count);
 
   // Start initializing a vector of peers
-  volatile bool done = false; // (TODO: Should be atomic?)
   std::vector<Peer> peers;
-  for (uint16_t n = 0; n < mp * params.node_count(); n++) {
+  for (uint16_t n = 0; n < mp * params.node_count; n++) {
     // Create the ip_peer (really just node name)
     std::string ippeer = "node";
     std::string node_id = std::to_string((int)n / mp);
@@ -108,19 +119,18 @@ int main(int argc, char **argv) {
   std::shared_ptr<rdma_capability> pools[mp];
   // Create multiple memory pools to be shared (have to use threads since Init
   // is blocking)
-  uint32_t block_size = 1 << params.region_size();
+  uint32_t block_size = 1 << params.region_size;
   for (int i = 0; i < mp; i++) {
     mempool_threads.emplace_back(std::thread(
         [&](int mp_index, int self_index) {
           Peer self = peers.at(self_index);
-          ROME_DEBUG(mp != params.thread_count() ? "Is shared"
-                                                 : "Is not shared");
+          ROME_DEBUG(mp != params.thread_count ? "Is shared" : "Is not shared");
           std::shared_ptr<rdma_capability> pool =
               std::make_shared<rdma_capability>(self);
           pool->init_pool(block_size, peers);
           pools[mp_index] = pool;
         },
-        i, (params.node_id() * mp) + i));
+        i, (params.node_id * mp) + i));
   }
   // Let the init finish
   for (int i = 0; i < mp; i++) {
@@ -129,13 +139,13 @@ int main(int argc, char **argv) {
 
   // Create a list of client and server  threads
   std::vector<std::thread> threads;
-  if (params.node_id() == 0) {
+  if (params.node_id == 0) {
     // If dedicated server-node, we must send IHT pointer and wait for clients
     // to finish
     threads.emplace_back(std::thread([&]() {
       // Initialize X connections
       tcp::SocketManager socket_handle = tcp::SocketManager(PORT_NUM);
-      for (int i = 0; i < params.thread_count() * params.node_count(); i++) {
+      for (int i = 0; i < params.thread_count * params.node_count; i++) {
         // TODO: Can we have a per-node connection?
         // I haven't gotten around to coming up with a clean way to reduce the
         // number of sockets connected to the server
@@ -148,14 +158,14 @@ int main(int argc, char **argv) {
       tcp::message ptr_message = tcp::message(root_ptr.raw());
       socket_handle.send_to_all(&ptr_message);
       // We are the server
-      ExperimentManager::ClientStopBarrier(socket_handle, params.runtime());
+      ExperimentManager::ClientStopBarrier(socket_handle, params.runtime);
       ROME_INFO("[SERVER THREAD] -- End of execution; -- ");
     }));
   }
 
   // Initialize T endpoints, one for each thread
-  tcp::EndpointManager endpoint_managers[params.thread_count()];
-  for (uint16_t i = 0; i < params.thread_count(); i++) {
+  tcp::EndpointManager endpoint_managers[params.thread_count];
+  for (uint16_t i = 0; i < params.thread_count; i++) {
     endpoint_managers[i] = tcp::EndpointManager(PORT_NUM, host.address.c_str());
   }
 
@@ -168,7 +178,7 @@ int main(int argc, char **argv) {
   //        I'm not exactly sure what the implementation of an RDMA barrier
   //        would look like. If you have one in mind, lmk and I can start
   //        working on it.
-  std::barrier client_sync = std::barrier(params.thread_count());
+  std::barrier client_sync = std::barrier(params.thread_count);
   // [mfs]  This seems like a misuse of protobufs: why would the local threads
   //        communicate via protobufs?
   // [esl]  Protobufs were a pain to code with. I think the ClientAdaptor
@@ -176,13 +186,13 @@ int main(int argc, char **argv) {
   // object.
   // TODO:  In the refactoring of the client adaptor, remove dependency on
   // protobufs for a workload object
-  rome::WorkloadDriverProto results[params.thread_count()];
-  for (int i = 0; i < params.thread_count(); i++) {
+  rome::WorkloadDriverProto workload_results[params.thread_count];
+  for (int i = 0; i < params.thread_count; i++) {
     threads.emplace_back(std::thread(
         [&](int thread_index) {
           int mempool_index = thread_index % mp;
           std::shared_ptr<rdma_capability> pool = pools[mempool_index];
-          Peer self = peers.at((params.node_id() * mp) + mempool_index);
+          Peer self = peers.at((params.node_id * mp) + mempool_index);
           std::unique_ptr<IHT> iht = std::make_unique<IHT>(self);
           // sleep for a short while to ensure the receiving end (SocketManager)
           // is up and running NB: We have no way to ensure the server is
@@ -200,10 +210,11 @@ int main(int argc, char **argv) {
               Client<IHT_Op<int, int>>::Create(
                   host, endpoint_managers[thread_index], params, &client_sync,
                   std::move(iht), pool);
+          double populate_frac =
+              0.5 / (double)(params.node_count * params.thread_count);
           sss::StatusVal<WorkloadDriverProto> output =
-              Client<IHT_Op<int, int>>::Run(
-                  std::move(client), thread_index,
-                  0.5 / (double)(params.node_count() * params.thread_count()));
+              Client<IHT_Op<int, int>>::Run(std::move(client), thread_index,
+                                            populate_frac);
           // [mfs]  It would be good to document how a client can fail, because
           // it seems like if even one client fails, on any machine, the
           //  whole experiment should be invalidated.
@@ -213,7 +224,7 @@ int main(int argc, char **argv) {
           //       being generated?
           if (output.status.t == sss::StatusType::Ok &&
               output.val.has_value()) {
-            results[thread_index] = output.val.value();
+            workload_results[thread_index] = output.val.value();
           } else {
             ROME_ERROR("Client run failed");
           }
@@ -234,30 +245,46 @@ int main(int argc, char **argv) {
   // [mfs]  Again, odd use of protobufs for relatively straightforward combining
   //        of results.  Or am I missing something, and each node is sending its
   //        results, so they are all accumulated at the main node?
-  // [esl]  Each node will create a result proto, combining the results of each
-  // thread, and save it.
-  //        Then the launch script scp these files, getting one results file per
-  //        node. The graphing script will combine the results of these files.
-  ResultProto result_proto = ResultProto();
-  *result_proto.mutable_params() = params;
-  for (int i = 0; i < params.thread_count(); i++) {
-    rome::WorkloadDriverProto *r = result_proto.add_driver();
-    std::string output;
-    results[i].SerializeToString(&output);
-    r->MergeFromString(output);
+  // [esl]  Each thread will create a result proto. The result struct will parse
+  // this and save it in a csv which the launch script can scp.
+  Result result[params.thread_count];
+  for (int i = 0; i < params.thread_count; i++) {
+    result[i] = Result(params);
+    if (workload_results[i].has_ops() &&
+        workload_results[i].ops().has_counter()) {
+      result[i].count = workload_results[i].ops().counter().count();
+    }
+    if (workload_results[i].has_runtime() &&
+        workload_results[i].runtime().has_stopwatch()) {
+      result[i].runtime_ns =
+          workload_results[i].runtime().stopwatch().runtime_ns();
+    }
+    if (workload_results[i].has_qps() &&
+        workload_results[i].qps().has_summary()) {
+      auto qps = workload_results[i].qps().summary();
+      result[i].units = qps.units();
+      result[i].mean = qps.mean();
+      result[i].stdev = qps.stddev();
+      result[i].min = qps.min();
+      result[i].p50 = qps.p50();
+      result[i].p90 = qps.p90();
+      result[i].p95 = qps.p95();
+      result[i].p999 = qps.p999();
+      result[i].max = qps.max();
+    }
+    ROME_DEBUG("Protobuf Result {}\n{}", i, result[i].result_as_debug_string());
   }
 
   // [mfs] Does this produce one file per node?
   // [esl] Yes, this produces one file per node,
   //       The launch.py script will scp this file and use the protobuf to
   //       interpret it
-  // TODO: Replace this file out for a simple CSV --> much easier to parse on
-  // the developer side and a lot more code friendly
-  ROME_DEBUG("Compiled Proto Results ### {}", result_proto.DebugString());
-  std::ofstream filestream("iht_result.pbtxt");
-  filestream << result_proto.DebugString();
+  std::ofstream filestream("iht_result.csv");
+  filestream << Result::result_as_string_header();
+  for (int i = 0; i < params.thread_count; i++) {
+    filestream << result[0].result_as_string();
+  }
   filestream.close();
-
   ROME_INFO("[EXPERIMENT] -- End of execution; -- ");
   return 0;
 }

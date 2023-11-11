@@ -12,8 +12,7 @@
 #include "../logging/logging.h"
 #include "../vendor/sss/status.h"
 
-// #include "peer.h"
-// #include "remote_ptr.h"
+namespace rome::rdma::internal {
 
 /// TODO: Update class-level documentation after this is fully
 ///       refactored/cleaned
@@ -53,10 +52,10 @@ class RdmaMemory {
   // Preallocated size.
   const uint64_t capacity_;
 
-  /// The mmap_deleter functor wraps a call to munmap.  This is used in some
-  /// template wizardry for the `raw_` field, so that we can use a unique_ptr to
-  /// hold raw memory regions returned by mmap or malloc, and have the region
-  /// get reclaimed correctly on unique_ptr deallocation.
+  /// The mmap_deleter functor wraps a call to munmap.  This is used by the
+  /// `rdma_unique_ptr` type, so that we can use a unique_ptr to hold raw memory
+  /// regions returned by mmap or malloc, and have the region get reclaimed
+  /// correctly on unique_ptr deallocation.
   struct mmap_deleter {
     void operator()(uint8_t raw[]) { munmap(raw, sizeof(*raw)); }
   };
@@ -112,6 +111,11 @@ class RdmaMemory {
 public:
   ~RdmaMemory() { memory_regions_.clear(); }
 
+  /// Construct a slab of RDMA memory by allocating a region of memory (from
+  /// hugepages if possible) and registering it with RDMA
+  ///
+  /// @param capacity The size (in bytes) of the region to allocate
+  /// @param pd       The RDMA protection domain in which to register the memory
   RdmaMemory(uint64_t capacity, ibv_pd *const pd) : capacity_(capacity) {
     if (GetNumHugepages() <= 0) {
       ROME_TRACE("Not using hugepages; performance might suffer.");
@@ -122,47 +126,51 @@ public:
       ROME_ASSERT(std::get<0>(raw_) != nullptr, "Allocation failed.");
     } else {
       ROME_INFO("Using hugepages");
-      raw_ =
-          std::unique_ptr<uint8_t[], mmap_deleter>(reinterpret_cast<uint8_t *>(
-              mmap(nullptr, capacity_, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0)));
-      ROME_ASSERT(reinterpret_cast<void *>(std::get<1>(raw_).get()) !=
-                      MAP_FAILED,
+      raw_ = mmap_unique_ptr(reinterpret_cast<uint8_t *>(
+          mmap(nullptr, capacity_, PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0)));
+      ROME_ASSERT((void *)(std::get<1>(raw_).get()) != MAP_FAILED,
                   "mmap failed.");
     }
     RegisterMemoryRegion(kDefaultId, pd, 0, capacity_);
   }
 
   RdmaMemory(const RdmaMemory &) = delete;
-  RdmaMemory(RdmaMemory &&rm)
-      : capacity_(rm.capacity_), raw_(std::move(rm.raw_)),
-        memory_regions_(std::move(rm.memory_regions_)) {}
+  RdmaMemory(RdmaMemory &&rm) = delete;
+  RdmaMemory &operator=(const RdmaMemory &) = delete;
 
-  // Getters.
-  uint64_t capacity() const { return capacity_; }
-
+  // TODO: stop needing this
   uint8_t *raw() const {
     return std::visit([](const auto &r) { return r.get(); }, raw_);
   }
 
-  // Creates a new memory region associated with the given protection domain
-  // `pd` at the provided offset and with the given length. If a region with the
-  // same `id` already exists then it returns `AlreadyExists`.
+  /// Associate this RdmaMemory's `raw` region with protection domain `pd`.
+  ///
+  /// TODO: When we get rid of the map, this signature will change
+  ///
+  /// TODO: The offset/length stuff is rather annoying.  It's all there so that
+  ///       we can allocate one slab, cut it in half, and use the halves for the
+  ///       send and receive regions.  It would be much better if we just had
+  ///       separate slabs for sending and receiving, even if that means wasting
+  ///       a hugepage or two.
   ibv_mr *RegisterMemoryRegion(std::string id, ibv_pd *const pd, int offset,
                                int length) {
     using namespace std::string_literals;
 
+    // TODO: This will go away if we get rid of splitting
     if (!ValidateRegion(offset, length)) {
       ROME_FATAL("RegisterMemoryRegion :: validation failed for "s + id)
       std::terminate();
     }
 
+    // TODO: This will go away when we get rid of the map
     auto iter = memory_regions_.find(id);
     if (iter != memory_regions_.end()) {
       ROME_FATAL("RegisterMemoryRegion :: region already registered: "s + id);
       std::terminate();
     }
 
+    // TODO: When the map goes away, I think this can just return the MR?
     auto *base = reinterpret_cast<uint8_t *>(std::visit(
                      [](const auto &raw) { return raw.get(); }, raw_)) +
                  offset;
@@ -178,18 +186,9 @@ public:
     return res;
   }
 
+  // TODO: Get rid of this?
   ibv_mr *GetDefaultMemoryRegion() const {
     return memory_regions_.find(kDefaultId)->second.get();
-  }
-
-  sss::StatusVal<ibv_mr *> GetMemoryRegion(std::string id) const {
-    auto iter = memory_regions_.find(id);
-    if (iter == memory_regions_.end()) {
-      sss::Status err = {sss::NotFound, "Memory region not found: "};
-      err << id;
-      return {err, {}};
-    }
-    return {sss::Status::Ok(), iter->second.get()};
   }
 
 private:
@@ -213,3 +212,4 @@ private:
     return true;
   }
 };
+}

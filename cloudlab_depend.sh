@@ -1,4 +1,5 @@
-sudo apt-get update
+export DEBIAN_FRONTEND=noninteractive
+sudo apt-get update -y
 sudo apt-get install libprotobuf-dev protobuf-compiler  -y
 sudo apt-get install cmake -y
 sudo apt-get install clang-15 libabsl-dev librdmacm-dev libibverbs-dev libgtest-dev libbenchmark-dev libfmt-dev libspdlog-dev libgmock-dev -y

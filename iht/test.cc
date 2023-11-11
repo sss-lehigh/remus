@@ -17,9 +17,9 @@
 
 auto ARGS = {
     sss::BOOL_ARG_OPT("--send_bulk",
-                      "If to run bulk operations. (More for benchmarking)"),
+                      "If to run test operations multithreaded"),
     sss::BOOL_ARG_OPT("--send_test",
-                      "If to test the functionality of the methods."),
+                      "If to test the functionality of the methods"),
 };
 
 #define PATH_MAX 4096

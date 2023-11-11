@@ -32,11 +32,6 @@ class ConnectionManager {
   /// A broker handles the connection setup using the RDMA CM library. It is
   /// single threaded but communicates with all other brokers in the system to
   /// exchange information regarding the underlying RDMA memory configurations.
-  ///
-  /// TODO: The edits to this (avoid coroutines) are not tested
-  ///
-  /// TODO: This is templated on the CM to break a circular dependence without
-  ///       resorting to virtual methods.  There's probably a better approach?
   class RdmaBroker {
     /// Produce a vector of active ports, or None if none are found
     static std::optional<std::vector<int>>
@@ -56,8 +51,7 @@ class ConnectionManager {
       }
       if (ports.empty())
         return {};
-      else
-        return ports;
+      return ports;
     }
 
     // Returns a vector of device name and active port pairs that are accessible
@@ -89,12 +83,6 @@ class ConnectionManager {
       return active;
     }
 
-    std::string address_;
-    uint16_t port_;
-
-    // Flag to indicate that the worker thread should terminate.
-    std::atomic<bool> terminate_;
-
     /// The worker thread that listens and responds to incoming messages.
     struct thread_deleter {
       void operator()(std::thread *thread) {
@@ -102,6 +90,12 @@ class ConnectionManager {
         free(thread);
       }
     };
+
+    std::string address_;
+    uint16_t port_;
+
+    // Flag to indicate that the worker thread should terminate.
+    std::atomic<bool> terminate_;
     std::unique_ptr<std::thread, thread_deleter> runner_;
 
     // Status of the broker at any given time.
@@ -114,6 +108,7 @@ class ConnectionManager {
     rdma_cm_id *listen_id_;
 
     // The total number of connections made by this broker.
+    // [mfs] Why atomic?
     std::atomic<uint32_t> num_connections_;
 
     // Maintains connections that are forwarded by the broker.
@@ -505,6 +500,8 @@ public:
   // `RdmaClientInterface` implementation
   sss::StatusVal<Connection *> Connect(uint32_t peer_id,
                                        std::string_view server, uint16_t port) {
+    // It's OK for this to return OK or Unavailable.  Otherwise, it is going to
+    // lead to the whole program crashing, so why not just crash here?
     if (Acquire(my_id_)) {
       auto conn = established_.find(peer_id);
       if (conn != established_.end()) {
@@ -671,8 +668,10 @@ public:
     }
   }
 
-  // TODO: Are errors always fatal here?
+  // TODO: Are errors always fatal here?  Yes.  So we can go ahead and make this
+  // fail-stop.
   sss::StatusVal<Connection *> GetConnection(uint32_t peer_id) {
+    // TODO: use a regular mutex
     while (!Acquire(my_id_)) {
       std::this_thread::yield();
     }

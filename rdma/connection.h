@@ -19,7 +19,8 @@
 
 #include "../logging/logging.h"
 #include "../vendor/sss/status.h"
-#include "memory_pool.h"
+
+#include "segment.h"
 
 namespace rome::rdma::internal {
 
@@ -81,9 +82,6 @@ class Connection {
   // [mfs] These should probably be template parameters
   static constexpr size_t kMemoryPoolMessengerCapacity = 1 << 12;
   static constexpr size_t kMemoryPoolMessageSize = 1 << 8;
-
-  uint32_t src_id_;
-  uint32_t dst_id_;
 
   sss::Status SendMessage(const Message &msg) {
     // The proto we send may not be larger than the maximum size received at
@@ -238,18 +236,15 @@ public:
   // worth the complexity?
   Connection(uint32_t src_id, uint32_t dst_id, rdma_cm_id *channel_id)
       : rm_(kCapacity, channel_id->pd), id_(channel_id),
-        send_cap_(kCapacity / 2), recv_cap_(kCapacity / 2), src_id_(src_id),
-        dst_id_(dst_id) {
+        send_cap_(kCapacity / 2), recv_cap_(kCapacity / 2) {
     // [mfs]  There's a secret rule here, that the send/recv are using the same
     //        pd as the channel.  Document it?
     send_mr_ =
         (rm_.RegisterMemoryRegion(kSendId, channel_id->pd, 0, send_cap_));
     recv_mr_ = (rm_.RegisterMemoryRegion(kRecvId, channel_id->pd, send_cap_,
                                          recv_cap_));
-    send_base_ = reinterpret_cast<uint8_t *>(send_mr_->addr);
-    send_next_ = send_base_;
-    recv_base_ = reinterpret_cast<uint8_t *>(recv_mr_->addr);
-    recv_next_ = recv_base_;
+    send_next_ = send_base_ = reinterpret_cast<uint8_t *>(send_mr_->addr);
+    recv_next_ = recv_base_ = reinterpret_cast<uint8_t *>(recv_mr_->addr);
     PrepareRecvBuffer();
   }
 

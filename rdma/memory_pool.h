@@ -25,6 +25,7 @@
 #include "../metrics/summary.h"
 #include "../vendor/sss/status.h"
 
+#include "connection.h"
 #include "peer.h"
 #include "remote_ptr.h"
 #include "segment.h"
@@ -55,45 +56,30 @@ template <typename T> struct std::hash<rome::rdma::remote_ptr<T>> {
 
 namespace rome::rdma::internal {
 
-class Connection;
-
 /// TODO: This is templated on the CM to break a circular dependence without
 ///       resorting to virtual methods.  There's probably a better approach?
 template <class CM> class MemoryPool {
+
   /// Specialization of a `memory_resource` that wraps RDMA accessible memory.
   ///
-  /// TODO: This is only used by this file, so it doesn't need to be publicly
-  ///       visible
+  /// TODO: This is really just a freelist-based allocator without true
+  ///       recycling.  Can it be simplified?  Or could we just use a bona fide
+  ///       std::memory_resource?
   class rdma_memory_resource : public std::experimental::pmr::memory_resource {
-  public:
-    virtual ~rdma_memory_resource() {}
-    explicit rdma_memory_resource(size_t bytes, ibv_pd *pd)
-        : rdma_memory_(std::make_unique<RdmaMemory>(bytes, pd)),
-          head_(rdma_memory_->raw() + bytes) {
-      std::memset(alignments_.data(), 0, sizeof(alignments_));
-      ROME_TRACE("rdma_memory_resource: {} to {} (length={})",
-                 fmt::ptr(rdma_memory_->raw()), fmt::ptr(head_.load()), bytes);
-    }
-
     rdma_memory_resource(const rdma_memory_resource &) = delete;
     rdma_memory_resource &operator=(const rdma_memory_resource &) = delete;
-    ibv_mr *mr() const { return rdma_memory_->GetDefaultMemoryRegion(); }
 
-    template <typename T>
-    [[nodiscard]] constexpr T *allocateT(std::size_t n = 1) {
-      return reinterpret_cast<T *>(allocate(sizeof(T) * n, 64));
-    }
-
-    template <typename T> constexpr void deallocateT(T *p, std::size_t n = 1) {
-      deallocate(reinterpret_cast<T *>(p), sizeof(T) * n, 64);
-    }
-
-  private:
     static constexpr uint8_t kMinSlabClass = 3;
     static constexpr uint8_t kMaxSlabClass = 20;
     static constexpr uint8_t kNumSlabClasses =
         kMaxSlabClass - kMinSlabClass + 1;
     static constexpr size_t kMaxAlignment = 1 << 8;
+
+    // [mfs]  base 2 log is really cheap these days... can't we just use an
+    //        instruction, and avoid the cache impact of this table?
+    //
+    // see:
+    // https://stackoverflow.com/questions/11376288/fast-computing-of-log2-for-64-bit-integers
     static constexpr char kLogTable[256] = {
 #define LT(n) n, n, n, n, n, n, n, n, n, n, n, n, n, n, n, n
         -1,    0,     1,     1,     2,     2,     2,     2,
@@ -101,6 +87,15 @@ template <class CM> class MemoryPool {
         LT(4), LT(5), LT(5), LT(6), LT(6), LT(6), LT(6), LT(7),
         LT(7), LT(7), LT(7), LT(7), LT(7), LT(7), LT(7),
     };
+
+    std::unique_ptr<RdmaMemory> rdma_memory_;
+    std::atomic<uint8_t *> head_;
+
+    // Stores addresses of freed memory for a given slab class.
+    inline static thread_local std::array<uint8_t, kNumSlabClasses> alignments_;
+    inline static thread_local std::array<std::list<std::pair<size_t, void *>>,
+                                          kNumSlabClasses>
+        freelists_;
 
     inline unsigned int UpperLog2(size_t x) {
       size_t r;
@@ -174,45 +169,68 @@ template <class CM> class MemoryPool {
       return this == &other;
     }
 
-    std::unique_ptr<RdmaMemory> rdma_memory_;
-    std::atomic<uint8_t *> head_;
+  public:
+    virtual ~rdma_memory_resource() {}
 
-    // Stores addresses of freed memory for a given slab class.
-    inline static thread_local std::array<uint8_t, kNumSlabClasses> alignments_;
-    inline static thread_local std::array<std::list<std::pair<size_t, void *>>,
-                                          kNumSlabClasses>
-        freelists_;
+    explicit rdma_memory_resource(size_t bytes, ibv_pd *pd)
+        : rdma_memory_(std::make_unique<RdmaMemory>(bytes, pd)),
+          head_(rdma_memory_->raw() + bytes) {
+      std::memset(alignments_.data(), 0, sizeof(alignments_));
+      ROME_TRACE("rdma_memory_resource: {} to {} (length={})",
+                 fmt::ptr(rdma_memory_->raw()), fmt::ptr(head_.load()), bytes);
+    }
+
+    /// [mfs] If we cached this once, we wouldn't need the call?
+    ibv_mr *mr() const { return rdma_memory_->GetDefaultMemoryRegion(); }
+
+    template <typename T>
+    [[nodiscard]] constexpr T *allocateT(std::size_t n = 1) {
+      return reinterpret_cast<T *>(allocate(sizeof(T) * n, 64));
+    }
+
+    template <typename T> constexpr void deallocateT(T *p, std::size_t n = 1) {
+      deallocate(reinterpret_cast<T *>(p), sizeof(T) * n, 64);
+    }
   };
 
-  static inline void cpu_relax() { asm volatile("pause\n" ::: "memory"); }
-
+  // TODO: Document this
   struct conn_info_t {
     Connection *conn;
     uint32_t rkey;
     uint32_t lkey;
   };
 
-  Peer self_;
   /// Used to protect the id generator and the thread_ids
   std::mutex control_lock_;
-  /// Used to protect the rdma_per_read_ summary statistics thing
-  std::mutex rdma_per_read_lock_;
-  /// A counter to increment
+  /// A generator for thread ids
   uint64_t id_gen = 0;
   /// A mapping of thread id to an index into the reordering_semaphores array.
   /// Passed as the wr_id in work requests.
   std::unordered_map<std::thread::id, uint64_t> thread_ids;
+
+  /// Used to protect the rdma_per_read_ summary statistics thing
+  std::mutex rdma_per_read_lock_;
+  rome::metrics::Summary<size_t> rdma_per_read_;
+
   /// a vector of semaphores, one for each thread that can send an operation.
   /// Threads will use this to recover from polling another thread's wr_id
+  // TODO:  the size should be a run-time value
+  //
+  // TODO:  threads should have descriptors and not use this, as it's going to
+  //        cause cache thrashing.
   std::array<std::atomic<int>, 20> reordering_counters;
 
+  // [mfs]  Stopped here.  Need to figure out what's going on in this code, and
+  //        how it can be cleaned up...
+
+  Peer self_;
   std::unique_ptr<CM> connection_manager_;
   std::unique_ptr<rdma_memory_resource> rdma_memory_;
-  ibv_mr *mr_;
+  // ibv_mr *mr_;
 
   std::unordered_map<uint16_t, conn_info_t> conn_info_;
 
-  rome::metrics::Summary<size_t> rdma_per_read_;
+  static inline void cpu_relax() { asm volatile("pause\n" ::: "memory"); }
 
 public:
   MemoryPool(const Peer &self, std::unique_ptr<CM> connection_manager)
@@ -222,7 +240,9 @@ public:
   MemoryPool(const MemoryPool &) = delete;
   MemoryPool(MemoryPool &&) = delete;
 
+  // TODO: Stop needing this!
   CM *connection_manager() const { return connection_manager_.get(); }
+
   rome::metrics::MetricProto rdma_per_read_proto() {
     return rdma_per_read_.ToProto();
   }
@@ -244,17 +264,18 @@ public:
   /// TODO: This is only called once, and the caller uses OK_OR_FAIL on the
   ///       return value.  Thus it doesn't make sense to have a return value.
   ///       This should just std::abort() on an error.
+  ///
+  /// TODO: Once we have fail-stop behavior, this can be part of the constructor
   inline sss::Status Init(uint32_t capacity, const std::vector<Peer> &peers) {
     // TODO: This method is fail-stop in the caller, so instead it should be
     // fail-stop here
 
     auto status = connection_manager_->Start(self_.address, self_.port);
-    RETURN_STATUS_ON_ERROR(status);
+    RETURN_STATUS_ON_ERROR(status); // abort instead!
 
     // Create a memory region (mr) in the current protection domain (pd)
     rdma_memory_ = std::make_unique<rdma_memory_resource>(
         capacity + sizeof(uint64_t), connection_manager_->pd());
-    mr_ = rdma_memory_->mr();
 
     // Go through the list of peers and connect to each of them
     for (const auto &p : peers) {
@@ -267,8 +288,8 @@ public:
 
     // Send the memory region to all peers
     RemoteObjectProto rm_proto;
-    rm_proto.set_rkey(mr_->rkey);
-    rm_proto.set_raddr(reinterpret_cast<uint64_t>(mr_->addr));
+    rm_proto.set_rkey(rdma_memory_->mr()->rkey);
+    rm_proto.set_raddr(reinterpret_cast<uint64_t>(rdma_memory_->mr()->addr));
     for (const auto &p : peers) {
       auto conn = connection_manager_->GetConnection(p.id);
       STATUSVAL_OR_DIE(conn);
@@ -283,13 +304,17 @@ public:
       auto got = conn.val.value()->template Deliver<RemoteObjectProto>();
       RETURN_STATUSVAL_ON_ERROR(got);
       // [mfs] I don't understand why we use mr_->lkey?
-      conn_info_.emplace(p.id, conn_info_t{conn.val.value(),
-                                           got.val.value().rkey(), mr_->lkey});
+      conn_info_.emplace(p.id,
+                         conn_info_t{conn.val.value(), got.val.value().rkey(),
+                                     rdma_memory_->mr()->lkey});
     }
 
     return {sss::Ok, {}};
   }
 
+  // This seems to be giving each thread a unique Id, solely so that it can have
+  // a slot in the reordering_counters array.  Per-thread descriptors would be a
+  // better approach.
   void RegisterThread() {
     control_lock_.lock();
     std::thread::id mid = std::this_thread::get_id();
@@ -304,14 +329,13 @@ public:
     this->thread_ids.insert(std::make_pair(mid, this->id_gen));
     this->reordering_counters[this->id_gen] = 0;
     this->id_gen++;
-    // this->reordering_counters.resize(this->id_gen);
     control_lock_.unlock();
   }
 
   /// Allocate some memory from the local RDMA heap
   template <typename T> remote_ptr<T> Allocate(size_t size = 1) {
-    auto ret = remote_ptr<T>(self_.id,
-                             rdma_memory_.get()->template allocateT<T>(size));
+    auto ret =
+        remote_ptr<T>(self_.id, rdma_memory_->template allocateT<T>(size));
     return ret;
   }
 
@@ -319,7 +343,7 @@ public:
   template <typename T> void Deallocate(remote_ptr<T> p, size_t size = 1) {
     ROME_ASSERT(p.id() == self_.id,
                 "Alloc/dealloc on remote node not implemented...");
-    rdma_memory_.get()->template deallocateT<T>(std::to_address(p), size);
+    rdma_memory_->template deallocateT<T>(std::to_address(p), size);
   }
 
   /// Read from RDMA, store the result in prealloc (may allocate)
@@ -394,7 +418,7 @@ public:
     ibv_sge sge{};
     sge.addr = reinterpret_cast<uint64_t>(local);
     sge.length = sizeof(T);
-    sge.lkey = mr_->lkey;
+    sge.lkey = rdma_memory_->mr()->lkey;
 
     ibv_send_wr send_wr_{};
     send_wr_.wr_id = index_as_id;
@@ -424,6 +448,9 @@ public:
       ROME_ASSERT(old >= 1, "Broken synchronization");
     }
 
+    // [mfs]  It is odd that we have metrics for read (albeit with a bottleneck)
+    //        but we don't have metrics for write/swap/cas?
+
     if (prealloc == remote_nullptr) {
       auto alloc = rdma_memory_.get();
       alloc->template deallocateT<T>(local);
@@ -432,7 +459,10 @@ public:
 
   /// Do a 64-bit swap over RDMA
   ///
-  /// [mfs] If the swap value is always a uint64_t, why is this templated on T?
+  /// TODO: This is really just a CAS with a loop if it fails, because RDMA
+  ///       doesn't support a true "swap" operation.  It's still good to have,
+  ///       because of the overhead of trying from scratch, but we can certainly
+  ///       optimize it a bit.
   template <typename T>
   T AtomicSwap(remote_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
     static_assert(sizeof(T) == 8);
@@ -442,13 +472,13 @@ public:
     uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
 
     auto alloc = rdma_memory_.get();
-    // [esl] There is probably a better way to avoid allocating every time we do
-    // this call (maybe be preallocating the space thread_local)
+    // [esl]  There is probably a better way to avoid allocating every time we
+    //        do this call (maybe be preallocating the space thread_local)
     volatile uint64_t *prev_ = alloc->template allocateT<uint64_t>();
 
     ibv_sge sge{.addr = reinterpret_cast<uint64_t>(prev_),
                 .length = sizeof(uint64_t),
-                .lkey = mr_->lkey};
+                .lkey = rdma_memory_->mr()->lkey};
 
     ibv_send_wr send_wr_{};
     send_wr_.wr_id = index_as_id;
@@ -510,7 +540,7 @@ public:
     // [esl] I agree, i think its much cleaner
     ibv_sge sge{.addr = reinterpret_cast<uint64_t>(prev_),
                 .length = sizeof(uint64_t),
-                .lkey = mr_->lkey};
+                .lkey = rdma_memory_->mr()->lkey};
 
     ibv_send_wr send_wr_{};
     send_wr_.wr_id = index_as_id;
@@ -540,8 +570,6 @@ public:
       ROME_ASSERT(old >= 1, "Broken synchronization");
     }
 
-    // ROME_TRACE("CompareAndSwap: expected={:x}, swap={:x}, actual={:x}
-    // (id={})", expected, swap, *prev_, static_cast<uint64_t>(self_.id));
     T ret = T(*prev_);
     alloc->template deallocateT<uint64_t>((uint64_t *)prev_, 8);
     return ret;
@@ -552,7 +580,8 @@ public:
   }
 
   template <typename T> inline remote_ptr<T> GetBaseAddress() const {
-    return GetRemotePtr<T>(reinterpret_cast<const T *>(mr_->addr));
+    return GetRemotePtr<T>(
+        reinterpret_cast<const T *>(rdma_memory_->mr()->addr));
   }
 
 private:
@@ -585,7 +614,7 @@ private:
       } else {
         sges[i].length = (i == num_chunks - 1 ? remainder : chunk_size);
       }
-      sges[i].lkey = mr_->lkey;
+      sges[i].lkey = rdma_memory_->mr()->lkey;
 
       wrs[i].wr_id = index_as_id;
       wrs[i].num_sge = 1;
@@ -618,6 +647,9 @@ private:
     }
 
     // Update rdma per read
+    //
+    // TODO: If we're serious about being multithreaded, rdma_per_read needs to
+    // be thread-local, or else all threads will contend on this.
     rdma_per_read_lock_.lock();
     rdma_per_read_ << num_chunks;
     rdma_per_read_lock_.unlock();

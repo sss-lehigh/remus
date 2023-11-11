@@ -19,3 +19,7 @@ graph TD
     RCV(receiver.h)
     RM(rmalloc.h) --> MEM
 ```
+
+Here's the discussion document:
+
+<https://docs.google.com/document/d/1dbtNQWZehf93oDXrdZvbbNRL2-Vf8ki7eJtp_4LkH-Q/edit#heading=h.5z1hw1t7kz6b>

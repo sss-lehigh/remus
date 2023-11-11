@@ -1,13 +1,10 @@
-from absl import app, flags
 from multiprocessing import Process
 import subprocess
 import os
 from typing import List
 import csv
 import json
-import sys
-sys.path.insert(1, '..')
-import protos.experiment_pb2 as protos
+import argparse
 
 def domain_name(nodetype):
     """Function to get domain name"""
@@ -15,45 +12,44 @@ def domain_name(nodetype):
     node_h = ['apt.emulab.net', 'cse.lehigh.edu', 'clemson.cloudlab.us', 'utah.cloudlab.us', 'utah.cloudlab.us', 'utah.cloudlab.us', 'utah.cloudlab.us']
     return node_h[node_i.index(nodetype)]
 
+# set colors
+red = "\033[31m"
+black = "\033[0m"
+green = "\033[32m"
+blue = "\033[34m"
+
+parser = argparse.ArgumentParser(description='Process the parameters for running an experiment or a test-suite')
 # Experiment configuration
-flags.DEFINE_string('ssh_keyfile', '~/.ssh/id_rsa', 'Path to ssh file for authentication')
-flags.DEFINE_string('ssh_user', 'esl225', 'Username for login')
-flags.DEFINE_string('nodefile', '../../scripts/nodefiles/r320.csv', 'Path to csv with the node names')
-flags.DEFINE_string('experiment_name', None, 'Used as local save directory', required=True)
-flags.DEFINE_string('bin_dir', 'librome_iht/iht_rdma_minimal', 'Directory where we run bazel build from')
-flags.DEFINE_bool('dry_run', required=True, default=None, help='Print the commands instead of running them')
-flags.DEFINE_string('exp_result', 'iht_result.pbtxt', 'File to retrieve experiment result')
+parser.add_argument('-u', '--ssh_user', type=str, required=True, help='Username for login)')
+parser.add_argument('-e', '--experiment_name', type=str, required=True, help="Used as local save directory")
+parser.add_argument('--nodefile', type=str, default="../../scripts/cloudlab.csv", help='Path to csv with the node names')
+parser.add_argument('--dry_run', action='store_true', help='Print the commands instead of running them')
+parser.add_argument('--exp_result', type=str, default='iht_result.csv', help='File to retrieve experiment result')
 
 # Program run-types
-flags.DEFINE_bool('send_bulk', required=False, default=False, help="Whether to run bulk operations (more for benchmarking)")
-flags.DEFINE_bool('send_test', required=False, default=False, help="Whether to run basic method testing")
-flags.DEFINE_bool('send_exp', required=False, default=False, help="Whether to run an experiment")
-flags.DEFINE_enum('log_level', 'info', ['info', 'debug', 'trace'], 'The level of print-out in the program')
+parser.add_argument('--runtype', required=True, choices=['test', 'concurrent_test', 'bench'], help="Define the type of experiment to run. Test will run correctness tests single-threaded. Concurrent test will run a correctness test with multiple threads. And bench will run a benchmark")
+parser.add_argument('--log_level', default='info', choices=['info', 'debug', 'trace'], help='The level of print-out in the program')
 
 # Experiment parameters
-flags.DEFINE_string('from_param_config', required=False, default=None, help="If to override the parameters with a config file.")
-flags.DEFINE_integer('qps_sample_rate', required=False, default=10, help="The QP sampling rate")
-flags.DEFINE_integer('max_qps_second', required=False, default=-1, help="The max qps per second. Leaving -1 will be infinite")
-flags.DEFINE_integer('runtime', required=False, default=10, help="How long to run the experiment before cutting off")
-flags.DEFINE_bool('unlimited_stream', required=False, default=False, help="If to run the stream for an infinite amount or just until the operations run out")
-flags.DEFINE_string('op_distribution', required=False, default="80-10-10", help="The distribution of operations as contains-insert-remove. Must add up to 100")
-flags.DEFINE_integer('op_count', required=False, default=10000, help="The number of operations to run if unlimited stream is passed as False.")
-flags.DEFINE_list('key_range', required=False, default=['0', '1e6'], help="Pass in two values to be the [lb,ub] of the key range. Can use e-notation as well.")
-flags.DEFINE_integer('region_size', required=False, default=22, help="2 ^ x bytes to allocate on each node")
-flags.DEFINE_bool('default', required=False, default=False, help="If to run the experiment with the default proto command")
+parser.add_argument('--from_param_config', type=str, default=None, help="If to override the parameters with a config file.")
+qps_sample_rate = 10 # not sure what these do, so leaving them out of the cmd-line options
+max_qps_second = -1
+parser.add_argument('--runtime', type=int, default=10, help="How long to run the experiment before cutting off")
+parser.add_argument('--unlimited_stream', action='store_true', help="If to run the stream for an infinite amount or just until the operations run out")
+parser.add_argument('--op_distribution', type=str, default="80-10-10", help="The distribution of operations as contains-insert-remove. Must add up to 100")
+parser.add_argument('--op_count', type=int, default=10000, help="The number of operations to run if unlimited stream is passed as False.")
+parser.add_argument('-lb', '--lb', type=str, default='0', help="Pass in the lower bound of the key range. Can use e-notation as well.")
+parser.add_argument('-ub', '--ub', type=str, default='1e5', help="Pass in the ubber bound of the key range. Can use e-notation as well.")
+parser.add_argument('--region_size', type=int, default=25, help="2 ^ x bytes to allocate on each node")
+# Experiment resources
+parser.add_argument('--thread_count', type=int, default=1, help="The number of threads to start per client. Only applicable in send_exp")
+parser.add_argument('--node_count', type=int, default=1, help="The number of nodes to use in the experiment. Will use node0-nodeN")
+parser.add_argument('--qp_max', type=int, default=30, help="The number of queue pairs to use in the experiment MAX")
+ARGS = parser.parse_args()
 
-# Cluster parameters
-flags.DEFINE_integer('thread_count', required=False, default=1, help="The number of threads to start per client. Only applicable in send_exp")
-flags.DEFINE_integer('node_count', required=False, default=1, help="The number of nodes to use in the experiment. Will use node0-nodeN")
-flags.DEFINE_integer('qp_max', required=False, default=30, help="The number of queues to use in the experiment MAX")
-
-# Define FLAGS to represet the flags
-FLAGS = flags.FLAGS
-FLAGS(sys.argv)
-
-QUOTE = "\""
-def make_one_line(proto):
-    return QUOTE + ' '.join(line for line in str(proto).split('\n')) + QUOTE 
+# Get parent folder name
+dir = os.path.abspath("../..")
+bin_dir = dir.split("/").pop()
 
 def quote(string):
     return f"'{string}'"
@@ -65,10 +61,40 @@ def is_valid(string):
             return False
     return True
 
+def process_exp_flags(node_id):
+    params = f" --node_id {node_id}"
+    """Returns a string to append to the payload"""
+    if ARGS.from_param_config is not None:
+        with open(ARGS.from_param_config, "r") as f:
+            # Load the json into the proto
+            json_data = f.read()
+            mapper = json.loads(json_data)
+            one_to_ones = ["runtime", "op_count", "contains", "insert", "remove", "key_lb", "key_ub", "region_size", "thread_count", "node_count", "qp_max"]
+            for param in one_to_ones:
+                params += f" --{param} " + str(mapper[param]).lower()
+            if mapper['unlimited_stream'] == True:
+                params += f" --unlimited_stream "
+    else:
+        one_to_ones = ["runtime", "op_count", "region_size", "thread_count", "node_count", "qp_max"]
+        for param in one_to_ones:
+            params += f" --{param} " + str(eval(f"ARGS.{param}")).lower()
+        if ARGS.unlimited_stream == True:
+            params += f" --unlimited_stream "
+        contains, insert, remove = ARGS.op_distribution.split("-")
+        if int(contains) + int(insert) + int(remove) != 100:
+            print("Must specify values that add to 100 in op_distribution")
+            exit(1)
+        params += " --contains " + str(contains)
+        params += " --insert " + str(insert)
+        params += " --remove " + str(remove)
+        params += " --key_lb " + str(eval(ARGS.lb))
+        params += " --key_ub " + str(eval(ARGS.ub))
+    return params
+
 # Create a function that will create a file and run the given command using that file as stout
 def __run__(cmd, outfile, file_perm):
     with open(f"{outfile}.txt", file_perm) as f:
-        if FLAGS.dry_run:
+        if ARGS.dry_run:
             print(cmd)
         else:
             try:
@@ -83,7 +109,7 @@ def execute(commands, file_perm):
     processes: List[Process] = []
     for cmd, file in commands:
         # Start a thread
-        file_out = os.path.join("results", FLAGS.experiment_name, file)
+        file_out = os.path.join("results", ARGS.experiment_name, file)
         processes.append(Process(target=__run__, args=(cmd, file_out, file_perm)))
         processes[-1].start()
 
@@ -91,72 +117,44 @@ def execute(commands, file_perm):
     for process in processes:
         process.join()
 
-def process_exp_flags(node_id):
-    params = protos.ExperimentParams()
-    params.node_id = node_id
-    """Returns a string to append to the payload"""
-    if FLAGS.from_param_config is not None:
-        with open(FLAGS.from_param_config, "r") as f:
-            # Load the json into the proto
-            json_data = f.read()
-            mapper = json.loads(json_data)
-            one_to_ones = ["qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "contains", "insert", "remove", "key_lb", "key_ub", "region_size", "thread_count", "node_count", "qp_max"]
-            for param in one_to_ones:
-                exec(f"params.{param} = mapper['{param}']")
-    elif not FLAGS.default:
-        one_to_ones = ["qps_sample_rate", "max_qps_second", "runtime", "unlimited_stream", "op_count", "region_size", "thread_count", "node_count", "qp_max"]
-        for param in one_to_ones:
-            exec(f"params.{param} = FLAGS.{param}")
-        contains, insert, remove = FLAGS.op_distribution.split("-")
-        if int(contains) + int(insert) + int(remove) != 100:
-            print("Must specify values that add to 100 in op_distribution")
-            exit(1)
-        params.contains = int(contains)
-        params.insert = int(insert)
-        params.remove = int(remove)
-        params.key_lb = int(eval(FLAGS.key_range[0]))
-        params.key_ub = int(eval(FLAGS.key_range[1]))
-    return params
 
-
-def main(args):
+def main():
     # Simple input validation
-    if not is_valid(FLAGS.experiment_name):
+    if not is_valid(ARGS.experiment_name):
         print("Invalid Experiment Name")
         exit(1)
     print("Starting Experiment")
     # Create results directory
-    os.makedirs(os.path.join("results", FLAGS.experiment_name), exist_ok=True)
-    os.makedirs(os.path.join("results", FLAGS.experiment_name + "-stats"), exist_ok=True)
+    os.makedirs(os.path.join("results", ARGS.experiment_name), exist_ok=True)
+    os.makedirs(os.path.join("results", ARGS.experiment_name + "-stats"), exist_ok=True)
     
     commands = []
     commands_copy = []
-    with open(FLAGS.nodefile, "r") as f:
+    with open(ARGS.nodefile, "r") as f:
         for node in csv.reader(f):
             # For every node in nodefile, get the node info
             nodename, nodealias, nodetype = node
             node_id = int(nodename.replace("node", ""))
             # Construct ssh command and payload
-            ssh_login = f"ssh -i {FLAGS.ssh_keyfile} {FLAGS.ssh_user}@{nodealias}.{domain_name(nodetype)}"
-            bazel_path = f"/users/{FLAGS.ssh_user}/go/bin/bazelisk"
-            payload = f"cd {FLAGS.bin_dir} && cmake . && make && LD_LIBRARY_PATH=.:./protos ./"
-            # Adding run-type
-            if FLAGS.send_test:
+            ssh_login = f"ssh {ARGS.ssh_user}@{nodealias}.{domain_name(nodetype)}"
+            bazel_path = f"/users/{ARGS.ssh_user}/go/bin/bazelisk"
+            payload = f"cd {bin_dir} && cmake . && make && LD_LIBRARY_PATH=.:./protos ./"
+            if ARGS.runtype == "test":
                 payload += "iht_rome_test --send_test"
-            elif FLAGS.send_bulk:
+            elif ARGS.runtype == "concurrent_test":
                 payload += "iht_rome_test --send_bulk"
-            elif FLAGS.send_exp:
+            elif ARGS.runtype == "bench":
                 payload += "iht_rome"
                 # Adding experiment flags
-                payload += " --experiment_params " + make_one_line(process_exp_flags(node_id))
+                payload += process_exp_flags(node_id)
             else:
-                print("Must specify whether testing methods '--send_test', doing bulk operations '--send_bulk', or sending experiment '--send_exp'")
+                print("Found unknown runtype")
                 exit(1)
             # Tuple: (Creating Command | Output File Name)
             commands.append((' '.join([ssh_login, quote(payload)]), nodename))
-            if FLAGS.send_exp:
-                filepath = os.path.join(f"/users/{FLAGS.ssh_user}", FLAGS.bin_dir, FLAGS.exp_result)
-                local_dir = os.path.join("./results", FLAGS.experiment_name + "-stats", nodename + "-" + FLAGS.exp_result)
+            if ARGS.runtype == "bench":
+                filepath = os.path.join(f"/users/{ARGS.ssh_user}", bin_dir, ARGS.exp_result)
+                local_dir = os.path.join("./results", ARGS.experiment_name + "-stats", nodename + "-" + ARGS.exp_result)
                 copy = f"scp {ssh_login[4:]}:{filepath} {local_dir}"
                 commands_copy.append((copy, nodename))
                 continue # do for all nodes
@@ -170,4 +168,4 @@ def main(args):
 
 if __name__ == "__main__":
     # Run abseil app
-    app.run(main)
+    main()
