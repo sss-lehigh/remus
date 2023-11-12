@@ -56,9 +56,8 @@ template <typename T> struct std::hash<rome::rdma::remote_ptr<T>> {
 
 namespace rome::rdma::internal {
 
-/// TODO: This is templated on the CM to break a circular dependence without
-///       resorting to virtual methods.  There's probably a better approach?
-template <class CM> class MemoryPool {
+/// TODO: Document this
+class MemoryPool {
 
   /// Specialization of a `memory_resource` that wraps RDMA accessible memory.
   ///
@@ -224,7 +223,6 @@ template <class CM> class MemoryPool {
   //        how it can be cleaned up...
 
   Peer self_;
-  std::unique_ptr<CM> connection_manager_;
   std::unique_ptr<rdma_memory_resource> rdma_memory_;
   // ibv_mr *mr_;
 
@@ -233,84 +231,28 @@ template <class CM> class MemoryPool {
   static inline void cpu_relax() { asm volatile("pause\n" ::: "memory"); }
 
 public:
-  MemoryPool(const Peer &self, std::unique_ptr<CM> connection_manager)
-      : self_(self), connection_manager_(std::move(connection_manager)),
-        rdma_per_read_("rdma_per_read", "ops", 10000) {}
+  MemoryPool(const Peer &self)
+      : self_(self), rdma_per_read_("rdma_per_read", "ops", 10000) {}
 
   MemoryPool(const MemoryPool &) = delete;
   MemoryPool(MemoryPool &&) = delete;
 
-  // TODO: Stop needing this!
-  CM *connection_manager() const { return connection_manager_.get(); }
+  rdma_memory_resource *init_memory(uint32_t capacity, ibv_pd *pd) {
+    // Create a memory region (mr) in the current protection domain (pd)
+    rdma_memory_ =
+        std::make_unique<rdma_memory_resource>(capacity + sizeof(uint64_t), pd);
+    return rdma_memory_.get();
+  }
+
+  void receive_conn(uint16_t id, Connection *conn, uint32_t rkey,
+                    uint32_t lkey) {
+    conn_info_.emplace(id, conn_info_t{conn, rkey, lkey});
+  }
 
   rome::metrics::MetricProto rdma_per_read_proto() {
     return rdma_per_read_.ToProto();
   }
   conn_info_t conn_info(uint16_t id) const { return conn_info_.at(id); }
-
-  /// This method does two things.
-  /// - It creates a memory region with `capacity` as its size.
-  /// - It does an all-all communication with every peer, to create a connection
-  ///   with each, and then it exchanges regions with all peers.
-  ///
-  /// TODO: Should there be some kind of "shutdown()" method?
-  ///
-  /// [mfs] This method is the *only* reason we need memory_pool.h to know about
-  ///       ConnectionManager.  If we made this something that CM did, and then
-  ///       gave memory chunks over to the MemoryPool, we could break the
-  ///       circular dependence.  That might also let us turn MemoryPool into a
-  ///       single-responsibility object.
-  ///
-  /// TODO: This is only called once, and the caller uses OK_OR_FAIL on the
-  ///       return value.  Thus it doesn't make sense to have a return value.
-  ///       This should just std::abort() on an error.
-  ///
-  /// TODO: Once we have fail-stop behavior, this can be part of the constructor
-  inline sss::Status Init(uint32_t capacity, const std::vector<Peer> &peers) {
-    // TODO: This method is fail-stop in the caller, so instead it should be
-    // fail-stop here
-
-    auto status = connection_manager_->Start(self_.address, self_.port);
-    RETURN_STATUS_ON_ERROR(status); // abort instead!
-
-    // Create a memory region (mr) in the current protection domain (pd)
-    rdma_memory_ = std::make_unique<rdma_memory_resource>(
-        capacity + sizeof(uint64_t), connection_manager_->pd());
-
-    // Go through the list of peers and connect to each of them
-    for (const auto &p : peers) {
-      auto connected = connection_manager_->Connect(p.id, p.address, p.port);
-      while (connected.status.t == sss::Unavailable) {
-        connected = connection_manager_->Connect(p.id, p.address, p.port);
-      }
-      RETURN_STATUSVAL_ON_ERROR(connected);
-    }
-
-    // Send the memory region to all peers
-    RemoteObjectProto rm_proto;
-    rm_proto.set_rkey(rdma_memory_->mr()->rkey);
-    rm_proto.set_raddr(reinterpret_cast<uint64_t>(rdma_memory_->mr()->addr));
-    for (const auto &p : peers) {
-      auto conn = connection_manager_->GetConnection(p.id);
-      STATUSVAL_OR_DIE(conn);
-      status = conn.val.value()->Send(rm_proto);
-      RETURN_STATUS_ON_ERROR(status);
-    }
-
-    // Get all peers' memory regions
-    for (const auto &p : peers) {
-      auto conn = connection_manager_->GetConnection(p.id);
-      STATUSVAL_OR_DIE(conn);
-      auto got = conn.val.value()->template Deliver<RemoteObjectProto>();
-      RETURN_STATUSVAL_ON_ERROR(got);
-      // [mfs] I don't understand why we use mr_->lkey?
-      conn_info_.emplace(p.id,
-                         conn_info_t{conn.val.value(), got.val.value().rkey(),
-                                     rdma_memory_->mr()->lkey});
-    }
-
-    return {sss::Ok, {}};
-  }
 
   // This seems to be giving each thread a unique Id, solely so that it can have
   // a slot in the reordering_counters array.  Per-thread descriptors would be a

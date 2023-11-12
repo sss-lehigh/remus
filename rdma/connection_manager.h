@@ -178,10 +178,9 @@ class ConnectionManager {
         return {sss::NotFound, "no devices found"}; // No devices found...
       // [mfs] Does the above call do anything?  Weird...
 
-      rdma_addrinfo hints, *resolved;
+      rdma_addrinfo hints = {0}, *resolved;
 
       // Get the local connection information.
-      std::memset(&hints, 0, sizeof(hints));
       hints.ai_flags = RAI_PASSIVE;
       hints.ai_port_space = RDMA_PS_TCP;
 
@@ -197,8 +196,7 @@ class ConnectionManager {
       }
 
       // Create an endpoint to receive incoming requests on.
-      ibv_qp_init_attr init_attr;
-      std::memset(&init_attr, 0, sizeof(init_attr));
+      ibv_qp_init_attr init_attr = {0};
       init_attr.cap.max_send_wr = init_attr.cap.max_recv_wr = 16;
       init_attr.cap.max_send_sge = init_attr.cap.max_recv_sge = 1;
       init_attr.cap.max_inline_data = 0;
@@ -344,8 +342,6 @@ class ConnectionManager {
   std::unordered_map<uint32_t, std::unique_ptr<Connection>> requested_;
   std::unordered_map<uint32_t, std::unique_ptr<Connection>> established_;
 
-  uint32_t backoff_us_{0};
-
   rdma_cm_id *loopback_id_ = nullptr;
 
 public:
@@ -445,9 +441,6 @@ public:
     // also store the `peer_id` associated with this id so that we can reference
     // it later.
     auto context = new IdContext{peer_id, {}};
-    // [mfs]  `memset()` shouldn't be needed for struct initialization in C++.
-    //        Replace {} with {0} in the following line if necessary?
-    std::memset(&context->conn_param, 0, sizeof(context->conn_param));
     context->conn_param.private_data = &context->node_id;
     context->conn_param.private_data_len = sizeof(context->node_id);
     context->conn_param.rnr_retry_count = 1; // Retry forever
@@ -511,15 +504,13 @@ public:
 
       auto port_str = std::to_string(htons(port));
       rdma_cm_id *id = nullptr;
-      rdma_addrinfo hints, *resolved = nullptr;
+      rdma_addrinfo hints = {0}, *resolved = nullptr;
 
-      std::memset(&hints, 0, sizeof(hints));
       hints.ai_port_space = RDMA_PS_TCP;
       hints.ai_qp_type = IBV_QPT_RC;
       hints.ai_family = AF_IB;
 
-      struct sockaddr_in src;
-      std::memset(&src, 0, sizeof(src));
+      struct sockaddr_in src = {0};
       src.sin_family = AF_INET;
       auto src_addr_str = broker_->address();
       inet_aton(src_addr_str.data(), &src.sin_addr);
@@ -559,8 +550,7 @@ public:
                           fcntl(event_channel->fd, F_GETFL) | O_NONBLOCK);
       RDMA_CM_CHECK_TOVAL(rdma_migrate_id, id, event_channel);
 
-      rdma_conn_param conn_param;
-      std::memset(&conn_param, 0, sizeof(conn_param));
+      rdma_conn_param conn_param = {0};
       conn_param.private_data = &my_id_;
       conn_param.private_data_len = sizeof(my_id_);
       conn_param.retry_count = 7;
@@ -571,6 +561,7 @@ public:
       RDMA_CM_CHECK_TOVAL(rdma_connect, id, &conn_param);
 
       // Handle events.
+      uint32_t backoff_us_{0}; // for backoff
       while (true) {
         rdma_cm_event *event;
         auto result = rdma_get_cm_event(id->channel, &event);
@@ -735,8 +726,7 @@ private:
   inline void Release() { mu_ = kUnlocked; }
 
   static ibv_qp_init_attr DefaultQpInitAttr() {
-    ibv_qp_init_attr init_attr;
-    std::memset(&init_attr, 0, sizeof(init_attr));
+    ibv_qp_init_attr init_attr = {0};
     init_attr.cap.max_send_wr = init_attr.cap.max_recv_wr = kMaxWr;
     init_attr.cap.max_send_sge = init_attr.cap.max_recv_sge = kMaxSge;
     init_attr.cap.max_inline_data = kMaxInlineData;

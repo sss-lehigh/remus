@@ -116,6 +116,8 @@ int main(int argc, char **argv) {
   Peer host = peers.at(0);
   // Initialize memory pools into an array
   std::vector<std::thread> mempool_threads;
+  // [mfs] This should migrate into the capability?
+  // [mfs] Why shared_ptr instead of unique_ptr?
   std::shared_ptr<rdma_capability> pools[mp];
   // Create multiple memory pools to be shared (have to use threads since Init
   // is blocking)
