@@ -86,6 +86,17 @@ int main(int argc, char **argv) {
     exit(0);
   }
 
+  // [mfs]  Starting here, it seems that there is a lot of configuration that
+  //        really ought to be part of the rdma library, not the responsibility
+  //        of the user of the library.  The goal should be to have a library
+  //        that is "easy to use, hard to get wrong".  Some things that aren't
+  //        clear to me are
+  //        - How are ports being chosen for all of the qps
+  //        - Are the various rdma capabilities hiding redundancies
+  //        - Does the user have enough control over the # of
+  //          connections/machine?  Is mapping them to threads appropriate?
+  //        - How does a thread decide *which* memory pool to allocate from?
+
   // Determine the number of memory pools to use in the experiment
   // Each memory pool represents
   int mp = std::min(params.thread_count,

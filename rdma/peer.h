@@ -4,15 +4,14 @@
 #include <string>
 
 namespace rome::rdma {
-
-/// Peer is used to describe another node in the system
+/// Peer is used to describe a node in the system
 ///
 /// NB: It appears that all nodes agree on the mapping between an id and an
 ///     address:port
 struct Peer {
-  uint16_t id;         // A unique Id for the peer
-  std::string address; // The public address of the peer
-  uint16_t port;       // The port on which the peer accepts connections
+  const uint16_t id = 0;          // A unique Id for the peer
+  const std::string address = ""; // The public address of the peer
+  const uint16_t port = 0;        // The port on which the peer listens
 
   /// Construct a Peer
   ///
@@ -22,5 +21,4 @@ struct Peer {
   Peer(uint16_t id = 0, std::string address = "", uint16_t port = 0)
       : id(id), address(address), port(port) {}
 };
-
-}
+} // namespace rome::rdma

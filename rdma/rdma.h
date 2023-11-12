@@ -70,19 +70,23 @@ public:
     // TODO: Make Start() fail-stop
     auto status = connection_manager_->Start(self_.address, self_.port);
     if (status.t != sss::Ok) {
-      ROME_FATAL(status.message);
+      ROME_FATAL(status.message.value());
       std::terminate();
     }
 
     // Go through the list of peers and connect to each of them
     for (const auto &p : peers) {
       // TODO: Why not have a blocking connect call?
+      //
+      // TODO: Only connect to "bigger" peers?
+      //
+      // TODO: Does this include connecting to self?
       auto connected = connection_manager_->Connect(p.id, p.address, p.port);
       while (connected.status.t == sss::Unavailable) {
         connected = connection_manager_->Connect(p.id, p.address, p.port);
       }
       if (connected.status.t != sss::Ok) {
-        ROME_FATAL(connected.status.message);
+        ROME_FATAL(connected.status.message.value());
         std::terminate();
       }
     }
@@ -97,12 +101,12 @@ public:
     for (const auto &p : peers) {
       auto conn = connection_manager_->GetConnection(p.id);
       if (conn.status.t != sss::Ok) {
-        ROME_FATAL(conn.status.message);
+        ROME_FATAL(conn.status.message.value());
         std::terminate();
       }
       auto status = conn.val.value()->Send(rm_proto);
       if (status.t != sss::Ok) {
-        ROME_FATAL(status.message);
+        ROME_FATAL(status.message.value());
         std::terminate();
       }
     }
@@ -112,12 +116,12 @@ public:
     for (const auto &p : peers) {
       auto conn = connection_manager_->GetConnection(p.id);
       if (conn.status.t != sss::Ok) {
-        ROME_FATAL(conn.status.message);
+        ROME_FATAL(conn.status.message.value());
         std::terminate();
       }
       auto got = conn.val.value()->template Deliver<RemoteObjectProto>();
       if (got.status.t != sss::Ok) {
-        ROME_FATAL(got.status.message);
+        ROME_FATAL(got.status.message.value());
         std::terminate();
       }
       // [mfs] I don't understand why we use mr_->lkey?
