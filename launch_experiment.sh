@@ -6,6 +6,13 @@ set -e # Halt the script on any error
 #                         scripts on those machines, and then building screenrc
 #                         configurations for either running the experiments, or
 #                         connecting to the remote machines.
+#
+#                         Note that this script assumes you're doing your
+#                         development on a Linux system that is not very
+#                         different than the target CloudLab machine.  In
+#                         particular, it is assumed that you can build locally,
+#                         copy the executable file to cloudlab, and run it
+#                         remotely.
 
 #
 # This section has the customization points for the script.  For now, you need
