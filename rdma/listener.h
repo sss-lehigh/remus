@@ -215,6 +215,7 @@ class RdmaBroker {
                  rdma_event_str(event->event), fmt::ptr(event->id));
       switch (event->event) {
       case RDMA_CM_EVENT_TIMEWAIT_EXIT: // Nothing to do.
+        // TODO:  Do we ever have this?
         rdma_ack_cm_event(event);
         break;
       case RDMA_CM_EVENT_CONNECT_REQUEST: {
@@ -223,6 +224,7 @@ class RdmaBroker {
         break;
       }
       case RDMA_CM_EVENT_ESTABLISHED: {
+        // TODO:  Do we ever have this?
         rdma_cm_id *id = event->id;
         // Now that we've established the connection, we can transition to
         // using it to communicate with the other node
@@ -233,6 +235,10 @@ class RdmaBroker {
                    num_connections_);
       } break;
       case RDMA_CM_EVENT_DISCONNECTED: {
+        // [mfs]  Will this code ever run?  If this is on the listen channel, I
+        //        don't think it will.  Indeed, I put in std::terminate, and it
+        //        never fired:
+        // std::terminate();
         rdma_cm_id *id = event->id;
         rdma_ack_cm_event(event);
         receiver_->OnDisconnect(id);

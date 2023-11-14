@@ -74,6 +74,9 @@ public:
   /// TODO: The IHT code uses this in an awkward way, due to the blocking
   ///       behavior of the methods this calls.  We should think about how to do
   ///       a better job.
+  ///
+  /// TODO: I feel like this should have a "connections-per-machine-pair"
+  ///       argument.
   void init_pool(uint32_t capacity, std::vector<Peer> &peers) {
     using namespace std::string_literals;
 

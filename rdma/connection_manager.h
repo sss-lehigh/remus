@@ -107,7 +107,7 @@ public:
     return {sss::Ok, {}};
   }
 
-  // `RdmaReceiverInterface` implementation
+  // TODO: Migrate to listener.h?
   void OnConnectRequest(rdma_cm_id *id, rdma_cm_event *event, ibv_pd *pd) {
     if (!accepting_)
       return;
@@ -182,6 +182,8 @@ public:
       Release();
   }
 
+  // TODO: Migrate to listener.h?
+  //
   // [mfs]  Is it necessary for the removal from erased() to precede destroying
   //        the endpoint?  If not, perhaps we could do all the rdma_* operations
   //        in the caller (broker), and then this code would only need to manage
@@ -210,7 +212,9 @@ public:
     rdma_destroy_event_channel(event_channel);
   }
 
-  // `RdmaClientInterface` implementation
+  // [mfs]  I think this should not go to broker, nor should ConnectLoopback,
+  //        but everything else should, because everything else is for receiving
+  //        a connection, not creating one.
   sss::StatusVal<Connection *> Connect(uint32_t peer_id,
                                        std::string_view server, uint16_t port,
                                        ibv_pd *pd, std::string my_address) {
@@ -380,6 +384,9 @@ public:
     }
   }
 
+  // [mfs]  This should stay, because we need to keep connections after the
+  //        broker goes away.
+  //
   // TODO: Are errors always fatal here?  Yes.  So we can go ahead and make this
   // fail-stop.
   sss::StatusVal<Connection *> GetConnection(uint32_t peer_id) {
@@ -431,6 +438,8 @@ private:
 
   inline void Release() { mu_ = kUnlocked; }
 
+  // TODO:  This is used by Connect and also OnConnectRequest.  Need to migrate
+  //        to util?
   static ibv_qp_init_attr DefaultQpInitAttr() {
     ibv_qp_init_attr init_attr = {0};
     init_attr.cap.max_send_wr = init_attr.cap.max_recv_wr = kMaxWr;
@@ -441,6 +450,7 @@ private:
     return init_attr;
   }
 
+  // TODO: This is only used in ConnectLoopback
   static ibv_qp_attr DefaultQpAttr() {
     ibv_qp_attr attr;
     std::memset(&attr, 0, sizeof(attr));
@@ -458,6 +468,7 @@ private:
     return attr;
   }
 
+  // TODO: This belongs wherever Connect() goes
   sss::StatusVal<Connection *> ConnectLoopback(rdma_cm_id *id) {
     ROME_ASSERT_DEBUG(id->qp != nullptr, "No QP associated with endpoint");
     ROME_TRACE("Connecting loopback...");
