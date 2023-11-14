@@ -100,23 +100,24 @@ inline void __rome_init_log__() {
 #endif
 
 // [mfs]  This looks like it is incorrect.  LOG_LEVEL==OFF will lead to an
-//        undefined symbol, when we probably still want a call to abort()?
+//        undefined symbol, when we probably still want a call to
+//        std::terminate()?
 #if ROME_LOG_LEVEL != OFF
 #define ROME_FATAL(...)                                                        \
   SPDLOG_CRITICAL(__VA_ARGS__);                                                \
-  abort();
+  std::terminate();
 #endif
 
 #define ROME_ASSERT(check, ...)                                                \
   if (!(check)) [[unlikely]] {                                                 \
     SPDLOG_CRITICAL(__VA_ARGS__);                                              \
-    abort();                                                                   \
+    std::terminate();                                                          \
   }
 
 #define OK_OR_FAIL(status)                                                     \
   if (auto __s = status; !(__s.t == sss::Ok)) [[unlikely]] {                   \
     SPDLOG_CRITICAL(__s.message.value());                                      \
-    abort();                                                                   \
+    std::terminate();                                                          \
   }
 
 #define RETURN_STATUS_ON_ERROR(status)                                         \
@@ -137,7 +138,7 @@ inline void __rome_init_log__() {
 #define ROME_ASSERT_DEBUG(func, ...)                                           \
   if (!(func)) [[unlikely]] {                                                  \
     SPDLOG_ERROR(__VA_ARGS__);                                                 \
-    abort();                                                                   \
+    std::terminate();                                                          \
   }
 #else
 #define ROME_ASSERT_DEBUG(...) ((void)0)
