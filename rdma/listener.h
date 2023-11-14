@@ -169,13 +169,37 @@ class RdmaBroker {
 
     // Migrate the new endpoint to an async channel
     listen_channel_ = rdma_create_event_channel();
-    RDMA_CM_CHECK(rdma_migrate_id, listen_id_, listen_channel_);
-    RDMA_CM_CHECK(fcntl, listen_id_->channel->fd, F_SETFL,
-                  fcntl(listen_id_->channel->fd, F_GETFL) | O_NONBLOCK);
+    {
+      int ret = rdma_migrate_id(listen_id_, listen_channel_);
+      if (ret != 0) {
+        sss::Status err = {sss::InternalError, ""};
+        err << "rdma_migrate_id"
+            << "(): " << strerror((*__errno_location()));
+        return err;
+      }
+    }
+
+    {
+      int ret = fcntl(listen_id_->channel->fd, F_SETFL,
+                      fcntl(listen_id_->channel->fd, F_GETFL) | O_NONBLOCK);
+      if (ret != 0) {
+        sss::Status err = {sss::InternalError, ""};
+        err << "fcntl"
+            << "(): " << strerror((*__errno_location()));
+        return err;
+      }
+    }
 
     // Start listening for incoming requests on the endpoint.
-    RDMA_CM_CHECK(rdma_listen, listen_id_, 0);
-
+    {
+      int ret = rdma_listen(listen_id_, 0);
+      if (ret != 0) {
+        sss::Status err = {sss::InternalError, ""};
+        err << "rdma_listen"
+            << "(): " << strerror((*__errno_location()));
+        return err;
+      }
+    }
     address_ = std::string(inet_ntoa(
         reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(listen_id_))
             ->sin_addr));

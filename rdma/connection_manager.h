@@ -271,10 +271,25 @@ public:
         return ConnectLoopback(id);
 
       auto *event_channel = rdma_create_event_channel();
-      RDMA_CM_CHECK_TOVAL(fcntl, event_channel->fd, F_SETFL,
-                          fcntl(event_channel->fd, F_GETFL) | O_NONBLOCK);
-      RDMA_CM_CHECK_TOVAL(rdma_migrate_id, id, event_channel);
-
+      {
+        int ret = fcntl(event_channel->fd, F_SETFL,
+                        fcntl(event_channel->fd, F_GETFL) | O_NONBLOCK);
+        if (ret != 0) {
+          sss::Status err = {sss::InternalError, ""};
+          err << "fcntl"
+              << "(): " << strerror((*__errno_location()));
+          return {err, {}};
+        }
+      }
+      {
+        int ret = rdma_migrate_id(id, event_channel);
+        if (ret != 0) {
+          sss::Status err = {sss::InternalError, ""};
+          err << "rdma_migrate_id"
+              << "(): " << strerror((*__errno_location()));
+          return {err, {}};
+        }
+      }
       rdma_conn_param conn_param = {0};
       conn_param.private_data = &my_id_;
       conn_param.private_data_len = sizeof(my_id_);
@@ -283,7 +298,15 @@ public:
       conn_param.responder_resources = 8;
       conn_param.initiator_depth = 8;
 
-      RDMA_CM_CHECK_TOVAL(rdma_connect, id, &conn_param);
+      {
+        int ret = rdma_connect(id, &conn_param);
+        if (ret != 0) {
+          sss::Status err = {sss::InternalError, ""};
+          err << "rdma_connect"
+              << "(): " << strerror((*__errno_location()));
+          return {err, {}};
+        }
+      }
 
       // Handle events.
       uint32_t backoff_us_{0}; // for backoff
@@ -298,7 +321,15 @@ public:
 
         switch (event->event) {
         case RDMA_CM_EVENT_ESTABLISHED: {
-          RDMA_CM_CHECK_TOVAL(rdma_ack_cm_event, event);
+          {
+            int ret = rdma_ack_cm_event(event);
+            if (ret != 0) {
+              sss::Status err = {sss::InternalError, ""};
+              err << "rdma_ack_cm_event"
+                  << "(): " << strerror((*__errno_location()));
+              return {err, {}};
+            }
+          }
           auto conn = established_.find(peer_id);
           if (bool is_established = (conn != established_.end());
               is_established && peer_id != my_id_) {
@@ -308,13 +339,29 @@ public:
             // the event.
             ROME_TRACE("[Connect] (Node {}) Disconnecting: (id={})", my_id_,
                        fmt::ptr(id));
-            RDMA_CM_CHECK_TOVAL(rdma_disconnect, id);
+            {
+              int ret = rdma_disconnect(id);
+              if (ret != 0) {
+                sss::Status err = {sss::InternalError, ""};
+                err << "rdma_disconnect"
+                    << "(): " << strerror((*__errno_location()));
+                return {err, {}};
+              }
+            }
             rdma_cm_event *event;
             auto result = rdma_get_cm_event(id->channel, &event);
             while (result < 0 && errno == EAGAIN) {
               result = rdma_get_cm_event(id->channel, &event);
             }
-            RDMA_CM_CHECK_TOVAL(rdma_ack_cm_event, event);
+            {
+              int ret = rdma_ack_cm_event(event);
+              if (ret != 0) {
+                sss::Status err = {sss::InternalError, ""};
+                err << "rdma_ack_cm_event"
+                    << "(): " << strerror((*__errno_location()));
+                return {err, {}};
+              }
+            }
 
             rdma_destroy_ep(id);
             rdma_destroy_event_channel(event_channel);
@@ -337,15 +384,40 @@ public:
               inet_ntoa(reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(id))
                             ->sin_addr),
               rdma_get_src_port(id));
+          {
+            int ret = fcntl(event_channel->fd, F_SETFL,
+                            fcntl(event_channel->fd, F_GETFL) | O_SYNC);
+            if (ret != 0) {
+              sss::Status err = {sss::InternalError, ""};
+              err << "fcntl"
+                  << "(): " << strerror((*__errno_location()));
+              return {err, {}};
+            }
+          }
 
-          RDMA_CM_CHECK_TOVAL(fcntl, event_channel->fd, F_SETFL,
-                              fcntl(event_channel->fd, F_GETFL) | O_SYNC);
-          RDMA_CM_CHECK_TOVAL(fcntl, id->recv_cq->channel->fd, F_SETFL,
-                              fcntl(id->recv_cq->channel->fd, F_GETFL) |
-                                  O_NONBLOCK);
-          RDMA_CM_CHECK_TOVAL(fcntl, id->send_cq->channel->fd, F_SETFL,
-                              fcntl(id->send_cq->channel->fd, F_GETFL) |
-                                  O_NONBLOCK);
+          {
+            int ret =
+                fcntl(id->recv_cq->channel->fd, F_SETFL,
+                      fcntl(id->recv_cq->channel->fd, F_GETFL) | O_NONBLOCK);
+            if (ret != 0) {
+              sss::Status err = {sss::InternalError, ""};
+              err << "fcntl"
+                  << "(): " << strerror((*__errno_location()));
+              return {err, {}};
+            }
+          }
+
+          {
+            int ret =
+                fcntl(id->send_cq->channel->fd, F_SETFL,
+                      fcntl(id->send_cq->channel->fd, F_GETFL) | O_NONBLOCK);
+            if (ret != 0) {
+              sss::Status err = {sss::InternalError, ""};
+              err << "fcntl"
+                  << "(): " << strerror((*__errno_location()));
+              return {err, {}};
+            }
+          }
 
           // Allocate a new control channel to be used with this connection
           auto iter = established_.emplace(peer_id,
@@ -357,11 +429,27 @@ public:
         }
         case RDMA_CM_EVENT_ADDR_RESOLVED:
           ROME_WARN("Got addr resolved...");
-          RDMA_CM_CHECK_TOVAL(rdma_ack_cm_event, event);
+          {
+            int ret = rdma_ack_cm_event(event);
+            if (ret != 0) {
+              sss::Status err = {sss::InternalError, ""};
+              err << "rdma_ack_cm_event"
+                  << "(): " << strerror((*__errno_location()));
+              return {err, {}};
+            }
+          }
           break;
         default: {
           auto cm_event = event->event;
-          RDMA_CM_CHECK_TOVAL(rdma_ack_cm_event, event);
+          {
+            int ret = rdma_ack_cm_event(event);
+            if (ret != 0) {
+              sss::Status err = {sss::InternalError, ""};
+              err << "rdma_ack_cm_event"
+                  << "(): " << strerror((*__errno_location()));
+              return {err, {}};
+            }
+          }
           backoff_us_ =
               backoff_us_ > 0
                   ? std::min((backoff_us_ + (100 * my_id_)) * 2, kMaxBackoffUs)
@@ -489,9 +577,15 @@ private:
     }
 
     ibv_port_attr port_attr;
-    RDMA_CM_CHECK_TOVAL(ibv_query_port, id->verbs, LOOPBACK_PORT_NUM,
-                        &port_attr); // RDMA_CM_CHECK(ibv_query_port, id->verbs,
-                                     // id->port_num, &port_attr);
+    {
+      int ret = ___ibv_query_port(id->verbs, LOOPBACK_PORT_NUM, &port_attr);
+      if (ret != 0) {
+        sss::Status err = {sss::InternalError, ""};
+        err << "ibv_query_port"
+            << "(): " << strerror((*__errno_location()));
+        return {err, {}};
+      }
+    }
     attr.ah_attr.dlid = port_attr.lid;
     attr.qp_state = IBV_QPS_RTR;
     attr.dest_qp_num = id->qp->qp_num;
@@ -511,12 +605,37 @@ private:
     attr_mask = (IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
                  IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
     ROME_TRACE("Loopback: IBV_QPS_RTS");
-    RDMA_CM_CHECK_TOVAL(ibv_modify_qp, id->qp, &attr, attr_mask);
+    {
+      int ret = ibv_modify_qp(id->qp, &attr, attr_mask);
+      if (ret != 0) {
+        sss::Status err = {sss::InternalError, ""};
+        err << "ibv_modify_qp"
+            << "(): " << strerror((*__errno_location()));
+        return {err, {}};
+      }
+    }
 
-    RDMA_CM_CHECK_TOVAL(fcntl, id->recv_cq->channel->fd, F_SETFL,
-                        fcntl(id->recv_cq->channel->fd, F_GETFL) | O_NONBLOCK);
-    RDMA_CM_CHECK_TOVAL(fcntl, id->send_cq->channel->fd, F_SETFL,
-                        fcntl(id->send_cq->channel->fd, F_GETFL) | O_NONBLOCK);
+    {
+      int ret = fcntl(id->recv_cq->channel->fd, F_SETFL,
+                      fcntl(id->recv_cq->channel->fd, F_GETFL) | O_NONBLOCK);
+      if (ret != 0) {
+        sss::Status err = {sss::InternalError, ""};
+        err << "fcntl"
+            << "(): " << strerror((*__errno_location()));
+        return {err, {}};
+      }
+    }
+
+    {
+      int ret = fcntl(id->send_cq->channel->fd, F_SETFL,
+                      fcntl(id->send_cq->channel->fd, F_GETFL) | O_NONBLOCK);
+      if (ret != 0) {
+        sss::Status err = {sss::InternalError, ""};
+        err << "fcntl"
+            << "(): " << strerror((*__errno_location()));
+        return {err, {}};
+      }
+    }
 
     // Allocate a new control channel to be used with this connection
     auto it = established_.emplace(my_id_, new Connection(my_id_, my_id_, id));
