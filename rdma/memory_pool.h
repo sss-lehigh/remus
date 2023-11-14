@@ -262,11 +262,9 @@ public:
     std::thread::id mid = std::this_thread::get_id();
     if (this->thread_ids.find(mid) != this->thread_ids.end()) {
       ROME_FATAL("Cannot register the same thread twice");
-      return;
     }
     if (this->id_gen >= THREAD_MAX) {
       ROME_FATAL("Hit upper limit on THREAD_MAX. todo: fix this condition");
-      return;
     }
     this->thread_ids.insert(std::make_pair(mid, this->id_gen));
     this->reordering_counters[this->id_gen] = 0;
