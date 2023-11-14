@@ -114,7 +114,6 @@ public:
         ibv_mr_unique_ptr(ibv_reg_mr(pd, base, capacity_, DEFAULT_ACCESS_MODE));
     if (memory_region_ == nullptr) {
       ROME_FATAL("RegisterMemoryRegion :: ibv_reg_mr failed")
-      std::terminate();
     }
     ROME_TRACE("Memory region registered: @ {} to {} (length={})",
                fmt::ptr(base), fmt::ptr(base + capacity_), capacity_);
