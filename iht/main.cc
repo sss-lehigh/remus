@@ -13,10 +13,14 @@
 #include "role_client.h"
 #include "role_server.h"
 
+/// An initializer list of all of the command line argument names, types, and
+/// descriptions.
+///
+/// TODO: Is this too specific to CloudLab?
 auto ARGS = {
     sss::I64_ARG(
         "--node_id",
-        "The node's id. (nodeX in cloudlab should have X in this option)"),
+        "The node's id. (nodeX in CloudLab should have X in this option)"),
     sss::I64_ARG(
         "--runtime",
         "How long to run the experiment for. Only valid if unlimited_stream"),
@@ -48,7 +52,7 @@ auto ARGS = {
 
 using namespace rome::rdma;
 
-// The optimial number of memory pools is mp=min(t, MAX_QP/n) where n is the
+// The optimal number of memory pools is mp=min(t, MAX_QP/n) where n is the
 // number of nodes and t is the number of threads To distribute mp (memory
 // pools) across t threads, it is best for t/mp to be a whole number IHT RDMA
 // MINIMAL
@@ -58,33 +62,24 @@ int main(int argc, char **argv) {
 
   ROME_INIT_LOG();
 
+  // Configure the args object, parse the command line, and turn it into a
+  // useful object
   sss::ArgMap args;
-  // import_args will validate that the newly added args don't conflict with
-  // those already added.
-  auto res = args.import_args(ARGS);
-  if (res) {
-    ROME_ERROR(res.value());
-    exit(1);
+  if (auto res = args.import_args(ARGS); res) {
+    ROME_FATAL(res.value());
   }
-  // NB: Only call parse_args once.  If it fails, a mandatory arg was skipped
-  res = args.parse_args(argc, argv);
-  if (res) {
+  if (auto res = args.parse_args(argc, argv); res) {
     args.usage();
-    ROME_ERROR(res.value());
-    exit(1);
+    ROME_FATAL(res.value());
   }
+  BenchmarkParams params(args);
 
-  // Extract the args to variables
-  BenchmarkParams params = BenchmarkParams(args);
-
-  // Check node count
+  // Check node count, ensure this node is part of the experiment
   if (params.node_count <= 0 || params.thread_count <= 0) {
-    ROME_INFO("Cannot start experiment. Node/thread count was found to be 0");
-    exit(1);
+    ROME_FATAL("Node count and thread count cannot be zero");
   }
-  // Check we are in this experiment
   if (params.node_id >= params.node_count) {
-    ROME_INFO("Not in this experiment. Exiting");
+    ROME_INFO("This node is not in the experiment. Exiting...");
     exit(0);
   }
 
@@ -99,36 +94,33 @@ int main(int argc, char **argv) {
   //          connections/machine?  Is mapping them to threads appropriate?
   //        - How does a thread decide *which* memory pool to allocate from?
 
-  // Determine the number of memory pools to use in the experiment Each memory
-  // pool represents
+  // Determine the number of memory pools to use in the experiment, make sure
+  // it's at least 1 per node!
   //
   // [mfs]  This is always resulting in one memory pool at 2 threads and 3
   //        nodes. That doesn't seem right?
   int mp = std::min(params.thread_count,
                     (int)std::floor(params.qp_max / params.node_count));
   if (mp == 0)
-    mp = 1; // Make sure if node_count > qp_max, we don't end up with 0 memory
-            // pools
-
+    mp = 1;
   ROME_INFO("Distributing {} MemoryPools across {} threads", mp,
             params.thread_count);
 
-  // Start initializing a vector of peers
+  // Initialize the vector of peers.  A node can appear more than once, as long
+  // as it has a different port.
+  //
+  // TODO:  This is hard-coded for CloudLab right now.  We should take machine
+  //        names and ports via the command line.
+  //
+  // [mfs]  Why do we need multiple ports like this?  Won't one listening
+  //        connection per node suffice?
   std::vector<Peer> peers;
   for (uint16_t n = 0; n < mp * params.node_count; n++) {
-    // Create the ip_peer (really just node name)
-    std::string ippeer = "node";
-    std::string node_id = std::to_string((int)n / mp);
-    ippeer.append(node_id);
-    // Create the peer and add it to the list
-    Peer next = Peer(n, ippeer, PORT_NUM + n + 1);
+    Peer next(n, "node"s + std::to_string((int)n / mp), PORT_NUM + n + 1);
     peers.push_back(next);
+    ROME_DEBUG("Peer list {}:{}@{}", n, peers.at(n).id, peers.at(n).address);
   }
-  // Print the peers included in this experiment
-  // This is just for debugging to ensure they are what you expect
-  for (int i = 0; i < peers.size(); i++) {
-    ROME_DEBUG("Peer list {}:{}@{}", i, peers.at(i).id, peers.at(i).address);
-  }
+
   Peer host = peers.at(0);
   // Initialize memory pools into an array
   std::vector<std::thread> mempool_threads;
@@ -198,13 +190,13 @@ int main(int argc, char **argv) {
   //        would look like. If you have one in mind, lmk and I can start
   //        working on it.
   std::barrier client_sync = std::barrier(params.thread_count);
-  // [mfs]  This seems like a misuse of protobufs: why would the local threads
-  //        communicate via protobufs?
-  // [esl]  Protobufs were a pain to code with. I think the ClientAdaptor
-  // returns a protobuf and I never understood why it didn't just return an
-  // object.
+  // [mfs]  This seems like a misuse of ProtoBufs: why would the local threads
+  //        communicate via ProtoBufs?
+  // [esl]  ProtoBufs were a pain to code with. I think the ClientAdaptor
+  //        returns a protobuf and I never understood why it didn't just return
+  //        an object.
   // TODO:  In the refactoring of the client adaptor, remove dependency on
-  // protobufs for a workload object
+  //        ProtoBufs for a workload object
   rome::WorkloadDriverProto workload_results[params.thread_count];
   for (int i = 0; i < params.thread_count; i++) {
     threads.emplace_back(std::thread(
@@ -261,13 +253,16 @@ int main(int argc, char **argv) {
     auto t = it;
     t->join();
   }
-  // [mfs]  Again, odd use of protobufs for relatively straightforward combining
+  // [mfs]  Again, odd use of ProtoBufs for relatively straightforward combining
   //        of results.  Or am I missing something, and each node is sending its
   //        results, so they are all accumulated at the main node?
   // [esl]  Each thread will create a result proto. The result struct will parse
-  // this and save it in a csv which the launch script can scp.
+  //        this and save it in a csv which the launch script can scp.
   Result result[params.thread_count];
   for (int i = 0; i < params.thread_count; i++) {
+    // TODO:  This process of aggregating results is error-prone.  This ought to
+    //        be the kind of thing that is done internally by a method of the
+    //        Result object.
     result[i] = Result(params);
     if (workload_results[i].has_ops() &&
         workload_results[i].ops().has_counter()) {
@@ -298,12 +293,12 @@ int main(int argc, char **argv) {
   // [esl] Yes, this produces one file per node,
   //       The launch.py script will scp this file and use the protobuf to
   //       interpret it
-  std::ofstream filestream("iht_result.csv");
-  filestream << Result::result_as_string_header();
+  std::ofstream file_stream("iht_result.csv");
+  file_stream << Result::result_as_string_header();
   for (int i = 0; i < params.thread_count; i++) {
-    filestream << result[0].result_as_string();
+    file_stream << result[0].result_as_string();
   }
-  filestream.close();
+  file_stream.close();
   ROME_INFO("[EXPERIMENT] -- End of execution; -- ");
   return 0;
 }
