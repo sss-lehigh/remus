@@ -87,7 +87,7 @@ class MemoryPool {
         LT(7), LT(7), LT(7), LT(7), LT(7), LT(7), LT(7),
     };
 
-    std::unique_ptr<RdmaMemory> rdma_memory_;
+    std::unique_ptr<Segment> rdma_memory_;
     std::atomic<uint8_t *> head_;
 
     // Stores addresses of freed memory for a given slab class.
@@ -172,7 +172,7 @@ class MemoryPool {
     virtual ~rdma_memory_resource() {}
 
     explicit rdma_memory_resource(size_t bytes, ibv_pd *pd)
-        : rdma_memory_(std::make_unique<RdmaMemory>(bytes, pd)),
+        : rdma_memory_(std::make_unique<Segment>(bytes, pd)),
           head_(rdma_memory_->raw() + bytes) {
       std::memset(alignments_.data(), 0, sizeof(alignments_));
       ROME_TRACE("rdma_memory_resource: {} to {} (length={})",
@@ -180,7 +180,7 @@ class MemoryPool {
     }
 
     /// [mfs] If we cached this once, we wouldn't need the call?
-    ibv_mr *mr() const { return rdma_memory_->GetDefaultMemoryRegion(); }
+    ibv_mr *mr() const { return rdma_memory_->mr(); }
 
     template <typename T>
     [[nodiscard]] constexpr T *allocateT(std::size_t n = 1) {

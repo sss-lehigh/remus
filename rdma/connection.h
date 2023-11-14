@@ -35,54 +35,70 @@ namespace rome::rdma::internal {
 /// two-sided operations between those machines.  This is realized in our design
 /// by a constructed connection only having public methods to send, receive,
 /// post one-sided write requests, and poll for completions.
-///
-/// TODO: This API is in flux.
 class Connection {
-  /// A byte stream, representing data sent or received via two-sided
+  /// A byte stream representing data sent or received via two-sided
   /// communication.
   ///
   /// NB: The use of a unique_ptr ensures that the memory gets cleaned up when
   ///     the Message goes out of scope.
   ///
   /// TODO: We need to think more carefully about the design.  Right now, the
-  ///       public interface of Send/Recv only allow for protos.  It also seems
-  ///       that those protos have a fixed maximum size, which is determined by
-  ///       the sizes of pinned memory regions.  Thus it might be possible for
-  ///       threads to pre-allocate a small number of Messages, and not need the
-  ///       allocator overhead that this Message type introduces.
+  ///       public interface of Send/Recv only allows for transmitting protos.
+  ///       It also seems that those protos have a fixed maximum size, which is
+  ///       determined by the sizes of pinned memory regions.  Thus it might be
+  ///       possible for threads to pre-allocate a small number of Messages, and
+  ///       not need the allocator overhead that this Message type introduces.
   struct Message {
     std::unique_ptr<uint8_t[]> buffer;
     size_t length;
   };
 
-  // [mfs] TODO: Make these arguments to the ctor?
+  /// The size to use when allocating the send and receive buffers
+  ///
+  /// TODO: Make this an argument to the constructor?
   static constexpr const uint32_t kCapacity = 1ul << 12;
-  static constexpr const uint32_t kRecvMaxBytes = 1ul << 8;
-  static_assert(kCapacity % 2 == 0, "Capacity must be divisible by two.");
 
-  RdmaMemory rm_;           // Remotely accessible memory for send/recv buffers.
+  /// The maximum size of a message sent or received
+  ///
+  /// TODO: Should we enforce that this evenly divides kCapacity?
+  ///
+  /// TODO: Is this even necessary?  How do we know how big it should be?
+  ///       When/where/how do we nicely enforce this maximum message size?
+  ///
+  /// TODO: Make this an argument to the constructor?
+  static constexpr const uint32_t kRecvMaxBytes = 1ul << 8;
+
+  /// TODO: I don't understand why this is separate from kCapacity
+  ///
+  /// TODO: Make this an argument to the constructor?
+  static constexpr size_t kMemoryPoolMessengerCapacity = 1 << 12;
+
+  /// TODO: I don't understand why this is separate from kRecvMaxBytes
+  ///
+  /// TODO: Make this an argument to the constructor?
+  static constexpr size_t kMemoryPoolMessageSize = 1 << 8;
+
   rdma_cm_id *id_;          // Pointer to the QP for sends/receives
-  ibv_mr *send_mr_;         // Memory region identified by `kSendId`
-  const int send_cap_;      // Capacity (in bytes) of the send buffer
+  Segment send_seg_;        // Remotely accessible memory for send buffer
   uint8_t *send_base_;      // Base address of send buffer
   uint8_t *send_next_;      // Next un-posted address within send buffer
   uint32_t send_total_ = 0; // Number of sends; also generates send ids
-  ibv_mr *recv_mr_;         // Memory region identified by `kRecvId`
-  const int recv_cap_;      // Capacity (in bytes) of recv buffer
+  Segment recv_seg_;        // Remotely accessible memory for recv buffer
   uint8_t *recv_base_;      // Base address of recv buffer
-  uint8_t *recv_next_;      // Next unposted address within recv buffer
+  uint8_t *recv_next_;      // Next un-posted address within recv buffer
   uint32_t recv_total_ = 0; // Completed receives; helps track completion
 
-  // Memory region IDs.
-  //
-  // TODO: Refactor memory pool so that we don't need these
-  static constexpr char kSendId[] = "send";
-  static constexpr char kRecvId[] = "recv";
-
-  // [mfs] These should probably be template parameters
-  static constexpr size_t kMemoryPoolMessengerCapacity = 1 << 12;
-  static constexpr size_t kMemoryPoolMessageSize = 1 << 8;
-
+  /// Internal method for sending a Message (byte array) over RDMA as a
+  /// two-sided operation.
+  ///
+  /// TODO: Should this be fail-stop?
+  ///
+  /// TODO: Why do we enforce length so late?
+  ///
+  /// TODO: Why not let the caller deal with protos, instead of using them
+  ///       internally?
+  ///
+  /// TODO: Should this be fail-stop?
   sss::Status SendMessage(const Message &msg) {
     // The proto we send may not be larger than the maximum size received at
     // the peer. We assume that everyone uses the same value, so we check
@@ -97,8 +113,10 @@ class Connection {
 
     // If the new message will not fit in remaining memory, then we reset
     // the head pointer to the beginning.
+    //
+    // TODO: Are we sure there are no pending completions on it?
     auto tail = send_next_ + msg.length;
-    auto end = send_base_ + send_cap_;
+    auto end = send_base_ + kCapacity;
     if (tail > end) {
       send_next_ = send_base_;
     }
@@ -109,7 +127,7 @@ class Connection {
     std::memset(&sge, 0, sizeof(sge));
     sge.addr = reinterpret_cast<uint64_t>(send_next_);
     sge.length = msg.length;
-    sge.lkey = send_mr_->lkey;
+    sge.lkey = send_seg_.mr()->lkey;
 
     // Note that we use a custom `ibv_send_wr` here since we want to add an
     // immediate. Otherwise we could have just used `rdma_post_send()`.
@@ -120,7 +138,6 @@ class Connection {
     wr.sg_list = &sge;
     wr.opcode = IBV_WR_SEND_WITH_IMM;
     wr.wr_id = send_total_++;
-
     ibv_send_wr *bad_wr;
     {
       int ret = ibv_post_send(id_->qp, &wr, &bad_wr);
@@ -132,12 +149,14 @@ class Connection {
     }
 
     // Assumes that the CQ associated with the SQ is synchronous.
+    //
+    // TODO:  This doesn't check if the *caller*'s event completed, just that
+    //        *some* event completed.  Is that OK?
     ibv_wc wc;
     int comps = rdma_get_send_comp(id_, &wc);
     while (comps < 0 && errno == EAGAIN) {
       comps = rdma_get_send_comp(id_, &wc);
     }
-
     if (comps < 0) {
       sss::Status e = {sss::InternalError, {}};
       return e << "rdma_get_send_comp: {}" << strerror(errno);
@@ -145,14 +164,12 @@ class Connection {
       sss::Status e = {sss::InternalError, {}};
       return e << "rdma_get_send_comp(): " << ibv_wc_status_str(wc.status);
     }
-
     send_next_ += msg.length;
     return sss::Status::Ok();
   }
 
-  // Attempts to deliver a sent message by checking for completed receives
-  // and then returning a `Message` containing a copy of the received
-  // buffer.
+  /// Internal method for receiving a Message (byte array) over RDMA as a
+  /// two-sided operation.
   sss::StatusVal<Message> TryDeliverMessage() {
     ibv_wc wc;
     auto ret = rdma_get_recv_comp(id_, &wc);
@@ -170,11 +187,13 @@ class Connection {
         // Prepare the response.
         //
         // [mfs] It looks like there's a lot of copying baked into the API?
-        // [esl] I was getting an error with the code that was previously
-        // here. The optional was throwing a bad_optional_access exception.
-        // I think the optional had to be constructed with a value. It might
-        // be better to refactor Message to make it moveable and construct
-        // in a series of steps instead of one long statement...
+        //
+        // [esl]  I was getting an error with the code that was previously here.
+        //        The optional was throwing a bad_optional_access exception. I
+        //        think the optional had to be constructed with a value. It
+        //        might be better to refactor Message to make it moveable and
+        //        construct in a series of steps instead of one long
+        //        statement...
         sss::StatusVal<Message> res = {
             sss::Status::Ok(),
             std::make_optional(Message{std::make_unique<uint8_t[]>(wc.byte_len),
@@ -188,7 +207,7 @@ class Connection {
         // to the base address of the receive buffer.
         recv_total_++;
         recv_next_ += kRecvMaxBytes;
-        if (recv_next_ > recv_base_ + (recv_cap_ - kRecvMaxBytes)) {
+        if (recv_next_ > recv_base_ + (kCapacity - kRecvMaxBytes)) {
           PrepareRecvBuffer();
         }
         return res;
@@ -206,15 +225,15 @@ class Connection {
   // only be called when all posted receives have corresponding completions,
   // otherwise there may be a race on memory by posted recvs.
   void PrepareRecvBuffer() {
-    ROME_ASSERT(recv_total_ % (recv_cap_ / kRecvMaxBytes) == 0,
+    ROME_ASSERT(recv_total_ % (kCapacity / kRecvMaxBytes) == 0,
                 "Unexpected number of completions from RQ");
     // Prepare the recv buffer for incoming messages with the assumption
     // that the maximum received message will be `max_recv_` bytes long.
     for (auto curr = recv_base_;
-         curr <= recv_base_ + (recv_cap_ - kRecvMaxBytes);
+         curr <= recv_base_ + (kCapacity - kRecvMaxBytes);
          curr += kRecvMaxBytes) {
       RDMA_CM_ASSERT(rdma_post_recv, id_, nullptr, curr, kRecvMaxBytes,
-                     recv_mr_);
+                     recv_seg_.mr());
     }
     recv_next_ = recv_base_;
   }
@@ -232,19 +251,14 @@ class Connection {
   }
 
 public:
-  // [mfs] It seems to me that the savings involved in splitting rm_ is not
-  // worth the complexity?
+  // TODO: Documentation
   Connection(uint32_t src_id, uint32_t dst_id, rdma_cm_id *channel_id)
-      : rm_(kCapacity, channel_id->pd), id_(channel_id),
-        send_cap_(kCapacity / 2), recv_cap_(kCapacity / 2) {
+      : send_seg_(kCapacity, channel_id->pd),
+        recv_seg_(kCapacity, channel_id->pd), id_(channel_id) {
     // [mfs]  There's a secret rule here, that the send/recv are using the same
     //        pd as the channel.  Document it?
-    send_mr_ =
-        (rm_.RegisterMemoryRegion(kSendId, channel_id->pd, 0, send_cap_));
-    recv_mr_ = (rm_.RegisterMemoryRegion(kRecvId, channel_id->pd, send_cap_,
-                                         recv_cap_));
-    send_next_ = send_base_ = reinterpret_cast<uint8_t *>(send_mr_->addr);
-    recv_next_ = recv_base_ = reinterpret_cast<uint8_t *>(recv_mr_->addr);
+    send_next_ = send_base_ = reinterpret_cast<uint8_t *>(send_seg_.mr()->addr);
+    recv_next_ = recv_base_ = reinterpret_cast<uint8_t *>(recv_seg_.mr()->addr);
     PrepareRecvBuffer();
   }
 
@@ -304,15 +318,22 @@ public:
 
   /// Test if this Connection's ID matches some other Connection's ID.  I don't
   /// understand why ConnectionManager::OnDisconnect needs this.
+  ///
+  /// TODO: Can we remove this?
   bool matches(rdma_cm_id *other) { return id_ == other; }
 
   /// Send a write request.  This encapsulates so that id_ can be private
+  ///
+  /// TODO: Can we remove this?
   void send_onesided(ibv_send_wr *send_wr_) {
     ibv_send_wr *bad = nullptr;
     RDMA_CM_ASSERT(ibv_post_send, id_->qp, send_wr_, &bad);
   }
 
-  /// Poll to see if anything new arrived on the completion queue
+  /// Poll to see if anything new arrived on the completion queue.  This
+  /// encapsulates so that id_ can be private.
+  ///
+  /// TODO: Can we remove this?
   int poll_cq(int num, ibv_wc *wc) {
     return ibv_poll_cq(id_->send_cq, num, wc);
   }

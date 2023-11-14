@@ -4,8 +4,9 @@
 
 #include "../logging/logging.h"
 
-// TODO: Should these three headers be in an "internal" subfolder?
+// TODO: Should these headers be in an "internal" subfolder?
 #include "connection_manager.h"
+#include "listener.h"
 #include "memory_pool.h"
 #include "peer.h"
 
@@ -42,11 +43,21 @@ class rdma_capability {
   internal::MemoryPool pool;  // A map of all the RDMA heaps
   cm_ptr connection_manager_; // The connections associated with the heaps
 
+  // TODO: This is in progress
+  std::unique_ptr<internal::RdmaBroker> broker_; //
+
 public:
   explicit rdma_capability(const Peer &self)
       : self_(self), pool(self_),
         connection_manager_(
-            std::make_unique<internal::ConnectionManager>(self_.id)) {}
+            std::make_unique<internal::ConnectionManager>(self_.id)),
+        broker_(nullptr) {}
+
+  ~rdma_capability() {
+    if (broker_ != nullptr)
+      auto s = broker_->Stop();
+    ROME_TRACE("Stopping broker...");
+  }
 
   /// Create a block of distributed memory and connect to all the other nodes in
   /// the system, so that they can have access to that memory region.
@@ -64,6 +75,8 @@ public:
   ///       behavior of the methods this calls.  We should think about how to do
   ///       a better job.
   void init_pool(uint32_t capacity, std::vector<Peer> &peers) {
+    using namespace std::string_literals;
+
     // Launch a connection manager, to enable other machines to connect to the
     // memory pool we're going to create.
     //
@@ -74,16 +87,28 @@ public:
       std::terminate();
     }
 
+    broker_ = internal::RdmaBroker::Create(self_.address, self_.port,
+                                           connection_manager_.get());
+    if (broker_ == nullptr) {
+      ROME_FATAL("Failed to create broker");
+      std::terminate();
+    }
+
     // Go through the list of peers and connect to each of them
     for (const auto &p : peers) {
+      ROME_DEBUG("Connecting to remote peer"s + p.address + ":" +
+                 std::to_string(p.port) + " (id = " + std::to_string(p.id) +
+                 ")");
       // TODO: Why not have a blocking connect call?
       //
       // TODO: Only connect to "bigger" peers?
       //
       // TODO: Does this include connecting to self?
-      auto connected = connection_manager_->Connect(p.id, p.address, p.port);
+      auto connected = connection_manager_->Connect(
+          p.id, p.address, p.port, broker_->pd(), broker_->address());
       while (connected.status.t == sss::Unavailable) {
-        connected = connection_manager_->Connect(p.id, p.address, p.port);
+        connected = connection_manager_->Connect(
+            p.id, p.address, p.port, broker_->pd(), broker_->address());
       }
       if (connected.status.t != sss::Ok) {
         ROME_FATAL(connected.status.message.value());
@@ -92,7 +117,7 @@ public:
     }
 
     // Create a memory region of the requested size
-    auto mem = pool.init_memory(capacity, connection_manager_->pd());
+    auto mem = pool.init_memory(capacity, broker_->pd());
 
     // Send the memory region to all peers
     RemoteObjectProto rm_proto;

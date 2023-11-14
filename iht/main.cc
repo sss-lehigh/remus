@@ -54,6 +54,8 @@ using namespace rome::rdma;
 // MINIMAL
 
 int main(int argc, char **argv) {
+  using namespace std::string_literals;
+
   ROME_INIT_LOG();
 
   sss::ArgMap args;
@@ -97,8 +99,11 @@ int main(int argc, char **argv) {
   //          connections/machine?  Is mapping them to threads appropriate?
   //        - How does a thread decide *which* memory pool to allocate from?
 
-  // Determine the number of memory pools to use in the experiment
-  // Each memory pool represents
+  // Determine the number of memory pools to use in the experiment Each memory
+  // pool represents
+  //
+  // [mfs]  This is always resulting in one memory pool at 2 threads and 3
+  //        nodes. That doesn't seem right?
   int mp = std::min(params.thread_count,
                     (int)std::floor(params.qp_max / params.node_count));
   if (mp == 0)
@@ -136,6 +141,7 @@ int main(int argc, char **argv) {
   for (int i = 0; i < mp; i++) {
     mempool_threads.emplace_back(std::thread(
         [&](int mp_index, int self_index) {
+          ROME_DEBUG("Creating pool");
           Peer self = peers.at(self_index);
           ROME_DEBUG(mp != params.thread_count ? "Is shared" : "Is not shared");
           std::shared_ptr<rdma_capability> pool =
@@ -150,7 +156,7 @@ int main(int argc, char **argv) {
     mempool_threads[i].join();
   }
 
-  // Create a list of client and server  threads
+  // Create a list of client and server threads
   std::vector<std::thread> threads;
   if (params.node_id == 0) {
     // If dedicated server-node, we must send IHT pointer and wait for clients
