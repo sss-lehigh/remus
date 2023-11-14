@@ -116,7 +116,8 @@ class ArgMap {
   std::string program_name = "";
 
 public:
-  /// @brief  Merge a bunch of Arg objects into the map of supported args
+  /// @brief  Merge a bunch of Arg objects into the map of supported args.  Fail
+  ///         if `in` includes keys that have already been imported.
   ///
   /// @param in The args to merge into the ArgMap
   ///
@@ -138,7 +139,8 @@ public:
   /// @brief  Try to process the command-line args, according to the Arg objects
   ///         that have been imported into this ArgMap.  Note that we currently
   ///         only support named arguments, unlike getopt(), which moves all
-  ///         unnamed arguments to the end of argv.
+  ///         unnamed arguments to the end of argv.  Fail if any required arg
+  ///         was omitted.
   ///
   /// @param argc The number of command-line args
   /// @param argv The array of command-line args
