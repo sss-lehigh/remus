@@ -13,6 +13,9 @@ set -e # Halt the script on any error
 #                         particular, it is assumed that you can build locally,
 #                         copy the executable file to cloudlab, and run it
 #                         remotely.
+#
+#                         Lastly, note the "-no-prep" flag will skip running the
+#                         "prepare_to_run.sh" script on the remote node.
 
 #
 # This section has the customization points for the script.  For now, you need
@@ -99,21 +102,25 @@ rm ${tmp_script_file}
 
 # Run the configuration script on each machine... Since `apt` has ugly output,
 # we use `screen`
-echo "Configuring machines"
-tmp_screen="$(mktemp)" || exit 1
-echo 'startup_message off' > ${tmp_screen}
-echo 'defscrollback 10000' >> ${tmp_screen}
-echo 'autodetach on' >> ${tmp_screen}
-echo 'escape ^jj' >> ${tmp_screen}
-echo 'defflow off' >> ${tmp_screen}
-echo 'hardstatus alwayslastline "%w"' >> ${tmp_screen}
-for i in `seq 0 ${last_valid_index}`
-do
-    echo "screen -t nodes${i} ssh ${user}@${machines[$i]}.${domain} bash ${config_command}" >> ${tmp_screen}
-done
-screen -c ${tmp_screen}
-echo -e "Done\n\n"
-rm ${tmp_screen}
+if [[ $1 == "-no-prep" ]]; then
+    echo -e "'-no-prep' flag detected... skipping machine configuration\n\n"
+else
+    echo "Configuring machines"
+    tmp_screen="$(mktemp)" || exit 1
+    echo 'startup_message off' > ${tmp_screen}
+    echo 'defscrollback 10000' >> ${tmp_screen}
+    echo 'autodetach on' >> ${tmp_screen}
+    echo 'escape ^jj' >> ${tmp_screen}
+    echo 'defflow off' >> ${tmp_screen}
+    echo 'hardstatus alwayslastline "%w"' >> ${tmp_screen}
+    for i in `seq 0 ${last_valid_index}`
+    do
+        echo "screen -t nodes${i} ssh ${user}@${machines[$i]}.${domain} bash ${config_command}" >> ${tmp_screen}
+    done
+    screen -c ${tmp_screen}
+    echo -e "Done\n\n"
+    rm ${tmp_screen}
+fi
 
 #
 # We are not actually going to run the program from this script, but we will
