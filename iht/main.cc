@@ -227,12 +227,11 @@ int main(int argc, char **argv) {
               Client<IHT_Op<int, int>>::Run(std::move(client), thread_index,
                                             populate_frac);
           // [mfs]  It would be good to document how a client can fail, because
-          // it seems like if even one client fails, on any machine, the
-          //  whole experiment should be invalidated.
-          // [esl] I agree. A strange thing though: I think the output of
-          // Client::Run is always OK.
-          //       Any errors just crash the script, which lead to no results
-          //       being generated?
+          //        it seems like if even one client fails, on any machine, the
+          //        whole experiment should be invalidated.
+          // [esl]  I agree. A strange thing though: I think the output of
+          //        Client::Run is always OK.  Any errors just crash the script,
+          //        which lead to no results being generated?
           if (output.status.t == sss::StatusType::Ok &&
               output.val.has_value()) {
             workload_results[thread_index] = output.val.value();
