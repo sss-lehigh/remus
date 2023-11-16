@@ -104,8 +104,10 @@ inline void __rome_init_log__() {
 //        std::terminate()?
 #if ROME_LOG_LEVEL != OFF
 #define ROME_FATAL(...)                                                        \
-  SPDLOG_CRITICAL(__VA_ARGS__);                                                \
-  std::terminate();
+  {                                                                            \
+    SPDLOG_CRITICAL(__VA_ARGS__);                                              \
+    std::terminate();                                                          \
+  }
 #endif
 
 #define ROME_ASSERT(check, ...)                                                \
