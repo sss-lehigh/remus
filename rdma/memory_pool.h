@@ -193,6 +193,8 @@ class MemoryPool {
   };
 
   // TODO: Document this
+  //
+  // TODO: Now that we can have multiple connections, this needs a redesign
   struct conn_info_t {
     Connection *conn;
     uint32_t rkey;
@@ -213,18 +215,17 @@ class MemoryPool {
 
   /// a vector of semaphores, one for each thread that can send an operation.
   /// Threads will use this to recover from polling another thread's wr_id
-  // TODO:  the size should be a run-time value
-  //
-  // TODO:  threads should have descriptors and not use this, as it's going to
-  //        cause cache thrashing.
+  ///
+  /// TODO:  the size should be a run-time value
+  ///
+  /// TODO:  threads should have descriptors and not use this, as it's going to
+  ///        cause cache thrashing.
   std::array<std::atomic<int>, 20> reordering_counters;
 
-  // [mfs]  Stopped here.  Need to figure out what's going on in this code, and
-  //        how it can be cleaned up...
+  // TODO: The rest of this file needs a lot more documentation
 
   Peer self_;
   std::unique_ptr<rdma_memory_resource> rdma_memory_;
-  // ibv_mr *mr_;
 
   std::unordered_map<uint16_t, conn_info_t> conn_info_;
 
@@ -462,6 +463,8 @@ public:
   /// Do a 64-bit CAS over RDMA
   ///
   /// [mfs] If the swap value is always a uint64_t, why is this templated on T?
+  ///       Or perhaps the question is "how does this work if the field to CAS
+  ///       isn't the first field of the T?"
   template <typename T>
   T CompareAndSwap(remote_ptr<T> ptr, uint64_t expected, uint64_t swap) {
     static_assert(sizeof(T) == 8);

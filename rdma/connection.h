@@ -1,5 +1,6 @@
 #pragma once
 
+// TODO: Do we still need all these includes?
 #include <arpa/inet.h>
 #include <atomic>
 #include <cstddef>
@@ -20,7 +21,10 @@
 #include "../logging/logging.h"
 #include "../vendor/sss/status.h"
 
+#include "connection_utils.h"
 #include "segment.h"
+
+// TODO: Many parts of this file need better documentation
 
 namespace rome::rdma::internal {
 
@@ -48,15 +52,15 @@ class Connection {
   ///       determined by the sizes of pinned memory regions.  Thus it might be
   ///       possible for threads to pre-allocate a small number of Messages, and
   ///       not need the allocator overhead that this Message type introduces.
+  ///
+  /// TODO: OTOH, we don't really use Send/Recv much, so maybe it doesn't
+  ///       matter?
   struct Message {
-    std::unique_ptr<uint8_t[]> buffer;
-    size_t length;
+    std::unique_ptr<uint8_t[]> buffer; // The data
+    size_t length;                     // The size of the buffer of data
   };
 
-  /// The size to use when allocating the send and receive buffers
-  ///
-  /// TODO: Make this an argument to the constructor?
-  static constexpr const uint32_t kCapacity = 1ul << 12;
+  // TODO: Should these constants migrate to connection_utils.h?
 
   /// The maximum size of a message sent or received
   ///
@@ -139,13 +143,10 @@ class Connection {
     wr.opcode = IBV_WR_SEND_WITH_IMM;
     wr.wr_id = send_total_++;
     ibv_send_wr *bad_wr;
-    {
-      int ret = ibv_post_send(id_->qp, &wr, &bad_wr);
-      if (ret != 0) {
-        sss::Status err = {sss::InternalError, ""};
-        err << "ibv_post_send(): " << strerror(errno);
-        return err;
-      }
+    if (ibv_post_send(id_->qp, &wr, &bad_wr) != 0) {
+      sss::Status err = {sss::InternalError, ""};
+      err << "ibv_post_send(): " << strerror(errno);
+      return err;
     }
 
     // Assumes that the CQ associated with the SQ is synchronous.
@@ -251,7 +252,7 @@ class Connection {
   }
 
 public:
-  // TODO: Documentation
+  /// Construct a connection object
   Connection(uint32_t src_id, uint32_t dst_id, rdma_cm_id *channel_id)
       : send_seg_(kCapacity, channel_id->pd),
         recv_seg_(kCapacity, channel_id->pd), id_(channel_id) {
@@ -274,6 +275,7 @@ public:
     return SendMessage(msg);
   }
 
+  // TODO: rename to Recv?
   template <typename ProtoType> sss::StatusVal<ProtoType> Deliver() {
     auto p = this->TryDeliver<ProtoType>();
     while (p.status.t == sss::Unavailable) {
@@ -288,6 +290,8 @@ public:
   ///
   /// TODO: Document this better  In particular, what are key and caller?  Are
   ///       they indicating that we actually do know who is the listening side?
+  ///
+  /// TODO: Could this be a destructor?
   void cleanup(uint32_t key, uint32_t caller) {
     // A loopback connection is made manually, so we do not need to deal with
     // the regular `rdma_cm` handling. Similarly, we avoid destroying the
@@ -297,6 +301,7 @@ public:
       rdma_cm_event *event;
       auto result = rdma_get_cm_event(id_->channel, &event);
       while (result == 0) {
+        // TODO: Stop using RDMA_CM_ASSERT?
         RDMA_CM_ASSERT(rdma_ack_cm_event, event);
         result = rdma_get_cm_event(id_->channel, &event);
       }
@@ -308,19 +313,17 @@ public:
     auto *context = id_->context;
     auto *channel = id_->channel;
     rdma_destroy_ep(id_);
-
-    if (key != caller && context != nullptr) {
+    // TODO:  I feel like we should be calling rdma_destroy_event_channel in the
+    //        if and in the else if, but that leads to occasional double frees.
+    //        Is there a race somewhere?  Note that the destructor used to hold
+    //        a lock while making all calls to cleanup, so maybe there's
+    //        something strange leading to the destructor getting called more
+    //        than once?
+    if (context != nullptr)
       free(context);
-    } else if (key != caller) {
+    else if (key != caller)
       rdma_destroy_event_channel(channel);
-    }
   }
-
-  /// Test if this Connection's ID matches some other Connection's ID.  I don't
-  /// understand why ConnectionManager::OnDisconnect needs this.
-  ///
-  /// TODO: Can we remove this?
-  bool matches(rdma_cm_id *other) { return id_ == other; }
 
   /// Send a write request.  This encapsulates so that id_ can be private
   ///

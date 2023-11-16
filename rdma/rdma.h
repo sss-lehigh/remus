@@ -1,12 +1,15 @@
 #pragma once
 
+#include "listener.h"
+
 #include <memory>
 
 #include "../logging/logging.h"
 
-// TODO: Should these headers be in an "internal" subfolder?
-#include "connection_manager.h"
-#include "listener.h"
+// TODO:  Should these headers be in an "internal" subfolder?
+#include "connection.h"
+#include "connection_map.h"
+#include "connector.h"
 #include "memory_pool.h"
 #include "peer.h"
 
@@ -38,33 +41,40 @@ namespace rome::rdma {
 ///       RDMA.  When we have a proper thread object, we can probably fix this
 ///       issue via per-thread buffers.
 class rdma_capability {
-  using cm_ptr = std::unique_ptr<internal::ConnectionManager>;
+  using cm_ptr = std::unique_ptr<internal::ConnectionMap>;
+  using listen_ptr = std::unique_ptr<internal::Listener>;
+  using connector_ptr = std::unique_ptr<internal::Connector>;
   Peer self_;                 // Identifying information for this node
   internal::MemoryPool pool;  // A map of all the RDMA heaps
   cm_ptr connection_manager_; // The connections associated with the heaps
-
-  // TODO: This is in progress
-  std::unique_ptr<internal::RdmaBroker> broker_; //
+  listen_ptr listener_;       // The listening socket/thread
+  connector_ptr connector_;   // A utility for connecting to other nodes
 
 public:
+  // TODO: This needs to be redesigned.  It's odd to construct the
+  // connection_manager and listener_, but not the connector, and it's odd to
+  // need to explicitly call init_pool.  This should be able to be merged.
   explicit rdma_capability(const Peer &self)
       : self_(self), pool(self_),
         connection_manager_(
-            std::make_unique<internal::ConnectionManager>(self_.id)),
-        broker_(nullptr) {}
+            std::make_unique<internal::ConnectionMap>(self_.id)),
+        listener_(std::make_unique<internal::Listener>(
+            self_.id, [&](uint32_t id, internal::Connection *conn) {
+              connection_manager_->put_connection(id, conn);
+            })) {}
 
   ~rdma_capability() {
-    if (broker_ != nullptr)
-      auto s = broker_->Stop();
-    ROME_TRACE("Stopping broker...");
+    // TODO: Make sure we aren't using the word "broker" anymore?
+    ROME_TRACE("Stopping listening thread...");
+    listener_->StopListeningThread();
   }
 
   /// Create a block of distributed memory and connect to all the other nodes in
   /// the system, so that they can have access to that memory region.
   ///
   /// This method does three things.
-  /// - It creates a memory region with `capacity` as its size.
   /// - It creates an all-all communication network with every peer
+  /// - It creates a memory region with `capacity` as its size.
   /// - It exchanges the region with all peers
   ///
   /// TODO: Should there be some kind of "shutdown()" method?
@@ -77,65 +87,81 @@ public:
   ///
   /// TODO: I feel like this should have a "connections-per-machine-pair"
   ///       argument.
+  ///
+  /// TODO: I also feel like we shouldn't be leaving it up to the caller to make
+  ///       `peers`.  Why can't we pass in a list of node ids, and a port, and
+  ///       be done with it?  And why can't every listener use the same port,
+  ///       now that there's only one per node.
   void init_pool(uint32_t capacity, std::vector<Peer> &peers) {
     using namespace std::string_literals;
 
-    // Launch a connection manager, to enable other machines to connect to the
-    // memory pool we're going to create.
+    // Start a listening thread, so we can get nodes connected to this node
+    listener_->StartListeningThread(self_.address, self_.port);
+
+    connector_ = std::make_unique<internal::Connector>(
+        self_.id, listener_->pd(), listener_->address(),
+        [&](uint32_t id, internal::Connection *conn) {
+          connection_manager_->put_connection(id, conn);
+        });
+
+    // Connect on the loopback first, as a sort of canary for testing IB
     //
-    // TODO: Make Start() fail-stop
-    auto status = connection_manager_->Start(self_.address, self_.port);
-    if (status.t != sss::Ok) {
-      ROME_FATAL(status.message.value());
-      std::terminate();
-    }
+    // [mfs] I have confirmed that multiple calls to ConnectLoopback do work
+    connector_->ConnectLoopback(self_.id, self_.address, self_.port);
 
-    broker_ = internal::RdmaBroker::Create(self_.address, self_.port,
-                                           connection_manager_.get());
-    if (broker_ == nullptr) {
-      ROME_FATAL("Failed to create broker");
-      std::terminate();
-    }
-
-    // Go through the list of peers and connect to each of them
+    // Go through the list of peers and connect to each of them.  Note that we
+    // only connect with "bigger" peers, in terms of Id, so that we don't have
+    // collisions between nodes trying to connect with each other.
     for (const auto &p : peers) {
-      ROME_DEBUG("Connecting to remote peer"s + p.address + ":" +
-                 std::to_string(p.port) + " (id = " + std::to_string(p.id) +
-                 ")");
-      // TODO: Why not have a blocking connect call?
-      //
-      // TODO: Only connect to "bigger" peers?
-      //
-      // TODO: Does this include connecting to self?
-      auto connected = connection_manager_->Connect(
-          p.id, p.address, p.port, broker_->pd(), broker_->address());
-      while (connected.status.t == sss::Unavailable) {
-        connected = connection_manager_->Connect(
-            p.id, p.address, p.port, broker_->pd(), broker_->address());
-      }
-      if (connected.status.t != sss::Ok) {
-        ROME_FATAL(connected.status.message.value());
-        std::terminate();
+      if (p.id != self_.id && p.id > self_.id) {
+        ROME_DEBUG("Connecting to remote peer"s + p.address + ":" +
+                   std::to_string(p.port) + " (id = " + std::to_string(p.id) +
+                   ") from " + std::to_string(self_.id));
+        // Connect to the remote nodes
+        //
+        // [mfs] I have confirmed that multiple calls to ConnectLoopback do work
+        connector_->ConnectRemote(p.id, p.address, p.port);
       }
     }
+    ROME_DEBUG("Finished connecting to remotes");
+
+    // TODO:  This is a hack.  We can't send the memory region to all peers
+    //        until we know that all peers are connected.  Before, we had both
+    //        sides race to create each of the n^2 connections, which was
+    //        inefficient, but guaranteed that we would not exit the above loop
+    //        until there was a guaranteed connection (and only one!) between
+    //        each pair of nodes.  Now that we have no such guarantee, we will
+    //        need something else to ensure that we don't try to send to
+    //        nonexistent peers.  For now, we'll just wait 5 seconds, but that's
+    //        not going to work in the long run.
+    //
+    // TODO:  Maybe we could just spin on a synchronized method of the
+    //        ConnectionMap that reports its number of connections?  If we do
+    //        that, we should wait until the connections are fully established,
+    //        not just requested, which will require a small modification.
+    sleep(5);
 
     // Create a memory region of the requested size
-    auto mem = pool.init_memory(capacity, broker_->pd());
+    auto mem = pool.init_memory(capacity, listener_->pd());
 
     // Send the memory region to all peers
+    //
+    // TODO:  This is probably not safe... we're blasting out a whole bunch of
+    //        Sends, then doing a whole bunch of Recvs.  The first problem is
+    //        that we want to have more than one qp between each pair of nodes,
+    //        so what happens if the sender and receiver disagree on which qp to
+    //        use?  The second problem is that the buffers for send/recv are
+    //        bounded, so what happens if we have so many nodes that we overflow
+    //        our buffer?  Will sends get rejected, or will they block?  Both
+    //        aren't handled by this code.
     RemoteObjectProto rm_proto;
     rm_proto.set_rkey(mem->mr()->rkey);
     rm_proto.set_raddr(reinterpret_cast<uint64_t>(mem->mr()->addr));
     for (const auto &p : peers) {
       auto conn = connection_manager_->GetConnection(p.id);
-      if (conn.status.t != sss::Ok) {
-        ROME_FATAL(conn.status.message.value());
-        std::terminate();
-      }
-      auto status = conn.val.value()->Send(rm_proto);
+      auto status = conn->Send(rm_proto);
       if (status.t != sss::Ok) {
         ROME_FATAL(status.message.value());
-        std::terminate();
       }
     }
 
@@ -143,18 +169,12 @@ public:
     // can manage them
     for (const auto &p : peers) {
       auto conn = connection_manager_->GetConnection(p.id);
-      if (conn.status.t != sss::Ok) {
-        ROME_FATAL(conn.status.message.value());
-        std::terminate();
-      }
-      auto got = conn.val.value()->template Deliver<RemoteObjectProto>();
+      auto got = conn->template Deliver<RemoteObjectProto>();
       if (got.status.t != sss::Ok) {
         ROME_FATAL(got.status.message.value());
-        std::terminate();
       }
       // [mfs] I don't understand why we use mr_->lkey?
-      pool.receive_conn(p.id, conn.val.value(), got.val.value().rkey(),
-                        mem->mr()->lkey);
+      pool.receive_conn(p.id, conn, got.val.value().rkey(), mem->mr()->lkey);
     }
 
     // TODO: This message isn't informative enough
@@ -200,29 +220,25 @@ public:
 
   /// Do a blocking Send() to another machine
   template <class T> sss::Status Send(const Peer &to, T &proto) {
-    // Form a connection with the machine
-    auto conn_or = connection_manager_->GetConnection(to.id);
-    RETURN_STATUSVAL_ON_ERROR(conn_or);
-
-    // Send the proto over
-    return conn_or.val.value()->Send(proto);
+    auto conn = connection_manager_->GetConnection(to.id);
+    return conn->Send(proto);
   }
 
   /// Do a blocking Recv() from another machine
   template <class T> sss::StatusVal<T> Recv(const Peer &from) {
     // Listen for a connection
-    auto conn_or = connection_manager_->GetConnection(from.id);
-    if (conn_or.status.t != sss::Ok)
-      return {conn_or.status, {}};
-    auto got = conn_or.val.value()->Deliver<T>();
+    auto conn = connection_manager_->GetConnection(from.id);
+    auto got = conn->Deliver<T>();
     return got;
   }
 
   /// Connect a thread to this pool.  Registered threads can ack each other's
   /// one-sided operations.  Threads *must* be registered!
   ///
-  /// TODO: It may be possible to do away with registration once
-  ///       pool.RegisterThread is rewritten.
+  /// TODO: Registration should define the affinity between a thread and a
+  ///       Connection to each node, since there can be >1 Connection from this
+  ///       node to each other node.  Some thread safety issues are likely to
+  ///       arise, too.
   void RegisterThread() { pool.RegisterThread(); }
 };
 } // namespace rome::rdma

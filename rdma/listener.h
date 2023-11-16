@@ -1,159 +1,81 @@
 #pragma once
 
-#include <arpa/inet.h>
 #include <atomic>
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
-#include <exception>
-#include <fcntl.h>
-#include <infiniband/verbs.h>
-#include <limits>
-#include <memory>
-#include <netdb.h>
-#include <optional>
+#include <functional>
 #include <rdma/rdma_cma.h>
-#include <rdma/rdma_verbs.h>
-#include <string>
-#include <unordered_map>
-#include <vector>
+#include <thread>
 
 #include "../logging/logging.h"
-#include "../vendor/sss/status.h"
-#include "connection.h"
-#include "connection_manager.h"
-#include "memory_pool.h"
+#include "connection_utils.h"
 
 namespace rome::rdma::internal {
 
-/// A broker handles the connection setup using the RDMA CM library. It is
-/// single threaded but communicates with all other brokers in the system to
-/// exchange information regarding the underlying RDMA memory configurations.
-///
-/// TODO: Rename to Listener?
-///
-/// TODO: I feel like the behavior we really want out of this code is that it
-///       should create a listening socket, and every time a new request comes
-///       in on the socket, it should *fully connect* and then hand that
-///       connection over to the connection manager.
-class RdmaBroker {
+/// A listening endpoint and a thread that listens for new connections
+class Listener {
+  /// A context to associate with an `rdma_cm_id`.  `node_id` is the numerical
+  /// identifier for the peer node of the connection and `conn_param` is used to
+  /// provide private data during the connection set up to send the local node
+  /// identifier.
+  struct IdContext {
+    uint32_t node_id;           // The peer's id
+    rdma_conn_param conn_param; // Private data to send during config
 
-  std::string address_;
-  uint16_t port_;
+    /// Extract a node id from a context object
+    static inline uint32_t GetNodeId(void *ctx) {
+      return reinterpret_cast<IdContext *>(ctx)->node_id;
+    }
+  };
 
-  // Flag to indicate that the worker thread should terminate.
-  std::atomic<bool> terminate_;
-
-  /// The worker thread that listens and responds to incoming messages.
+  /// A functor for joining a thread on deletion
   struct thread_deleter {
     void operator()(std::thread *thread) {
       thread->join();
       free(thread);
     }
   };
-  std::unique_ptr<std::thread, thread_deleter> runner_;
 
-  // Status of the broker at any given time.
-  //
-  // [mfs] I don't think we need this
-  sss::Status status_;
+  /// A thread that joins itself on deletion
+  using receiving_thread = std::unique_ptr<std::thread, thread_deleter>;
 
-  // RDMA CM related members.
-  rdma_event_channel *listen_channel_;
-  rdma_cm_id *listen_id_;
+  /// A function type; used for saving a connection to the Connection Map
+  using saver_t = std::function<void(uint32_t, Connection *)>;
 
-  // The total number of connections made by this broker.
-  // [mfs] Why atomic?
-  std::atomic<uint32_t> num_connections_;
+  std::atomic<bool> stop_listening_;             // For stopping worker thread
+  rdma_cm_id *listen_id_ = nullptr;              // The listening endpoint
+  rdma_event_channel *listen_channel_ = nullptr; // The channel for listen_id_
+  receiving_thread runner_;                      // The worker thread
+  std::string address_;                          // This node's IP address
+  uint16_t port_;                                // This node's port
+  uint32_t my_id_;                               // Node ID of this thread
+  const saver_t connection_saver; // Saves a connection to the Connection Map
 
-  // Maintains connections that are forwarded by the broker.
-  ConnectionManager *receiver_; //! NOT OWNED
-
-  /// Produce a vector of active ports, or None if none are found
-  static std::optional<std::vector<int>> FindActivePorts(ibv_context *context) {
-    // Find the first active port, failing if none exists.
-    ibv_device_attr dev_attr;
-    ibv_query_device(context, &dev_attr);
-    std::vector<int> ports;
-    for (int i = 1; i <= dev_attr.phys_port_cnt; ++i) {
-      ibv_port_attr port_attr;
-      ibv_query_port(context, i, &port_attr);
-      if (port_attr.state != IBV_PORT_ACTIVE) {
-        continue;
-      } else {
-        ports.push_back(i);
-      }
-    }
-    if (ports.empty())
-      return {};
-    return ports;
-  }
-
-  // Returns a vector of device name and active port pairs that are accessible
-  // on this machine, or None if no devices are found
-  //
-  // TODO: this function name is misleading... It is stateful, since it
-  // *opens* devices.  This means that its return value doesn't tell the whole
-  // story.
-  static std::optional<std::vector<std::pair<std::string, int>>>
-  GetAvailableDevices() {
-    int num_devices;
-    auto **device_list = ibv_get_device_list(&num_devices);
-    if (num_devices <= 0)
-      return {};
-    std::vector<std::pair<std::string, int>> active;
-    for (int i = 0; i < num_devices; ++i) {
-      auto *context = ibv_open_device(device_list[i]);
-      if (context) {
-        auto ports = FindActivePorts(context);
-        if (!ports.has_value())
-          continue;
-        for (auto p : ports.value()) {
-          active.emplace_back(context->device->name, p);
-        }
-      }
-    }
-
-    ibv_free_device_list(device_list);
-    return active;
-  }
-
-  static constexpr int kMaxRetries = 100;
-
-  RdmaBroker(ConnectionManager *receiver)
-      : terminate_(false), status_(sss::Status::Ok()), listen_channel_(nullptr),
-        listen_id_(nullptr), num_connections_(0), receiver_(receiver) {}
-
-  // Start the broker listening on the given `device` and `port`. If `port` is
-  // `nullopt`, then the first available port is used.
-  sss::Status Init(std::optional<std::string_view> address,
-                   std::optional<uint16_t> port) {
-    // TODO: This method is fail-stop in the caller, so instead it should be
-    // fail-stop here
+  /// Create a listening endpoint on RDMA and start listening on it.  Terminate
+  /// the program if anything goes wrong.
+  ///
+  /// NB: Since we are using an async socket, we call `listen()` here, but it
+  ///     won't block or run any code for handling a listening request.  We'll
+  ///     do that later, in a separate thread.
+  void CreateListeningEndpoint(const std::string &address, uint16_t port) {
+    using namespace std::string_literals;
 
     // Check that devices exist before trying to set things up.
     auto devices = GetAvailableDevices();
-    if (!devices.has_value())
-      return {sss::NotFound, "no devices found"}; // No devices found...
-    // [mfs] Does the above call do anything?  Weird...
-
-    rdma_addrinfo hints = {0}, *resolved;
-
-    // Get the local connection information.
-    hints.ai_flags = RAI_PASSIVE;
-    hints.ai_port_space = RDMA_PS_TCP;
-
-    auto port_str = port.has_value() ? std::to_string(htons(port.value())) : "";
-    int gai_ret =
-        rdma_getaddrinfo(address.has_value() ? address.value().data() : nullptr,
-                         port_str.data(), &hints, &resolved);
-    if (gai_ret != 0) {
-      sss::Status err = {sss::InternalError, "rdma_getaddrinfo(): "};
-      err << gai_strerror(gai_ret);
-      return err;
+    if (!devices.has_value()) {
+      ROME_FATAL("CreateListeningEndpoint :: no RDMA-capable devices found");
     }
 
-    // Create an endpoint to receive incoming requests on.
+    // Get the local connection information.
+    rdma_addrinfo hints = {0}, *resolved;
+    hints.ai_flags = RAI_PASSIVE;
+    hints.ai_port_space = RDMA_PS_TCP;
+    auto port_str = std::to_string(htons(port));
+    int gai_ret =
+        rdma_getaddrinfo(address.c_str(), port_str.c_str(), &hints, &resolved);
+    if (gai_ret != 0) {
+      ROME_FATAL("rdma_getaddrinfo(): "s + gai_strerror(gai_ret));
+    }
+
+    // Create an endpoint to receive incoming requests
     ibv_qp_init_attr init_attr = {0};
     init_attr.cap.max_send_wr = init_attr.cap.max_recv_wr = 16;
     init_attr.cap.max_send_sge = init_attr.cap.max_recv_sge = 1;
@@ -162,122 +84,102 @@ class RdmaBroker {
     auto err = rdma_create_ep(&listen_id_, resolved, nullptr, &init_attr);
     rdma_freeaddrinfo(resolved);
     if (err) {
-      sss::Status err = {sss::InternalError, "rdma_create_ep(): "};
-      err << strerror(errno);
-      return err;
+      ROME_FATAL("rdma_create_ep(): "s + strerror(errno));
     }
 
     // Migrate the new endpoint to an async channel
     listen_channel_ = rdma_create_event_channel();
-    {
-      int ret = rdma_migrate_id(listen_id_, listen_channel_);
-      if (ret != 0) {
-        sss::Status err = {sss::InternalError, ""};
-        err << "rdma_migrate_id"
-            << "(): " << strerror((*__errno_location()));
-        return err;
-      }
+    if (rdma_migrate_id(listen_id_, listen_channel_) != 0) {
+      ROME_FATAL("rdma_migrate_id(): "s + strerror(errno));
     }
-
-    {
-      int ret = fcntl(listen_id_->channel->fd, F_SETFL,
-                      fcntl(listen_id_->channel->fd, F_GETFL) | O_NONBLOCK);
-      if (ret != 0) {
-        sss::Status err = {sss::InternalError, ""};
-        err << "fcntl"
-            << "(): " << strerror((*__errno_location()));
-        return err;
-      }
-    }
+    make_nonblocking(listen_id_->channel->fd);
 
     // Start listening for incoming requests on the endpoint.
-    {
-      int ret = rdma_listen(listen_id_, 0);
-      if (ret != 0) {
-        sss::Status err = {sss::InternalError, ""};
-        err << "rdma_listen"
-            << "(): " << strerror((*__errno_location()));
-        return err;
-      }
+    if (rdma_listen(listen_id_, 0) != 0) {
+      ROME_FATAL("rdma_listen(): "s + strerror(errno));
     }
+
+    // Record and report the node's address/port
     address_ = std::string(inet_ntoa(
         reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(listen_id_))
             ->sin_addr));
-
     port_ = rdma_get_src_port(listen_id_);
     ROME_INFO("Listening: {}:{}", address_, port_);
-
-    runner_.reset(new std::thread([&]() { this->Run(); }));
-
-    return sss::Status::Ok();
   }
 
+  /// The main loop run by the listening thread.  Polls for new events on the
+  /// listening endpoint and handles them.  This typically means receiving new
+  /// connections, configuring the new endpoints, and then putting them into the
+  /// map.
   void HandleConnectionRequests() {
-    rdma_cm_event *event = nullptr;
-    int ret;
+    using namespace std::string_literals;
+
     while (true) {
-      do {
-        // If we are shutting down, and there are no connections left then we
-        // should finish.
-        if (terminate_)
-          return;
+      // Check if shutdown was requested
+      if (stop_listening_) {
+        return;
+      }
 
-        // Attempt to read from `listen_channel_`
-        ret = rdma_get_cm_event(listen_channel_, &event);
+      // Attempt to read an event from `listen_channel_`
+      rdma_cm_event *event = nullptr;
+      {
+        int ret = rdma_get_cm_event(listen_channel_, &event);
         if (ret != 0 && errno != EAGAIN) {
-          status_ = {sss::InternalError, "rdma_get_cm_event(): "};
-          status_ << strerror(errno);
-          return;
+          ROME_FATAL("rdma_get_cm_event(): "s + strerror(errno));
         }
-        std::this_thread::yield(); // TODO: is this right?
-
-        // It was this at top, then an await/suspend here
-        // std::this_thread::sleep_for(std::chrono::milliseconds(10))
-      } while ((ret != 0 && errno == EAGAIN));
-
+        // On EAGAIN, yield and then try again
+        //
+        // TODO: Is yielding the right thing to do?  Sleep?  Tight spin loop?
+        if (ret != 0) {
+          std::this_thread::yield();
+          continue;
+        }
+      }
       ROME_TRACE("({}) Got event: {} (id={})", fmt::ptr(this),
                  rdma_event_str(event->event), fmt::ptr(event->id));
+
+      // Handle whatever event we just received
+      rdma_cm_id *id = event->id;
       switch (event->event) {
-      case RDMA_CM_EVENT_TIMEWAIT_EXIT: // Nothing to do.
-        // TODO:  Do we ever have this?
+      case RDMA_CM_EVENT_TIMEWAIT_EXIT:
+        // We aren't currently getting CM_EVENT_TIMEWAIT_EXIT events, but if we
+        // did, we'd probably just ACK them and continue
+        //
+        // TODO:  Why doesn't this code check for ACK errors, when the Connector
+        //        does?
         rdma_ack_cm_event(event);
         break;
-      case RDMA_CM_EVENT_CONNECT_REQUEST: {
-        rdma_cm_id *id = event->id;
-        receiver_->OnConnectRequest(id, event, listen_id_->pd);
+
+      case RDMA_CM_EVENT_CONNECT_REQUEST:
+        // This is the main thing we expect: a request for a new connection
+        OnConnectRequest(id, event, listen_id_->pd);
         break;
-      }
-      case RDMA_CM_EVENT_ESTABLISHED: {
-        // TODO:  Do we ever have this?
-        rdma_cm_id *id = event->id;
-        // Now that we've established the connection, we can transition to
-        // using it to communicate with the other node
-        rdma_ack_cm_event(event);
 
-        num_connections_.fetch_add(1);
-        ROME_TRACE("({}) Num connections: {}", fmt::ptr(this),
-                   num_connections_);
-      } break;
-      case RDMA_CM_EVENT_DISCONNECTED: {
-        // [mfs]  Will this code ever run?  If this is on the listen channel, I
-        //        don't think it will.  Indeed, I put in std::terminate, and it
-        //        never fired:
-        // std::terminate();
-        rdma_cm_id *id = event->id;
+      case RDMA_CM_EVENT_ESTABLISHED:
+        // Once the connection is fully established, we just ack it, and then
+        // it's ready for use.
+        //
+        // TODO:  Should we be updating the map?  What if another thread tries
+        //        to use it before we ack?  Are we just getting lucky with
+        //        potential timing bugs, because we set up the whole clique
+        //        before we use connections?
         rdma_ack_cm_event(event);
-        receiver_->OnDisconnect(id);
+        break;
 
-        // `num_connections_` will only reach zero once all connections have
-        // received their disconnect messages.
-        num_connections_.fetch_add(-1);
-        ROME_TRACE("({}) Num connections: {}", fmt::ptr(this),
-                   num_connections_);
-      } break;
+      case RDMA_CM_EVENT_DISCONNECTED:
+        // Since we're polling on a *listening* channel, we're never going to
+        // see disconnected events.  If we did, we have some code for knowing
+        // what to do with them.
+        rdma_ack_cm_event(event);
+        OnDisconnect(id);
+        break;
+
       case RDMA_CM_EVENT_DEVICE_REMOVAL:
-        // TODO: Cleanup
+        // We don't expect to ever see a device removal event
         ROME_ERROR("event: {}, error: {}\n", rdma_event_str(event->event),
                    event->status);
         break;
+
       case RDMA_CM_EVENT_ADDR_ERROR:
       case RDMA_CM_EVENT_ROUTE_ERROR:
       case RDMA_CM_EVENT_UNREACHABLE:
@@ -287,65 +189,109 @@ class RdmaBroker {
         // These signals are sent to a connecting endpoint, so we should not
         // see them here. If they appear, abort.
         ROME_FATAL("Unexpected signal: {}", rdma_event_str(event->event));
+
       default:
+        // We did not design for other events, so crash if another event arrives
         ROME_FATAL("Not implemented");
       }
-
-      // TODO: is this right?  It used to be co_await suspend_always
-      std::this_thread::yield();
-      // co_await std::suspend_always{}; // Suspend after handling a given
-      // message.
     }
   }
 
-  void Run() {
-    HandleConnectionRequests();
-    ROME_TRACE("Finished: {}",
-               (status_.t == sss::Ok) ? "Ok" : status_.message.value());
+  /// Handler to run when a connection request arrives
+  void OnConnectRequest(rdma_cm_id *id, rdma_cm_event *event, ibv_pd *pd) {
+    using namespace std::string_literals;
+
+    // The private data is used to figure out the node that made the request
+    ROME_ASSERT_DEBUG(event->param.conn.private_data != nullptr,
+                      "Received connect request without private data.");
+    uint32_t peer_id = *(uint32_t *)(event->param.conn.private_data);
+    ROME_TRACE("[OnConnectRequest] (Node {}) Got connection request from: {}",
+               my_id_, peer_id);
+
+    if (peer_id != my_id_) {
+      // Create a new QP for the connection.
+      ibv_qp_init_attr init_attr = DefaultQpInitAttr();
+      ROME_ASSERT(id->qp == nullptr, "QP already allocated...?");
+      RDMA_CM_ASSERT(rdma_create_qp, id, pd, &init_attr);
+    } else {
+      ROME_FATAL("OnConnectionRequest called for self-connection");
+    }
+
+    // Prepare the necessary resources for this connection.  Includes a QP and
+    // memory for 2-sided communication. The underlying QP is RC, so we reuse it
+    // for issuing 1-sided RDMA too. We also store the `peer_id` associated with
+    // this id so that we can reference it later.
+    auto context = new IdContext{peer_id, {}};
+    context->conn_param.private_data = &context->node_id;
+    context->conn_param.private_data_len = sizeof(context->node_id);
+    context->conn_param.rnr_retry_count = 1; // Retry forever
+    context->conn_param.retry_count = 7;
+    context->conn_param.responder_resources = 8;
+    context->conn_param.initiator_depth = 8;
+    id->context = context;
+    make_nonblocking(id->recv_cq->channel->fd);
+    make_nonblocking(id->send_cq->channel->fd);
+    // Save the connection and ack it
+    connection_saver(peer_id, new Connection(my_id_, peer_id, id));
+
+    ROME_TRACE("[OnConnectRequest] (Node {}) peer={}, id={}", my_id_, peer_id,
+               fmt::ptr(id));
+    RDMA_CM_ASSERT(rdma_accept, id,
+                   peer_id == my_id_ ? nullptr : &context->conn_param);
+    rdma_ack_cm_event(event);
+  }
+
+  /// This is not live code, we just have it here for reference.  If we wanted
+  /// to handle dropped connections gracefully, we could do something like this
+  /// (but not exactly this).
+  void OnDisconnect(rdma_cm_id *id) {
+    // NB:  The event is already ack'ed by the caller, and the remote peer
+    //      already disconnected, so we just clean up...
+    rdma_disconnect(id);
+    uint32_t peer_id = IdContext::GetNodeId(id->context);
+    auto *event_channel = id->channel;
+    rdma_destroy_ep(id);
+    rdma_destroy_event_channel(event_channel);
+    // ... And don't forget to remove peer_id from the map of connections ...
   }
 
 public:
-  ~RdmaBroker() {
-    [[maybe_unused]] auto s = Stop();
-    rdma_destroy_ep(listen_id_);
-  }
+  /// Construct a Listener by saving its node Id and the function for saving
+  /// connections
+  Listener(uint32_t my_id, std::function<void(uint32_t, Connection *)> saver)
+      : my_id_(my_id), connection_saver(saver) {}
 
-  // Creates a new broker on the given `device` and `port` using the provided
-  // `receiver`. If the initialization fails, then the status is propagated to
-  // the caller. Otherwise, a unique pointer to the newly created `RdmaBroker`
-  // is returned.
-  static std::unique_ptr<RdmaBroker>
-  Create(std::optional<std::string_view> address, std::optional<uint16_t> port,
-         ConnectionManager *receiver) {
-    // TODO: This method is fail-stop in the caller, so instead it should be
-    // fail-stop here
-
-    auto *broker = new RdmaBroker(receiver);
-    auto status = broker->Init(address, port);
-    if (status.t == sss::Ok) {
-      return std::unique_ptr<RdmaBroker>(broker);
-    } else {
-      ROME_ERROR("{}: {}:{}", status.message.value(), address.value_or(""),
-                 port.value_or(-1));
-      return nullptr;
+  /// Initialize a listening endpoint, and then park a thread on it, so the
+  /// thread can receive new connection requests
+  void StartListeningThread(const std::string &address, uint16_t port) {
+    // Don't allow multiple threads at once
+    if (runner_ != nullptr) {
+      ROME_FATAL("Cannot start more than one listener");
     }
+
+    // Create the endpoint, park a thread on it
+    CreateListeningEndpoint(address, port);
+    runner_.reset(new std::thread([&]() { this->HandleConnectionRequests(); }));
   }
 
-  RdmaBroker(const RdmaBroker &) = delete;
-  RdmaBroker(RdmaBroker &&) = delete;
+  /// Stop listening for new connections, and terminate the listening thread
+  ///
+  /// NB: This blocks the caller until the listening thread has been joined
+  void StopListeningThread() {
+    stop_listening_ = true;      // Tell the thread to stop
+    runner_.reset();             // This will join on the thread
+    rdma_destroy_ep(listen_id_); // Now we can destroy the endpoint
+  }
 
-  // Getters.
-  std::string address() const { return address_; }
-  uint16_t port() const { return port_; }
+  /// Report the listener's RDMA protection domain (PD)
+  ///
+  /// TODO: Why not just return it from StartListeningThread?
   ibv_pd *pd() const { return listen_id_->pd; }
 
-  // When shutting down the broker we must be careful. First, we signal to the
-  // connection request handler that we are not accepting new requests.
-  sss::Status Stop() {
-    terminate_ = true;
-    runner_.reset();
-    return status_;
-  }
+  /// Report the listener's address
+  ///
+  /// TODO: Why not just return it from StartListeningThread?
+  std::string address() { return address_; }
 };
 
 } // namespace rome::rdma::internal
