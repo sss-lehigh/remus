@@ -2,7 +2,7 @@
 
 #include <random>
 
-#include "../rdma/rdma.h"
+#include <rome/rdma/rdma.h>
 #include "common.h"
 
 using namespace rome::rdma;

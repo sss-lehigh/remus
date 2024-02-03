@@ -44,13 +44,20 @@ set(CMAKE_CXX_STANDARD ${CXX_STANDARD})
 # all in the `protos` subfolder of the build tree.
 add_subdirectory(protos)
 
+add_library(spdlog_vendor INTERFACE)
+target_include_directories(spdlog_vendor INTERFACE vendor/spdlog-1.12.0)
+
+add_library(rome INTERFACE)
+target_link_libraries(rome INTERFACE protos rdma::ibverbs rdma::cm spdlog_vendor)
+target_include_directories(rome INTERFACE include)
+
 # Now declare the executables to build
 add_executable(iht_rome iht/main.cc)
 add_executable(iht_rome_test iht/test.cc)
 
 # Make the vendored spdlog library easier to include
-target_include_directories(iht_rome PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
-target_include_directories(iht_rome_test PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
+target_link_libraries(iht_rome PUBLIC rome)
+target_link_libraries(iht_rome_test PUBLIC rome)#$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
 
 # Set up the logging level
 target_compile_definitions(iht_rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
@@ -61,5 +68,5 @@ target_compile_definitions(iht_rome_test PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
 # target_compile_options(iht_rome_test PUBLIC -Wall -Wextra -Werror)
 
 # Declare libraries that the targets depend upon
-target_link_libraries(iht_rome PUBLIC protos rdma::ibverbs rdma::cm)
-target_link_libraries(iht_rome_test PUBLIC protos rdma::ibverbs rdma::cm)
+# target_link_libraries(iht_rome PUBLIC protos rdma::ibverbs rdma::cm)
+# target_link_libraries(iht_rome_test PUBLIC protos rdma::ibverbs rdma::cm)

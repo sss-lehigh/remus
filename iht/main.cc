@@ -1,12 +1,12 @@
-#include "../rdma/memory_pool.h"
-
-#include <protos/workloaddriver.pb.h>
 #include <vector>
 
-#include "../logging/logging.h"
+#include <protos/workloaddriver.pb.h>
+#include <rome/rdma/memory_pool.h>
+#include <rome/logging/logging.h>
+#include <rome/rdma/rdma.h>
+
 #include "../vendor/sss/cli.h"
 
-#include "../rdma/rdma.h"
 
 #include "common.h"
 #include "experiment.h"

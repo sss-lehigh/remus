@@ -5,9 +5,9 @@
 #include <protos/experiment.pb.h>
 #include <random>
 
-#include "../colosseum/workload_driver.h"
-#include "../logging/logging.h"
-#include "../rdma/rdma.h"
+#include <rome/colosseum/workload_driver.h>
+#include <rome/logging/logging.h>
+#include <rome/rdma/rdma.h>
 
 #include "common.h"
 #include "experiment.h"
