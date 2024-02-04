@@ -5,13 +5,15 @@
 Rome is a collection of useful utilities for research-oriented programming. 
 This is the ethos of this project, to accumulate helpful tools that can serve as the basis for development.
 
+Remus is Romulus's brother that Romulus killed over disagreeing about where Rome should be.
+Any features here may be killed off at some point before making it to rome, hence the name.
+
 Some current features are:
-* Workload driver library (see `rome/colosseum`) for experimental evaluation
-* Data structures (see `rome/internal`)
+* Workload driver library (see `rome/workload`) for experimental evaluation
 * Logging utilities (see `rome/logging`)
 * Measurements library (see `rome/metrics`)
-* Test utilities (see `rome/testutil`)
-* Sundry other utilities (see `rome/utilitites`)
+* Sundry other utilities that we don't know where to place yet (see `rome/util`)
+* RDMA (see `rome/rdma`)
 
 The wishlist includes:
 * Portability utilities
@@ -20,6 +22,8 @@ The wishlist includes:
 * NUMA utilities
 
 As they say, "Rome wasn't built in a day".
+
+*OLD STUFF BELOW*
 
 # Workload Driver Library (`rome/colosseum`)
 In order to test a system, there must be some kind of workload delivered to it.
