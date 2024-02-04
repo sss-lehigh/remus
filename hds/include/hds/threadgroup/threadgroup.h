@@ -11,6 +11,7 @@
 
 namespace hds::threadgroup {
 
+#if defined(GPU)
 struct warp_threadgroup {
 
   static constexpr inline size_t size = 32;
@@ -103,6 +104,7 @@ struct warp_threadgroup {
 
   cooperative_groups::thread_block_tile<32> warp;
 };
+#endif
 
 struct single_threadgroup {
 

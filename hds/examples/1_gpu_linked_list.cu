@@ -15,7 +15,6 @@ exit(1);
 
 #define ASSERT(x, y) if(!(x)) { printf("%s did not evaluate to true for i = %d\n", #x, (y)); error(); }
 
-#if defined(GPU)
 __global__ void single_thread_test(hds::linked_list<int, 2, hds::allocator::heap_allocator>* ll) {
 
   ll = new (ll) hds::linked_list<int, 2, hds::allocator::heap_allocator>(); 
@@ -82,7 +81,6 @@ __global__ void warp_test(hds::linked_list<int, 32, hds::allocator::heap_allocat
     ll->~linked_list<int, 32, hds::allocator::heap_allocator>(); 
   }
 }
-#endif
 
 int main() {
   hds::linked_list<int, 2, hds::allocator::heap_allocator> ll;
@@ -124,7 +122,6 @@ int main() {
     }
   }
 
-  #if defined(GPU)
   hds::allocator::device_allocator dev_mem;
   hds::linked_list<int, 2, hds::allocator::heap_allocator>* st_gpu_ll;
   st_gpu_ll = dev_mem.allocate<hds::linked_list<int, 2, hds::allocator::heap_allocator>>(1);
@@ -151,12 +148,10 @@ int main() {
   }
   
   dev_mem.deallocate(w_gpu_ll, 1);
-  #endif
 
   return 0;
 }
 
-#if defined(GPU)
 __launch_bounds__(1024, 1)
 __global__ void warp_insert(hds::linked_list<int, 32, hds::allocator::heap_allocator>* ll, int i) {
 
@@ -188,4 +183,3 @@ __global__ void warp_contains(hds::linked_list<int, 32, hds::allocator::heap_all
   ll->contains(i, warp);
  
 }
-#endif

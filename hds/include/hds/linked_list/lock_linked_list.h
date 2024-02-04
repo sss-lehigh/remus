@@ -1,5 +1,6 @@
 #include <type_traits>
 #include <concepts>
+#include <numeric>
 
 #include "../logging/print.h"
 #include "../utility/optional.h"

@@ -11,6 +11,7 @@ public:
 
   template<typename T>
   HDS_HOST_DEVICE T* allocate(size_t amount) {
+    #if defined(GPU)
     T* ptr;
     auto err = cudaMalloc(&ptr, sizeof(T) * amount);
     if (err != cudaSuccess) {
@@ -21,10 +22,14 @@ public:
       #endif
     }
     return ptr;
+    #else
+    return nullptr;
+    #endif
   }
 
   template<typename T>
   HDS_HOST_DEVICE void deallocate(T* ptr, size_t amount) {
+    #if defined(GPU)
     auto err = cudaFree(ptr);
     if (err != cudaSuccess) {
       #if defined(__CUDA_ARCH__)
@@ -33,6 +38,7 @@ public:
       throw std::runtime_error(std::string(cudaGetErrorName(err)) + " : " + std::string(cudaGetErrorString(err)));
       #endif
     }
+    #endif
   }
 
 };

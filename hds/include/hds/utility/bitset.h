@@ -1,6 +1,7 @@
 #include <bit>
 #include <concepts>
 #include <cstdint>
+#include <cassert>
 
 #include "annotations.h"
 #include "types.h"

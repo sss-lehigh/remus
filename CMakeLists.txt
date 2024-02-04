@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.18)
 project(remus LANGUAGES CXX VERSION 0.0.0)
 
 # Options
-option(GPU OFF "Compile for CUDA")
-option(KEEP OFF "Keep ptx and cubin files")
+option(GPU "Compile for CUDA" OFF)
+option(KEEP "Keep ptx and cubin files" OFF)
 
 # Flags
 set(LOG_LEVEL "DEBUG" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
@@ -71,7 +71,5 @@ target_include_directories(rome INTERFACE include)
 
 enable_testing()
 add_subdirectory(iht)
-if(GPU)
-  add_subdirectory(hds)
-endif()
+add_subdirectory(hds)
 
