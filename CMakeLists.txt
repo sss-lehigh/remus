@@ -57,19 +57,36 @@ add_subdirectory(protos) #TODO get rid of this requirement
 add_library(spdlog_vendor INTERFACE) # TODO get rid of this requirement
 target_include_directories(spdlog_vendor INTERFACE vendor/spdlog-1.12.0)
 
+add_library(sss INTERFACE)
+target_include_directories(sss INTERFACE vendor/sss)
+
+## rome::workload
+add_subdirectory(workload)
+
+## rome::logging
+add_subdirectory(logging)
+
+## rome::metrics
+add_subdirectory(metrics)
+
 ## rome::rdma
+add_subdirectory(rdma)
 
-add_library(rome INTERFACE)
-target_link_libraries(rome INTERFACE protos) # Remove this bloat
-target_link_libraries(rome INTERFACE spdlog_vendor) #Remove this bloat
+## rome::util
+add_subdirectory(util)
 
-target_link_libraries(rome INTERFACE rdma::ibverbs rdma::cm) # All we should link to
-target_include_directories(rome INTERFACE include)
+#add_library(rome INTERFACE)
+#target_link_libraries(rome INTERFACE protos) # Remove this bloat
+#target_link_libraries(rome INTERFACE spdlog_vendor) #Remove this bloat
+#target_link_libraries(rome INTERFACE colosseum) #Remove this bloat
+#
+#target_link_libraries(rome INTERFACE rdma::ibverbs rdma::cm) # All we should link to
+#target_include_directories(rome INTERFACE include)
 
 #######################################################################################################################
 ## Examples
 
 enable_testing()
-add_subdirectory(iht)
-add_subdirectory(hds)
+add_subdirectory(examples/iht)
+add_subdirectory(examples/hds)
 
