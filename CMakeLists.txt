@@ -1,55 +1,63 @@
-# Declare boilerplat cmake stuff: minimum version, project name
 cmake_minimum_required(VERSION 3.18)
-project(IHT_Rome LANGUAGES CXX VERSION 0.0.0)
+project(remus LANGUAGES CXX VERSION 0.0.0)
 
-# Declare flags that the user can override
+# Options
+option(GPU OFF "Compile for CUDA")
+option(KEEP OFF "Keep ptx and cubin files")
+
+# Flags
 set(LOG_LEVEL "DEBUG" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
-set(CXX_STANDARD 23 CACHE STRING "Uses C++20 or 23")
+set(CXX_STANDARD 20 CACHE STRING "Uses C++20 or 23")
+set(CUDA_ARCHITECTURES "70;75;80;86;89;90" CACHE STRING "CUDA architectures to compile for")
 
-# Ensure that the protobuf compiler is available
-find_package(Protobuf REQUIRED)
-message(STATUS "Using protobuf version ${Protobuf_VERSION}")
+#######################################################################################################################
+# Setup
 
-# Use a custom rule (in `cmake/`) to find the ibverbs and rdmacm libraries.
-# NB: The rule prints a message, so we don't need a `message()` here
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-find_package(RDMA REQUIRED)
+if(GPU)
+  enable_language(CUDA)
+endif()
+
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+message(STATUS "Using standard ${CXX_STANDARD}")
+
+set(CMAKE_CXX_STANDARD ${CXX_STANDARD})
+set(CMAKE_CUDA_STANDARD ${CXX_STANDARD})
+set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCHITECTURES})
+
+if(KEEP)
+  add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--keep>)
+endif()
 
 # Ensure the LOG_LEVEL is correct
 set(LOG_LEVELS "TRACE;DEBUG;INFO;WARN;ERROR;CRITICAL;OFF")
 foreach(L ${LOG_LEVELS})
-    if("${LOG_LEVEL}" STREQUAL "${L}")
-        set(CORRECT_LOG_LEVEL TRUE)
-    endif()
+  if("${LOG_LEVEL}" STREQUAL "${L}")
+    set(CORRECT_LOG_LEVEL TRUE)
+  endif()
 endforeach()
 if(NOT DEFINED CORRECT_LOG_LEVEL)
-    message(FATAL_ERROR "LOG_LEVEL must be one of ${LOG_LEVELS}") 
+  message(FATAL_ERROR "LOG_LEVEL must be one of ${LOG_LEVELS}") 
 endif()
 message(STATUS "Using LOG_LEVEL=${LOG_LEVEL}")
 
-# Ensure requested C++ is modern enough, then turn on that CXX standard
-set(CXX_STANDARDS "20;23")
-foreach(S ${CXX_STANDARDS})
-    if("${CXX_STANDARD}" STREQUAL "${S}")
-        set(CORRECT_CXX_STANDARD TRUE)
-    endif()
-endforeach()
-if(NOT DEFINED CORRECT_CXX_STANDARD)
-    message(FATAL_ERROR "CXX_STANDARD must be one of ${CXX_STANDARDS}") 
-endif()
-message(STATUS "Using CXX_STANDARD=${CXX_STANDARD}")
-set(CMAKE_CXX_STANDARD ${CXX_STANDARD})
+# Use a custom rule (in `cmake/`) to find the ibverbs and rdmacm libraries.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+find_package(RDMA REQUIRED)
 
-# Compile `protos/*.proto` into headers and a static library (.a), putting them
-# all in the `protos` subfolder of the build tree.
-add_subdirectory(protos)
+find_package(Protobuf REQUIRED)
+message(STATUS "Using protobuf version ${Protobuf_VERSION}")
 
-add_library(spdlog_vendor INTERFACE)
+#######################################################################################################################
+## Libraries
+
+add_subdirectory(protos) #TODO get rid of this requirement
+
+add_library(spdlog_vendor INTERFACE) # TODO get rid of this requirement
 target_include_directories(spdlog_vendor INTERFACE vendor/spdlog-1.12.0)
 
-#####
-
-# This is the rome repo, it should be as minimal as possible
+## rome::rdma
 
 add_library(rome INTERFACE)
 target_link_libraries(rome INTERFACE protos) # Remove this bloat
@@ -58,24 +66,12 @@ target_link_libraries(rome INTERFACE spdlog_vendor) #Remove this bloat
 target_link_libraries(rome INTERFACE rdma::ibverbs rdma::cm) # All we should link to
 target_include_directories(rome INTERFACE include)
 
-####
+#######################################################################################################################
+## Examples
 
-# Now declare the executables to build
-add_executable(iht_rome iht/main.cc)
-add_executable(iht_rome_test iht/test.cc)
+enable_testing()
+add_subdirectory(iht)
+if(GPU)
+  add_subdirectory(hds)
+endif()
 
-# Make the vendored spdlog library easier to include
-target_link_libraries(iht_rome PUBLIC rome)
-target_link_libraries(iht_rome_test PUBLIC rome)#$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/../vendor/spdlog-1.12.0>)
-
-# Set up the logging level
-target_compile_definitions(iht_rome PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
-target_compile_definitions(iht_rome_test PUBLIC ROME_LOG_LEVEL=${LOG_LEVEL})
-
-# Use these if you want to turn on warnings during compilation
-# target_compile_options(iht_rome PUBLIC -Wall -Wextra -Werror)
-# target_compile_options(iht_rome_test PUBLIC -Wall -Wextra -Werror)
-
-# Declare libraries that the targets depend upon
-# target_link_libraries(iht_rome PUBLIC protos rdma::ibverbs rdma::cm)
-# target_link_libraries(iht_rome_test PUBLIC protos rdma::ibverbs rdma::cm)

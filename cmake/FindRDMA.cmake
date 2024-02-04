@@ -2,6 +2,8 @@ if(TARGET rdma::ibverbs)
     return()
 endif()
 
+include(CheckLibraryExists)
+
 CHECK_LIBRARY_EXISTS(ibverbs ibv_create_qp "" _HAVE_IBVERBS)
 CHECK_LIBRARY_EXISTS(rdmacm rdma_create_id "" _HAVE_RDMACM)
 
