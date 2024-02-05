@@ -18,3 +18,6 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include)
 
 add_library(rome::rdma ALIAS rdma)
 
+add_executable(loopback_test test/loopback.cc)
+target_link_libraries(loopback_test PRIVATE rdma)
+
