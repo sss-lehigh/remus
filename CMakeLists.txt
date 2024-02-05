@@ -4,6 +4,7 @@ project(remus LANGUAGES CXX VERSION 0.0.0)
 # Options
 option(GPU "Compile for CUDA" OFF)
 option(KEEP "Keep ptx and cubin files" OFF)
+option(DOCS "Set to build documentation" OFF)
 
 # Flags
 set(LOG_LEVEL "DEBUG" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
@@ -15,6 +16,7 @@ set(CUDA_ARCHITECTURES "70;75;80;86;89;90" CACHE STRING "CUDA architectures to c
 
 if(GPU)
   enable_language(CUDA)
+  message(STATUS "Using host compiler - ${CMAKE_CUDA_HOST_COMPILER}")
 endif()
 
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
@@ -42,6 +44,14 @@ if(NOT DEFINED CORRECT_LOG_LEVEL)
 endif()
 message(STATUS "Using LOG_LEVEL=${LOG_LEVEL}")
 
+if(DOCS)
+    find_package(Doxygen REQUIRED)  # use doxygen for building docs
+    add_custom_target(docs ALL
+        COMMAND ${DOXYGEN_EXECUTABLE} ${PROJECT_SOURCE_DIR}/Doxyfile
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        COMMENT "Generating docs through doxygen")    
+endif()
+
 # Use a custom rule (in `cmake/`) to find the ibverbs and rdmacm libraries.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(RDMA REQUIRED)
@@ -49,16 +59,29 @@ find_package(RDMA REQUIRED)
 find_package(Protobuf REQUIRED)
 message(STATUS "Using protobuf version ${Protobuf_VERSION}")
 
+find_package(fmt 8.1...<8.2 REQUIRED) # defines fmt::fmt
+
+message(STATUS "Using fmt version ${fmt_VERSION}")
+
+find_package(spdlog 1.9...<1.10 REQUIRED) #defines spdlog::spdlog
+message(STATUS "Using spdlog version ${spdlog_VERSION}")
+
 #######################################################################################################################
 ## Libraries
 
 add_subdirectory(protos) #TODO get rid of this requirement
 
-add_library(spdlog_vendor INTERFACE) # TODO get rid of this requirement
-target_include_directories(spdlog_vendor INTERFACE vendor/spdlog-1.12.0)
+#add_library(spdlog_vendor INTERFACE) # TODO get rid of this requirement
+#target_include_directories(spdlog_vendor INTERFACE 
+#                           $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/vendor/spdlog-1.12.0>
+#                           $<INSTALL_INTERFACE:include>)
+#install(DIRECTORY ${PROJECT_SOURCE_DIR}/vendor/spdlog-1.12.0 DESTINATION include) 
 
 add_library(sss INTERFACE)
-target_include_directories(sss INTERFACE vendor/sss)
+target_include_directories(sss INTERFACE 
+                           $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/vendor/sss>
+                           $<INSTALL_INTERFACE:include>)
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/vendor/sss/sss DESTINATION include) 
 
 ## rome::workload
 add_subdirectory(workload)
@@ -75,13 +98,48 @@ add_subdirectory(rdma)
 ## rome::util
 add_subdirectory(util)
 
-#add_library(rome INTERFACE)
-#target_link_libraries(rome INTERFACE protos) # Remove this bloat
-#target_link_libraries(rome INTERFACE spdlog_vendor) #Remove this bloat
-#target_link_libraries(rome INTERFACE colosseum) #Remove this bloat
-#
-#target_link_libraries(rome INTERFACE rdma::ibverbs rdma::cm) # All we should link to
-#target_include_directories(rome INTERFACE include)
+
+#######################################################################################################################
+## Install
+
+install(TARGETS workload logging metrics rdma util sss protos 
+                EXPORT romeTargets
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        RUNTIME DESTINATION bin
+        INCLUDES DESTINATION include)
+
+# install the include dirs
+install(FILES ${PROJECT_SOURCE_DIR}/protos/experiment.proto DESTINATION protos)
+install(FILES ${PROJECT_SOURCE_DIR}/protos/rdma.proto DESTINATION protos)
+install(FILES ${PROJECT_SOURCE_DIR}/protos/metrics.proto DESTINATION protos)
+install(FILES ${PROJECT_SOURCE_DIR}/protos/workloaddriver.proto DESTINATION protos)
+# install protos for reuse
+
+install(EXPORT romeTargets
+        FILE romeTargets.cmake
+        NAMESPACE rome::
+        DESTINATION lib/cmake)
+
+install(FILES ${PROJECT_SOURCE_DIR}/share/romeConfig.cmake DESTINATION lib/cmake)
+
+install(FILES ${PROJECT_SOURCE_DIR}/cmake/FindRDMA.cmake DESTINATION lib/cmake)
+install(FILES ${PROJECT_SOURCE_DIR}/cmake/FindCoroutines.cmake DESTINATION lib/cmake)
+
+#######################################################################################################################
+## DEB Package
+
+set(CPACK_PACKAGE_VENDOR "Scalable Systems and Software Lab")
+SET(CPACK_GENERATOR "DEB")
+SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Scalable Systems and Software Lab")
+set(CPACK_SOURCE_GENERATOR "TGZ;ZIP")
+set(CPACK_SOURCE_IGNORE_FILES
+        /.git
+        /dist
+        /.*build.*
+        /\\\\.DS_Store
+        )
+include(CPack)
 
 #######################################################################################################################
 ## Examples

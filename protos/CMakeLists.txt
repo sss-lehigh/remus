@@ -1,6 +1,7 @@
 set(Protobuf_IMPORT_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/..)
 #protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS metrics.proto colosseum.proto testutil.proto)  
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS metrics.proto workloaddriver.proto experiment.proto rdma.proto)
+install(FILES ${PROTO_HDRS} DESTINATION include/protos)
 
 add_library(protos STATIC ${PROTO_SRCS})
 add_library(rome::protos ALIAS protos)
