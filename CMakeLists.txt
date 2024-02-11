@@ -5,6 +5,7 @@ project(remus LANGUAGES CXX VERSION 0.0.0)
 option(GPU "Compile for CUDA" OFF)
 option(KEEP "Keep ptx and cubin files" OFF)
 option(DOCS "Set to build documentation" OFF)
+option(NUMA "Set to enable numa library support" OFF)
 
 # Flags
 set(LOG_LEVEL "DEBUG" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
@@ -66,6 +67,13 @@ message(STATUS "Using fmt version ${fmt_VERSION}")
 find_package(spdlog 1.9...<1.10 REQUIRED) #defines spdlog::spdlog
 message(STATUS "Using spdlog version ${spdlog_VERSION}")
 
+if(NUMA)
+  message(STATUS "NUMA support enabled")
+  find_package(NUMA REQUIRED)
+endif()
+
+enable_testing()
+
 #######################################################################################################################
 ## Libraries
 
@@ -97,6 +105,10 @@ add_subdirectory(rdma)
 
 ## rome::util
 add_subdirectory(util)
+
+if(NUMA)
+  add_subdirectory(numa)
+endif()
 
 
 #######################################################################################################################
@@ -144,7 +156,6 @@ include(CPack)
 #######################################################################################################################
 ## Examples
 
-enable_testing()
 add_subdirectory(examples/iht)
 add_subdirectory(examples/hds)
 
