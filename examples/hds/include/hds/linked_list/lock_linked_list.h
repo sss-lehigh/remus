@@ -383,9 +383,9 @@ private:
   struct node {
 
     HDS_HOST_DEVICE static node* init_locked_node(node* n) {
-      atomic_ref(n->lock_).store(1, memory_order_relaxed);
-      atomic_ref(n->present).store(0, memory_order_relaxed);
-      atomic_ref(n->next_).store(nullptr, memory_order_relaxed);
+      atomic_ref<uint64_t>(n->lock_).store(1, memory_order_relaxed);
+      atomic_ref<utility::uint32_bitset<N>>(n->present).store(0, memory_order_relaxed);
+      atomic_ref<node*>(n->next_).store(nullptr, memory_order_relaxed);
       return n;
     }
 
@@ -397,11 +397,11 @@ private:
       Tiling<std::remove_cvref_t<Group>::size> tile{};
       TemporaryData<std::remove_cvref_t<Group>::size> result;
 
-      auto tmp = atomic_ref(present).load(memory_order_relaxed);
+      auto tmp = atomic_ref<utility::uint32_bitset<N>>(present).load(memory_order_relaxed);
       
       if constexpr (tile(N / std::remove_cvref_t<Group>::size - 1, std::remove_cvref_t<Group>::size - 1) < N) {
         for(int i = 0; i < N / std::remove_cvref_t<Group>::size; ++i) {
-          result.regs[i] = atomic_ref(values[tile(i, group.thread_rank())]).load(memory_order_relaxed);
+          result.regs[i] = atomic_ref<T>(values[tile(i, group.thread_rank())]).load(memory_order_relaxed);
         }
         
         for(int i = 0; i < N / std::remove_cvref_t<Group>::size; ++i) {
@@ -412,7 +412,7 @@ private:
 
         for(int i = 0; i < N / std::remove_cvref_t<Group>::size; ++i) {
           if(tiling(i, group.thread_rank()) < N) {
-            result.regs[i] = atomic_ref(values[tile(i, group.thread_rank())]).load(memory_order_relaxed);
+            result.regs[i] = atomic_ref<T>(values[tile(i, group.thread_rank())]).load(memory_order_relaxed);
           }
         }
         
@@ -483,22 +483,22 @@ private:
     }
 
     HDS_HOST_DEVICE void set(int offset, T x) {
-      atomic_ref(values[offset]).store(x, memory_order_relaxed);
+      atomic_ref<T>(values[offset]).store(x, memory_order_relaxed);
 
-      auto tmp = atomic_ref(present).load(memory_order_relaxed);
+      auto tmp = atomic_ref<utility::uint32_bitset<N>>(present).load(memory_order_relaxed);
       tmp.set(offset, true);
 
-      atomic_ref(present).store(tmp, memory_order_relaxed);
+      atomic_ref<utility::uint32_bitset<N>>(present).store(tmp, memory_order_relaxed);
     }
 
     HDS_HOST_DEVICE void remove(int offset) {
-      auto tmp = atomic_ref(present).load(memory_order_relaxed);
+      auto tmp = atomic_ref<utility::uint32_bitset<N>>(present).load(memory_order_relaxed);
       tmp.set(offset, false);
-      atomic_ref(present).store(tmp, memory_order_relaxed);
+      atomic_ref<utility::uint32_bitset<N>>(present).store(tmp, memory_order_relaxed);
     }
 
     HDS_HOST_DEVICE bool is_empty() {
-      auto tmp = atomic_ref(present).load(memory_order_relaxed);
+      auto tmp = atomic_ref<utility::uint32_bitset<N>>(present).load(memory_order_relaxed);
 
       for (int i = 0; i < N; ++i) {
         if (tmp.get(i)) {
@@ -602,10 +602,14 @@ private:
 
       if(group.is_leader()) {
 
-        atomic_ref(left->present).store(bits, memory_order_relaxed);
-        uint32_t xored_bits = static_cast<uint32_t>(bits) ^ static_cast<uint32_t>(atomic_ref(present).load(memory_order_relaxed));
+        atomic_ref<utility::uint32_bitset<N>>(left->present).store(bits, memory_order_relaxed);
+        uint32_t xored_bits = static_cast<uint32_t>(bits) ^ 
+                              static_cast<uint32_t>(
+                                atomic_ref<utility::uint32_bitset<N>>(present).load(memory_order_relaxed)
+                              );
+
         auto new_present = utility::uint32_bitset<N>(xored_bits);
-        atomic_ref(present).store(new_present, memory_order_seq_cst);
+        atomic_ref<utility::uint32_bitset<N>>(present).store(new_present, memory_order_seq_cst);
 
         for(int i = 0; i < N; ++i) {
           if(!bits.get(i)) {
@@ -624,20 +628,20 @@ private:
 
     template<typename Group>
     HDS_HOST_DEVICE node* next(TemporaryData<std::remove_cvref_t<Group>::size>& result, Group&& group) {
-      return atomic_ref(next_).load(memory_order_relaxed);
+      return atomic_ref<node*>(next_).load(memory_order_relaxed);
     }
 
     template<typename Group>
     HDS_HOST_DEVICE node* next(Group&& group) {
-      return atomic_ref(next_).load(memory_order_relaxed);
+      return atomic_ref<node*>(next_).load(memory_order_relaxed);
     }
 
     HDS_HOST_DEVICE node* unsafe_next() {
-      return atomic_ref(next_).load(memory_order_relaxed);
+      return atomic_ref<node*>(next_).load(memory_order_relaxed);
     }
 
     HDS_HOST_DEVICE void store_next(node* val) {
-      atomic_ref(next_).store(val, memory_order_relaxed);
+      atomic_ref<node*>(next_).store(val, memory_order_relaxed);
     }
 
     template<typename Group>
@@ -651,10 +655,10 @@ private:
     HDS_HOST_DEVICE void lock_unsync_leader() {
       while(true) {
         uint64_t expected = 0;
-        if (atomic_ref(lock_).compare_exchange_strong(expected, 1, memory_order_acq_rel)) {
+        if (atomic_ref<uint64_t>(lock_).compare_exchange_strong(expected, 1, memory_order_acq_rel)) {
           return;
         }
-        while(!atomic_ref(lock_).load(memory_order_relaxed) == 0) {
+        while(atomic_ref<uint64_t>(lock_).load(memory_order_relaxed) != 0) {
           #if (defined(__x86_64__) || defined(_M_X64)) && !defined(__CUDA_ARCH__)
           __builtin_ia32_pause();
           #endif
@@ -677,7 +681,7 @@ private:
     }
  
     HDS_HOST_DEVICE void unlock_unsync_leader() {
-      atomic_ref(lock_).store(0, memory_order_release);
+      atomic_ref<uint64_t>(lock_).store(0, memory_order_release);
     }   
 
     template<typename Group>
