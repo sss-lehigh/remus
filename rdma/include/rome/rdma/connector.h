@@ -244,6 +244,9 @@ public:
         ROME_FATAL("ibv_query_port(): "s + strerror(errno));
       }
       attr.ah_attr.dlid = port_attr.lid;
+
+      ROME_ASSERT_DEBUG(port_attr.lid != 0x0, "LID of port uses reserved number");
+
       attr.qp_state = IBV_QPS_RTR;
       attr.dest_qp_num = id->qp->qp_num;
       attr.ah_attr.port_num = LOOPBACK_PORT_NUM;
