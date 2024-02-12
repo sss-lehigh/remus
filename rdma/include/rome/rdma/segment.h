@@ -8,8 +8,6 @@
 #include <sys/mman.h>
 #include <variant>
 
-#include <sss/status.h>
-
 #include "rome/logging/logging.h"
 
 namespace rome::rdma::internal {

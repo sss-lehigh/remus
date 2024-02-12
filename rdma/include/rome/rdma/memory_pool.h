@@ -21,8 +21,7 @@
 #include <spdlog/fmt/fmt.h> // [mfs] Used in remote_ptr... factor away?
 #include <vector>
 
-#include <sss/status.h>
-
+#include "rome/util/status.h"
 #include "rome/logging/logging.h"
 #include "rome/metrics/summary.h"
 

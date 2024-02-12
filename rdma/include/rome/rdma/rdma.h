@@ -160,7 +160,7 @@ public:
     for (const auto &p : peers) {
       auto conn = connection_manager_->GetConnection(p.id);
       auto status = conn->Send(rm_proto);
-      if (status.t != sss::Ok) {
+      if (status.t != rome::util::Ok) {
         ROME_FATAL(status.message.value());
       }
     }
@@ -170,7 +170,7 @@ public:
     for (const auto &p : peers) {
       auto conn = connection_manager_->GetConnection(p.id);
       auto got = conn->template Deliver<RemoteObjectProto>();
-      if (got.status.t != sss::Ok) {
+      if (got.status.t != rome::util::Ok) {
         ROME_FATAL(got.status.message.value());
       }
       // [mfs] I don't understand why we use mr_->lkey?
@@ -219,13 +219,13 @@ public:
   }
 
   /// Do a blocking Send() to another machine
-  template <class T> sss::Status Send(const Peer &to, T &proto) {
+  template <class T> rome::util::Status Send(const Peer &to, T &proto) {
     auto conn = connection_manager_->GetConnection(to.id);
     return conn->Send(proto);
   }
 
   /// Do a blocking Recv() from another machine
-  template <class T> sss::StatusVal<T> Recv(const Peer &from) {
+  template <class T> rome::util::StatusVal<T> Recv(const Peer &from) {
     // Listen for a connection
     auto conn = connection_manager_->GetConnection(from.id);
     auto got = conn->Deliver<T>();

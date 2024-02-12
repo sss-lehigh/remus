@@ -38,7 +38,7 @@ public:
 
   MetricProto ToProto() override;
 
-  sss::Status Accumulate(const sss::StatusVal<Counter<T>> &other) override;
+  rome::util::Status Accumulate(const rome::util::StatusVal<Counter<T>> &other) override;
 
 private:
   T counter_;
@@ -105,15 +105,15 @@ template <typename T> MetricProto Counter<T>::ToProto() {
 }
 
 template <typename T>
-sss::Status Counter<T>::Accumulate(const sss::StatusVal<Counter<T>> &other) {
-  if (other.status.t != sss::Ok)
+rome::util::Status Counter<T>::Accumulate(const rome::util::StatusVal<Counter<T>> &other) {
+  if (other.status.t != rome::util::Ok)
     return other.status;
   if (!(name_ == other.val.value().name_)) {
-    return {sss::FailedPrecondition,
+    return {rome::util::FailedPrecondition,
             "Counter name does not match: " + other.val.value().name_};
   }
   operator+=(other.val.value().counter_);
-  return sss::Status::Ok();
+  return rome::util::Status::Ok();
 }
 
 } // namespace rome::metrics

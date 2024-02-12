@@ -27,7 +27,8 @@
 /// SocketManager
 #define TCP_MESSAGE_SIZE 32
 
-namespace tcp {
+/// TCP library
+namespace rome::util::tcp {
 /// @brief A struct as a standard for communicating as a server-client. It has
 /// the capability to store 4 64-bit ints. In practice, I've only needed one,
 /// but the extra space could come in handy.

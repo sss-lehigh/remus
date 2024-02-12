@@ -6,7 +6,7 @@
 #include <vector>
 
 #include <rome/logging/logging.h>
-#include "sss/cli.h"
+#include <rome/util/cli.h>
 
 #include <rome/rdma/rdma.h>
 
@@ -16,9 +16,9 @@
 #include "role_server.h"
 
 auto ARGS = {
-    sss::BOOL_ARG_OPT("--send_bulk",
+    rome::util::BOOL_ARG_OPT("--send_bulk",
                       "If to run test operations multithreaded"),
-    sss::BOOL_ARG_OPT("--send_test",
+    rome::util::BOOL_ARG_OPT("--send_test",
                       "If to test the functionality of the methods"),
 };
 
@@ -34,7 +34,7 @@ using namespace rome::rdma;
 int main(int argc, char **argv) {
   ROME_INIT_LOG();
 
-  sss::ArgMap args;
+  rome::util::ArgMap args;
   // import_args will validate that the newly added args don't conflict with
   // those already added.
   auto res = args.import_args(ARGS);

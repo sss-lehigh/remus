@@ -90,7 +90,7 @@ class Connection {
   /// TODO: Should this be fail-stop?
   template<typename T>
     requires std::ranges::contiguous_range<T>
-  sss::Status SendMessage(T&& msg) {
+  rome::util::Status SendMessage(T&& msg) {
 
     static_assert(std::ranges::sized_range<T>);
 
@@ -103,7 +103,7 @@ class Connection {
     // what we know locally instead of doing something fancy to ask the
     // remote node.
     if (msg_size >= kRecvMaxBytes) {
-      sss::Status err = {sss::ResourceExhausted, ""};
+      rome::util::Status err = {rome::util::ResourceExhausted, ""};
       err << "Message too large: expected<=" << kRecvMaxBytes
           << ", actual=" << msg_size;
       return err;
@@ -138,7 +138,7 @@ class Connection {
     wr.wr_id = send_total_++;
     ibv_send_wr *bad_wr;
     if (ibv_post_send(id_->qp, &wr, &bad_wr) != 0) {
-      sss::Status err = {sss::InternalError, ""};
+      rome::util::Status err = {rome::util::InternalError, ""};
       err << "ibv_post_send(): " << strerror(errno);
       return err;
     }
@@ -153,32 +153,32 @@ class Connection {
       comps = rdma_get_send_comp(id_, &wc);
     }
     if (comps < 0) {
-      sss::Status e = {sss::InternalError, {}};
+      rome::util::Status e = {rome::util::InternalError, {}};
       return e << "rdma_get_send_comp: {}" << strerror(errno);
     } else if (wc.status != IBV_WC_SUCCESS) {
-      sss::Status e = {sss::InternalError, {}};
+      rome::util::Status e = {rome::util::InternalError, {}};
       return e << "rdma_get_send_comp(): " << ibv_wc_status_str(wc.status);
     }
     send_next_ += msg_size;
-    return sss::Status::Ok();
+    return rome::util::Status::Ok();
   }
 
   /// Internal method for receiving a Message (byte array) over RDMA as a
   /// two-sided operation.
   /// TODO is it possible we already know the message size we expect to serialize?
-  sss::StatusVal<std::vector<uint8_t>> TryDeliverMessage() {
+  rome::util::StatusVal<std::vector<uint8_t>> TryDeliverMessage() {
     ibv_wc wc;
     auto ret = rdma_get_recv_comp(id_, &wc);
     if (ret < 0 && errno != EAGAIN) {
-      sss::Status e = {sss::InternalError, {}};
+      rome::util::Status e = {rome::util::InternalError, {}};
       e << "rdma_get_recv_comp: " << strerror(errno);
       return {e, {}};
     } else if (ret < 0 && errno == EAGAIN) {
-      return {{sss::Unavailable, "Retry"}, {}};
+      return {{rome::util::Unavailable, "Retry"}, {}};
     } else {
       switch (wc.status) {
       case IBV_WC_WR_FLUSH_ERR:
-        return {{sss::Aborted, "QP in error state"}, {}};
+        return {{rome::util::Aborted, "QP in error state"}, {}};
       case IBV_WC_SUCCESS: {
 
         // [dsm] This may be fine now?
@@ -197,8 +197,8 @@ class Connection {
 
         std::span<uint8_t> recv_span{recv_next_, wc.byte_len};
 
-        sss::StatusVal<std::vector<uint8_t>> res = {
-            sss::Status::Ok(),
+        rome::util::StatusVal<std::vector<uint8_t>> res = {
+            rome::util::Status::Ok(),
             std::make_optional(std::vector<uint8_t>(recv_span.begin(), recv_span.end()))};
 
         ROME_TRACE("{} {}", res.val->data(), res.val->size());
@@ -215,7 +215,7 @@ class Connection {
         return res;
       }
       default: {
-        sss::Status err = {sss::InternalError, {}};
+        rome::util::Status err = {rome::util::InternalError, {}};
         err << "rdma_get_recv_comp(): " << ibv_wc_status_str(wc.status);
         return {err, {}};
       }
@@ -241,19 +241,19 @@ class Connection {
   }
 
   template <typename ProtoType> 
-  sss::StatusVal<ProtoType> TryDeliver() {
-    sss::StatusVal<std::vector<uint8_t>> msg_or = TryDeliverMessage();
-    if (msg_or.status.t == sss::Ok) {
+  rome::util::StatusVal<ProtoType> TryDeliver() {
+    rome::util::StatusVal<std::vector<uint8_t>> msg_or = TryDeliverMessage();
+    if (msg_or.status.t == rome::util::Ok) {
       ProtoType proto;
       proto.ParseFromArray(msg_or.val.value().data(),
                            msg_or.val.value().size());
-      return {sss::Status::Ok(), proto};
+      return {rome::util::Status::Ok(), proto};
     } else {
       return {msg_or.status, {}};
     }
   }
 
-  sss::StatusVal<std::vector<uint8_t>> TryDeliverBytes() {
+  rome::util::StatusVal<std::vector<uint8_t>> TryDeliverBytes() {
     return TryDeliverMessage();
   }
 
@@ -273,7 +273,7 @@ public:
   Connection(Connection &&c) = delete;
 
   template <typename ProtoType> 
-  sss::Status Send(const ProtoType &proto) {
+  rome::util::Status Send(const ProtoType &proto) {
     // two callers.  One is fail-stop.  The other is never called in IHT.  Can
     // this be fail-stop?
     std::string str = proto.SerializeAsString();
@@ -282,23 +282,23 @@ public:
 
   template <typename T> 
     requires std::ranges::contiguous_range<T>
-  sss::Status Send(T&& msg) {
+  rome::util::Status Send(T&& msg) {
     return SendMessage(std::forward<T>(msg));
   }
 
   // TODO: rename to Recv?
   template <typename ProtoType> 
-  sss::StatusVal<ProtoType> Deliver() {
+  rome::util::StatusVal<ProtoType> Deliver() {
     auto p = this->TryDeliver<ProtoType>();
-    while (p.status.t == sss::Unavailable) {
+    while (p.status.t == rome::util::Unavailable) {
       p = this->TryDeliver<ProtoType>();
     }
     return p;
   }
 
-  sss::StatusVal<std::vector<uint8_t>> DeliverBytes() {
+  rome::util::StatusVal<std::vector<uint8_t>> DeliverBytes() {
     auto p = this->TryDeliverBytes();
-    while (p.status.t == sss::Unavailable) {
+    while (p.status.t == rome::util::Unavailable) {
       p = this->TryDeliverBytes();
     }
     return p;

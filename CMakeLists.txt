@@ -85,12 +85,6 @@ add_subdirectory(protos) #TODO get rid of this requirement
 #                           $<INSTALL_INTERFACE:include>)
 #install(DIRECTORY ${PROJECT_SOURCE_DIR}/vendor/spdlog-1.12.0 DESTINATION include) 
 
-add_library(sss INTERFACE)
-target_include_directories(sss INTERFACE 
-                           $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/vendor/sss>
-                           $<INSTALL_INTERFACE:include>)
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/vendor/sss/sss DESTINATION include) 
-
 ## rome::workload
 add_subdirectory(workload)
 
@@ -114,7 +108,7 @@ endif()
 #######################################################################################################################
 ## Install
 
-install(TARGETS workload logging metrics rdma util sss protos 
+install(TARGETS workload logging metrics rdma util protos 
                 EXPORT romeTargets
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib

@@ -5,7 +5,7 @@
 
 #include <protos/metrics.pb.h>
 
-#include <sss/status.h>
+#include "rome/util/status.h"
 
 namespace rome::metrics {
 
@@ -26,7 +26,7 @@ protected:
 template <typename T> class Accumulator {
 public:
   virtual ~Accumulator() = default;
-  virtual sss::Status Accumulate(const sss::StatusVal<T> &other) = 0;
+  virtual rome::util::Status Accumulate(const rome::util::StatusVal<T> &other) = 0;
 };
 
 } // namespace rome::metrics

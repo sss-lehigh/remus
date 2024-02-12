@@ -4,7 +4,7 @@
 #include <sstream>
 #include <string>
 
-namespace sss {
+namespace rome::util {
 enum StatusType {
   Ok,
   InternalError,
@@ -42,4 +42,4 @@ template <class T> struct StatusVal {
   Status status;
   std::optional<T> val;
 };
-} // namespace sss
+} // namespace rome::util

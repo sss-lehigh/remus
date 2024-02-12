@@ -10,7 +10,7 @@
 #include <string>
 #include <variant>
 
-namespace sss {
+namespace rome::util {
 
 /// @brief  A tuple that describes a command-line argument and its value.
 ///         Supported types are int64_t, double, bool, and std::string.
@@ -256,4 +256,4 @@ public:
     return std::get<std::string>(args.find(flag)->second.value.value());
   }
 };
-} // namespace sss
+} // namespace rome::util

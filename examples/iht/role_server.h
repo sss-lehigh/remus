@@ -23,7 +23,7 @@ namespace ExperimentManager {
 ///            function to allow for things such as remote deallocation.
 /// [esl]      TODO: the code in this file is small, it could be moved to main?
 /// @return ok status
-inline void ClientStopBarrier(tcp::SocketManager &socket_handle,
+inline void ClientStopBarrier(rome::util::tcp::SocketManager &socket_handle,
                               int runtime_s) {
   // Sleep while clients are running if there is a set runtime.
   if (runtime_s > 0) {
@@ -40,13 +40,13 @@ inline void ClientStopBarrier(tcp::SocketManager &socket_handle,
   // server-client (one->many relationship)
 
   // Receive a message from all clients to sync
-  tcp::message recv_buffer[socket_handle.num_clients()];
+  rome::util::tcp::message recv_buffer[socket_handle.num_clients()];
   socket_handle.recv_from_all(recv_buffer);
   ROME_DEBUG("SERVER :: received ack");
 
   // Once we receive a message from everyone, everyone is done
   // So we now send an OK to exit message
-  tcp::message send_buffer;
+  rome::util::tcp::message send_buffer;
   socket_handle.send_to_all(&send_buffer);
   ROME_DEBUG("SERVER :: sent ack");
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "sss/cli.h"
+#include <rome/util/cli.h>
 
 /// An object to hold the experimental params
 /// @param node_id The node's id. (nodeX in cloudlab should have X in this option)
@@ -47,7 +47,7 @@ public:
 
     BenchmarkParams(){}
 
-    BenchmarkParams(sss::ArgMap args){
+    BenchmarkParams(rome::util::ArgMap args){
         node_id = args.iget("--node_id");
         runtime = args.iget("--runtime");
         unlimited_stream = args.bget("--unlimited_stream");

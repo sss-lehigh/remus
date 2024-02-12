@@ -37,19 +37,19 @@ namespace rome {
 template <template <typename> typename ClientAdapter, typename Operation>
 concept IsClientAdapter =
     requires(ClientAdapter<Operation> c, const Operation o, bool b) {
-      { c.Start() } -> std::same_as<sss::Status>;
-      { c.Apply(o) } -> std::same_as<sss::Status>;
-      { c.Stop() } -> std::same_as<sss::Status>;
-      { c.Operations(b) } -> std::same_as<sss::Status>;
+      { c.Start() } -> std::same_as<util::Status>;
+      { c.Apply(o) } -> std::same_as<util::Status>;
+      { c.Stop() } -> std::same_as<util::Status>;
+      { c.Operations(b) } -> std::same_as<util::Status>;
     };
 
 namespace {
-inline sss::Status StreamTerminatedStatus() {
-  return {sss::StreamTerminated, "Stream terminated"};
+inline util::Status StreamTerminatedStatus() {
+  return {util::StreamTerminated, "Stream terminated"};
 }
 
-inline bool IsStreamTerminated(const sss::Status &status) {
-  return status.t == sss::StreamTerminated;
+inline bool IsStreamTerminated(const util::Status &status) {
+  return status.t == util::StreamTerminated;
 }
 } // namespace
 
@@ -74,7 +74,7 @@ public:
   Stream(const Stream &) = delete;
   Stream(Stream &&) = default;
 
-  sss::StatusVal<T> Next() __attribute__((always_inline)) {
+  util::StatusVal<T> Next() __attribute__((always_inline)) {
     if (!terminated_) {
       return NextInternal();
     } else {
@@ -85,7 +85,7 @@ public:
   void Terminate() { terminated_ = true; }
 
 private:
-  virtual sss::StatusVal<T> NextInternal() __attribute__((always_inline)) = 0;
+  virtual util::StatusVal<T> NextInternal() __attribute__((always_inline)) = 0;
 
   bool terminated_;
 };
@@ -96,13 +96,13 @@ public:
       : output_(input), iter_(output_.begin()) {}
 
 private:
-  sss::StatusVal<T> NextInternal() override {
+  util::StatusVal<T> NextInternal() override {
     auto curr = iter_;
     if (curr == output_.end()) {
       return {StreamTerminatedStatus(), {}};
     }
     iter_++; // Only advance `iter_` if not at the end.
-    return {sss::Status::Ok(), *curr};
+    return {util::Status::Ok(), *curr};
   }
   std::vector<T> output_;
   typename std::vector<T>::iterator iter_;
@@ -114,8 +114,8 @@ public:
 
 private:
   std::function<T(void)> generator_;
-  inline sss::StatusVal<T> NextInternal() override {
-    return {sss::Status::Ok(), generator_()};
+  inline util::StatusVal<T> NextInternal() override {
+    return {util::Status::Ok(), generator_()};
   }
 };
 
@@ -128,12 +128,12 @@ private:
   std::function<T(void)> generator_;
   int length_;
   int count_;
-  inline sss::StatusVal<T> NextInternal() override {
+  inline util::StatusVal<T> NextInternal() override {
     count_++;
     if (length_ < count_) {
       return {StreamTerminatedStatus(), {}};
     }
-    return {sss::Status::Ok(), generator_()};
+    return {util::Status::Ok(), generator_()};
   }
 };
 
@@ -164,7 +164,7 @@ class WorkloadDriver {
   std::chrono::milliseconds lat_sampling_rate_;
   metrics::Summary<double> lat_summary_;
 
-  std::future<sss::Status> run_status_;
+  std::future<util::Status> run_status_;
   std::unique_ptr<std::thread> run_thread_;
 
   WorkloadDriver(std::unique_ptr<ClientAdapter<OpType>> client,
@@ -199,27 +199,27 @@ public:
   // `stream_` and passed to `client_`'s `Apply` method. The client will
   // handle operations until either the given stream is exhausted or `Stop` is
   // called.
-  sss::Status Start() {
+  util::Status Start() {
     if (terminated_) {
-      return {sss::Unavailable, "Cannot restart a terminated workload driver."};
+      return {util::Unavailable, "Cannot restart a terminated workload driver."};
     }
 
-    auto task = std::packaged_task<sss::Status()>(
+    auto task = std::packaged_task<util::Status()>(
         std::bind(&WorkloadDriver::Run, this));
     run_status_ = task.get_future();
     run_thread_ = std::make_unique<std::thread>(std::move(task));
     while (!running_)
       ;
-    return sss::Status::Ok();
+    return util::Status::Ok();
   }
 
   // Stops the workload driver so no new requests are passed to the client.
   // Then, the client's `Stop` method is called so that any pending operations
   // can be finalized.
-  sss::Status Stop() {
+  util::Status Stop() {
     ROME_INFO("Stopping Workload Driver...");
     if (terminated_) {
-      return {sss::Unavailable, "Workload driver was already terminated"};
+      return {util::Unavailable, "Workload driver was already terminated"};
     }
 
     // Signal `run_thread_` to stop. After joining the thread, it is guaranteed
@@ -227,9 +227,9 @@ public:
     terminated_ = true;
     run_status_.wait();
 
-    if (run_status_.get().t != sss::Ok)
+    if (run_status_.get().t != util::Ok)
       return run_status_.get();
-    return sss::Status::Ok();
+    return util::Status::Ok();
   }
 
   metrics::Stopwatch *GetStopwatch() { return stopwatch_.get(); }
@@ -253,16 +253,16 @@ public:
   }
 
 private:
-  sss::Status Run() {
+  util::Status Run() {
     auto status = client_->Start();
-    if (status.t != sss::Ok)
+    if (status.t != util::Ok)
       return status;
     stopwatch_ = metrics::Stopwatch::Create("driver_stopwatch");
     running_ = true;
 
     while (!terminated_) {
       auto next_op = stream_->Next();
-      if (next_op.status.t != sss::Ok) {
+      if (next_op.status.t != util::Ok) {
         if (!IsStreamTerminated(next_op.status)) {
           status = next_op.status;
         }
@@ -280,7 +280,7 @@ private:
                 curr_lap.GetRuntimeNanoseconds().count());
       }
 
-      if (client_status.t != sss::Ok) {
+      if (client_status.t != util::Ok) {
         status = client_status;
         break;
       }

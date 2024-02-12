@@ -1,6 +1,6 @@
 #pragma once
 
-#include <sss/status.h>
+#include "rome/util/status.h"
 
 #define TRACE 0
 #define DEBUG 1
@@ -117,19 +117,19 @@ inline void __rome_init_log__() {
   }
 
 #define OK_OR_FAIL(status)                                                     \
-  if (auto __s = status; !(__s.t == sss::Ok)) [[unlikely]] {                   \
+  if (auto __s = status; !(__s.t == rome::util::Ok)) [[unlikely]] {            \
     SPDLOG_CRITICAL(__s.message.value());                                      \
     std::terminate();                                                          \
   }
 
 #define RETURN_STATUS_ON_ERROR(status)                                         \
-  if (!(status.t == sss::Ok)) [[unlikely]] {                                   \
+  if (!(status.t == rome::util::Ok)) [[unlikely]] {                            \
     SPDLOG_ERROR(status.message.value());                                      \
     return status;                                                             \
   }
 
 #define RETURN_STATUSVAL_ON_ERROR(sv)                                          \
-  if (!(sv.status.t == sss::Ok)) [[unlikely]] {                                \
+  if (!(sv.status.t == rome::util::Ok)) [[unlikely]] {                         \
     SPDLOG_ERROR(sv.status.message.value());                                   \
     return sv.status;                                                          \
   }
@@ -147,7 +147,7 @@ inline void __rome_init_log__() {
 #endif
 
 #define STATUSVAL_OR_DIE(__s)                                                  \
-  if (!(__s.status.t == sss::Ok)) {                                            \
+  if (!(__s.status.t == rome::util::Ok)) {                                     \
     ROME_FATAL(__s.status.message.value());                                    \
   }
 
@@ -155,7 +155,7 @@ inline void __rome_init_log__() {
   {                                                                            \
     int ret = func(__VA_ARGS__);                                               \
     if (ret != 0) {                                                            \
-      sss::Status err = {sss::InternalError, ""};                              \
+      rome::util::Status err = {rome::util::InternalError, ""};                \
       err << #func << "(): " << strerror(errno);                               \
       return err;                                                              \
     }                                                                          \
@@ -165,7 +165,7 @@ inline void __rome_init_log__() {
   {                                                                            \
     int ret = func(__VA_ARGS__);                                               \
     if (ret != 0) {                                                            \
-      sss::Status err = {sss::InternalError, ""};                              \
+      rome::util::Status err = {rome::util::InternalError, ""};                \
       err << #func << "(): " << strerror(errno);                               \
       return {err, {}};                                                        \
     }                                                                          \

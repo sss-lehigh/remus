@@ -6,7 +6,8 @@
 #include <sstream>
 #include <type_traits>
 
-#include <sss/status.h>
+#include "rome/util/status.h"
+
 #include "atree/atree.h"
 #include "metric.h"
 
@@ -61,7 +62,7 @@ public:
 
   Summary &operator<<(const T &value);
 
-  sss::Status Accumulate(const sss::StatusVal<Summary<T>> &other) override;
+  rome::util::Status Accumulate(const rome::util::StatusVal<Summary<T>> &other) override;
 
   std::string ToString() override;
 
@@ -104,7 +105,7 @@ private:
   class PercentileAccessor {
   public:
     template <typename ATreeType>
-    sss::StatusVal<typename ATreeType::node_type *>
+    rome::util::StatusVal<typename ATreeType::node_type *>
     FindNthPercentile(const ATreeType &tree, double n);
 
     template <typename ATreeType> int GetSize(const ATreeType &tree);
@@ -177,7 +178,7 @@ template <typename T> void Summary<T>::UpdatePercentilesAndClearSamples() {
 template <typename T> void Summary<T>::UpdatePercentile(double p) {
   PercentileAccessor accessor;
   auto node_or = accessor.FindNthPercentile(samples_, p);
-  if (node_or.status.t != sss::Ok)
+  if (node_or.status.t != rome::util::Ok)
     exit(1);
   auto value = double(node_or.val.value()->key());
   if (p == 0.0) {
@@ -245,7 +246,7 @@ template <typename T> double Summary<T>::GetPercentileInternal(double p) {
 
 template <typename T>
 template <typename ATreeType>
-sss::StatusVal<typename ATreeType::node_type *>
+rome::util::StatusVal<typename ATreeType::node_type *>
 Summary<T>::PercentileAccessor::FindNthPercentile(const ATreeType &tree,
                                                   double percentile) {
   if (percentile > 100.0 || percentile < 0.0) {
@@ -271,7 +272,7 @@ Summary<T>::PercentileAccessor::FindNthPercentile(const ATreeType &tree,
         (left != nullptr ? left->metadata() : 0) < rank) {
       // If the rank lies somewhere excluding the right subtree, and does not
       // include the left subtree then it must be this node.
-      return {sss::Status::Ok(), curr};
+      return {rome::util::Status::Ok(), curr};
     } else if (left != nullptr && left->metadata() >= rank) {
       // If there are `rank` nodes smaller than this node, the n-th node must be
       // in the left subtree.
@@ -288,7 +289,7 @@ Summary<T>::PercentileAccessor::FindNthPercentile(const ATreeType &tree,
     right = curr->right();
   }
   assert(curr->metadata() >= rank);
-  return {sss::Status::Ok(), curr};
+  return {rome::util::Status::Ok(), curr};
 }
 
 template <typename T>
@@ -302,13 +303,13 @@ int Summary<T>::PercentileAccessor::GetSize(const ATreeType &tree) {
 }
 
 template <typename T>
-sss::Status Summary<T>::Accumulate(const sss::StatusVal<Summary<T>> &other) {
-  if (other.status.t != sss::Ok)
+rome::util::Status Summary<T>::Accumulate(const rome::util::StatusVal<Summary<T>> &other) {
+  if (other.status.t != rome::util::Ok)
     return other.status;
 
   auto d = other.val.value();
   if (d.name_ != name_) {
-    return {sss::FailedPrecondition, "Unexpected metric ID"};
+    return {rome::util::FailedPrecondition, "Unexpected metric ID"};
   }
 
   // Compute the weighted average of the two distribution statistics.
@@ -331,7 +332,7 @@ sss::Status Summary<T>::Accumulate(const sss::StatusVal<Summary<T>> &other) {
            double(total_samples_ + d.total_samples_);
   variance_ += (d.variance_ * d.total_samples_ - variance_ * total_samples_) /
                double(total_samples_ + d.total_samples_);
-  return sss::Status::Ok();
+  return rome::util::Status::Ok();
 }
 
 template <typename T> std::string Summary<T>::ToString() {
