@@ -1,26 +1,16 @@
 #pragma once
 
-// TODO: Do we still need all these includes?
 #include <arpa/inet.h>
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <exception>
-#include <fcntl.h>
-#include <infiniband/verbs.h>
 #include <limits>
-#include <memory>
 #include <netdb.h>
-#include <optional>
 #include <rdma/rdma_cma.h>
 #include <rdma/rdma_verbs.h>
-#include <string>
-#include <vector>
-
-#include <sss/status.h>
-
-#include "rome/logging/logging.h"
+#include <ranges>
+#include <span>
 
 #include "connection_utils.h"
 #include "segment.h"
@@ -50,16 +40,10 @@ class Connection {
   /// TODO: We need to think more carefully about the design.  Right now, the
   ///       public interface of Send/Recv only allows for transmitting protos.
   ///       It also seems that those protos have a fixed maximum size, which is
-  ///       determined by the sizes of pinned memory regions.  Thus it might be
-  ///       possible for threads to pre-allocate a small number of Messages, and
-  ///       not need the allocator overhead that this Message type introduces.
+  ///       determined by the sizes of pinned memory regions.  
   ///
   /// TODO: OTOH, we don't really use Send/Recv much, so maybe it doesn't
   ///       matter?
-  struct Message {
-    std::unique_ptr<uint8_t[]> buffer; // The data
-    size_t length;                     // The size of the buffer of data
-  };
 
   // TODO: Should these constants migrate to connection_utils.h?
 
@@ -104,15 +88,24 @@ class Connection {
   ///       internally?
   ///
   /// TODO: Should this be fail-stop?
-  sss::Status SendMessage(const Message &msg) {
+  template<typename T>
+    requires std::ranges::contiguous_range<T>
+  sss::Status SendMessage(T&& msg) {
+
+    static_assert(std::ranges::sized_range<T>);
+
+    auto msg_ptr = std::ranges::data(std::forward<T>(msg));
+    auto msg_elements = std::ranges::size(std::forward<T>(msg)); // elements
+    auto msg_size = msg_elements * sizeof(decltype(*msg_ptr)); // bytes
+
     // The proto we send may not be larger than the maximum size received at
     // the peer. We assume that everyone uses the same value, so we check
     // what we know locally instead of doing something fancy to ask the
     // remote node.
-    if (msg.length >= kRecvMaxBytes) {
+    if (msg_size >= kRecvMaxBytes) {
       sss::Status err = {sss::ResourceExhausted, ""};
       err << "Message too large: expected<=" << kRecvMaxBytes
-          << ", actual=" << msg.length;
+          << ", actual=" << msg_size;
       return err;
     }
 
@@ -120,18 +113,18 @@ class Connection {
     // the head pointer to the beginning.
     //
     // TODO: Are we sure there are no pending completions on it?
-    auto tail = send_next_ + msg.length;
+    auto tail = send_next_ + msg_size;
     auto end = send_base_ + kCapacity;
     if (tail > end) {
       send_next_ = send_base_;
     }
-    std::memcpy(send_next_, msg.buffer.get(), msg.length);
+    std::memcpy(send_next_, msg_ptr, msg_size); // TODO can this be subsituted with std::ranges::copy?
 
     // Copy the proto into the send buffer.
     ibv_sge sge;
     std::memset(&sge, 0, sizeof(sge));
     sge.addr = reinterpret_cast<uint64_t>(send_next_);
-    sge.length = msg.length;
+    sge.length = msg_size;
     sge.lkey = send_seg_.mr()->lkey;
 
     // Note that we use a custom `ibv_send_wr` here since we want to add an
@@ -166,13 +159,14 @@ class Connection {
       sss::Status e = {sss::InternalError, {}};
       return e << "rdma_get_send_comp(): " << ibv_wc_status_str(wc.status);
     }
-    send_next_ += msg.length;
+    send_next_ += msg_size;
     return sss::Status::Ok();
   }
 
   /// Internal method for receiving a Message (byte array) over RDMA as a
   /// two-sided operation.
-  sss::StatusVal<Message> TryDeliverMessage() {
+  /// TODO is it possible we already know the message size we expect to serialize?
+  sss::StatusVal<std::vector<uint8_t>> TryDeliverMessage() {
     ibv_wc wc;
     auto ret = rdma_get_recv_comp(id_, &wc);
     if (ret < 0 && errno != EAGAIN) {
@@ -186,6 +180,10 @@ class Connection {
       case IBV_WC_WR_FLUSH_ERR:
         return {{sss::Aborted, "QP in error state"}, {}};
       case IBV_WC_SUCCESS: {
+
+        // [dsm] This may be fine now?
+        // vvvvv
+
         // Prepare the response.
         //
         // [mfs] It looks like there's a lot of copying baked into the API?
@@ -196,12 +194,14 @@ class Connection {
         //        might be better to refactor Message to make it moveable and
         //        construct in a series of steps instead of one long
         //        statement...
-        sss::StatusVal<Message> res = {
+
+        std::span<uint8_t> recv_span{recv_next_, wc.byte_len};
+
+        sss::StatusVal<std::vector<uint8_t>> res = {
             sss::Status::Ok(),
-            std::make_optional(Message{std::make_unique<uint8_t[]>(wc.byte_len),
-                                       wc.byte_len})};
-        std::memcpy(res.val->buffer.get(), recv_next_, wc.byte_len);
-        ROME_TRACE("{} {}", res.val->buffer.get(), res.val->length);
+            std::make_optional(std::vector<uint8_t>(recv_span.begin(), recv_span.end()))};
+
+        ROME_TRACE("{} {}", res.val->data(), res.val->size());
 
         // If the tail reached the end of the receive buffer then all posted
         // wrs have been consumed and we can post new ones.
@@ -240,16 +240,21 @@ class Connection {
     recv_next_ = recv_base_;
   }
 
-  template <typename ProtoType> sss::StatusVal<ProtoType> TryDeliver() {
-    auto msg_or = TryDeliverMessage();
+  template <typename ProtoType> 
+  sss::StatusVal<ProtoType> TryDeliver() {
+    sss::StatusVal<std::vector<uint8_t>> msg_or = TryDeliverMessage();
     if (msg_or.status.t == sss::Ok) {
       ProtoType proto;
-      proto.ParseFromArray(msg_or.val.value().buffer.get(),
-                           msg_or.val.value().length);
+      proto.ParseFromArray(msg_or.val.value().data(),
+                           msg_or.val.value().size());
       return {sss::Status::Ok(), proto};
     } else {
       return {msg_or.status, {}};
     }
+  }
+
+  sss::StatusVal<std::vector<uint8_t>> TryDeliverBytes() {
+    return TryDeliverMessage();
   }
 
 public:
@@ -267,20 +272,34 @@ public:
   Connection(const Connection &) = delete;
   Connection(Connection &&c) = delete;
 
-  template <typename ProtoType> sss::Status Send(const ProtoType &proto) {
+  template <typename ProtoType> 
+  sss::Status Send(const ProtoType &proto) {
     // two callers.  One is fail-stop.  The other is never called in IHT.  Can
     // this be fail-stop?
-    Message msg{std::make_unique<uint8_t[]>(proto.ByteSizeLong()),
-                proto.ByteSizeLong()};
-    proto.SerializeToArray(msg.buffer.get(), msg.length);
-    return SendMessage(msg);
+    std::string str = proto.SerializeAsString();
+    return SendMessage(str);
+  }
+
+  template <typename T> 
+    requires std::ranges::contiguous_range<T>
+  sss::Status Send(T&& msg) {
+    return SendMessage(std::forward<T>(msg));
   }
 
   // TODO: rename to Recv?
-  template <typename ProtoType> sss::StatusVal<ProtoType> Deliver() {
+  template <typename ProtoType> 
+  sss::StatusVal<ProtoType> Deliver() {
     auto p = this->TryDeliver<ProtoType>();
     while (p.status.t == sss::Unavailable) {
       p = this->TryDeliver<ProtoType>();
+    }
+    return p;
+  }
+
+  sss::StatusVal<std::vector<uint8_t>> DeliverBytes() {
+    auto p = this->TryDeliverBytes();
+    while (p.status.t == sss::Unavailable) {
+      p = this->TryDeliverBytes();
     }
     return p;
   }
