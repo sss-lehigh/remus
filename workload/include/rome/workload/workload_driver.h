@@ -15,6 +15,7 @@
 #include "rome/metrics/counter.h"
 #include "rome/metrics/stopwatch.h"
 #include "rome/metrics/summary.h"
+#include "rome/metrics/workload_driver_result.h"
 
 namespace rome {
 
@@ -243,6 +244,16 @@ public:
     return ss.str();
   }
 
+  metrics::WorkloadDriverResult ToMetrics(){
+    metrics::WorkloadDriverResult result;
+    result.ops = ops_.ToMetrics();
+    result.runtime = stopwatch_->ToMetrics();
+    result.qps = qps_summary_.ToMetrics();
+    result.latency = lat_summary_.ToMetrics();
+    return result;
+  }
+
+  [[deprecated("Use ToMetrics() instead")]]
   WorkloadDriverProto ToProto() {
     WorkloadDriverProto proto;
     proto.mutable_ops()->CopyFrom(ops_.ToProto());

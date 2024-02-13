@@ -28,12 +28,16 @@ set -e # Halt the script on any error
 # WARNING:  Order matters for the machines, because there is an implicit
 #           conversion to names like node0, node1, etc.  Be sure to follow the
 #           order in the CloudLab "List View" for your experiment.
-machines=(apt083 apt073 ) #apt085)
+machines=(apt137 apt148) #apt149) #apt085)
 domain=apt.emulab.net
 
 # The user who is going to be using ssh/scp to connect to cloudlab.  It is
 # expected that keys are already set up.
 user=depaulm
+
+for machine in ${machines[@]}; do
+  ssh $user@$machine.$domain echo "Connected"
+done
 
 # The executable file that needs to be sent over to cloudlab
 exefile="./build/examples/iht/iht_rome"

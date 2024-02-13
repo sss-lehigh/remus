@@ -9,7 +9,7 @@
 #include "rome/util/status.h"
 
 #include "atree/atree.h"
-#include "metric.h"
+#include "abstract_metric.h"
 
 namespace rome::metrics {
 
@@ -67,6 +67,8 @@ public:
   std::string ToString() override;
 
   MetricProto ToProto() override;
+
+  Metrics ToMetrics() override;
 
 private:
   // A visitor that counts the total number of values in the subtree rooted by a
@@ -371,6 +373,25 @@ template <typename T> MetricProto Summary<T>::ToProto() {
   summary->set_p999(p999_);
   summary->set_max(max_);
   return proto;
+}
+
+template <typename T> Metrics Summary<T>::ToMetrics(){
+  UpdatePercentilesAndClearSamples();
+  Metrics result = Metrics(MetricType::Summary);
+  result.name = name_;
+  shared_ptr<SummaryMetric> summary = result.try_get_summary();
+  summary->units = units_;
+  summary->count = total_samples_;
+  summary->mean = mean_;
+  summary->stddev = std::sqrt(variance_);
+  summary->min = min_;
+  summary->p50 = p50_;
+  summary->p90 = p90_;
+  summary->p95 = p95_;
+  summary->p99 = p99_;
+  summary->p999 = p999_;
+  summary->max = max_;
+  return result;
 }
 
 } // namespace rome::metrics

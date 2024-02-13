@@ -12,7 +12,7 @@
 #include <string_view>
 
 #include "rome/logging/logging.h"
-#include "metric.h"
+#include "abstract_metric.h"
 
 namespace rome::metrics {
 
@@ -139,6 +139,13 @@ public:
     proto.set_name(name_);
     proto.mutable_stopwatch()->set_runtime_ns(GetRuntimeNanoseconds().count());
     return proto;
+  }
+
+  Metrics ToMetrics() override {
+    Metrics result = Metrics(MetricType::Stopwatch);
+    result.name = name_;
+    result.try_get_stopwatch()->runtime_ns = GetRuntimeNanoseconds().count();
+    return result;
   }
 
 private:

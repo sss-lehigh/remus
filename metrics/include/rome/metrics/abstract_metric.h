@@ -1,10 +1,10 @@
 #pragma once
 
+#include "metrics_object.h"
 #include <ostream>
 #include <vector>
 
 #include <protos/metrics.pb.h>
-
 #include "rome/util/status.h"
 
 namespace rome::metrics {
@@ -15,6 +15,7 @@ public:
   virtual ~Metric() = default;
   virtual std::string ToString() = 0;
   virtual MetricProto ToProto() = 0;
+  virtual Metrics ToMetrics() = 0;
   friend std::ostream &operator<<(std::ostream &os, Metric &metric) {
     return os << "name: \"" << metric.name_ << "\", " << metric.ToString();
   };

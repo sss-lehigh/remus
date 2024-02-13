@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "metric.h"
+#include "abstract_metric.h"
 
 namespace rome::metrics {
 
@@ -37,6 +37,8 @@ public:
   std::string ToString() override;
 
   MetricProto ToProto() override;
+
+  Metrics ToMetrics() override;
 
   rome::util::Status Accumulate(const rome::util::StatusVal<Counter<T>> &other) override;
 
@@ -102,6 +104,13 @@ template <typename T> MetricProto Counter<T>::ToProto() {
   proto.set_name(name_);
   proto.mutable_counter()->set_count(counter_);
   return proto;
+}
+
+template <typename T> Metrics Counter<T>::ToMetrics() {
+  Metrics result = Metrics(MetricType::Counter);
+  result.name = name_;
+  result.try_get_counter()->counter = counter_;
+  return result;
 }
 
 template <typename T>

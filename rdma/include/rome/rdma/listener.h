@@ -7,6 +7,7 @@
 
 #include "rome/logging/logging.h"
 #include "connection_utils.h"
+#include "connection.h"
 
 namespace rome::rdma::internal {
 
