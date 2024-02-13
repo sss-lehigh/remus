@@ -28,7 +28,7 @@ set -e # Halt the script on any error
 # WARNING:  Order matters for the machines, because there is an implicit
 #           conversion to names like node0, node1, etc.  Be sure to follow the
 #           order in the CloudLab "List View" for your experiment.
-machines=(apt137 apt148) #apt149) #apt085)
+machines=(apt137 apt148 apt149) #apt085)
 domain=apt.emulab.net
 
 # The user who is going to be using ssh/scp to connect to cloudlab.  It is
@@ -145,6 +145,11 @@ for i in `seq 0 ${last_valid_index}`
 do
     echo "screen -t node${i} ssh ${user}@${machines[$i]}.${domain} ./${exename} --node_count ${num_nodes} --node_id ${i} --runtime 10 --op_count 0 --contains 80 --insert 10 --remove 10 --key_lb 0 --key_ub 10000 --region_size 25 --thread_count 1 --qp_max 1 --unlimited_stream; bash" >> ${screenrc_run}
     echo "screen -t node${i} ssh ${user}@${machines[$i]}.${domain}" >> ${screenrc_dev}
+done
+
+for machine in ${machines[@]}; do
+  echo "$machine:"
+  ssh $user@$machine.$domain ibv_devinfo
 done
 
 # Provide some instructions

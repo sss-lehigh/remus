@@ -16,10 +16,10 @@
 
 namespace rome::rdma::internal {
 
+
+
 /// Connector is a utility class for establishing connections among nodes
 class Connector {
-  /// The port number to use when configuring the loopback device
-  static constexpr uint32_t LOOPBACK_PORT_NUM = 1;
 
   /// Minimum value, in us, for exponential backoff
   static constexpr uint32_t kMinBackoffUs = 100;
@@ -231,6 +231,39 @@ public:
       ROME_ASSERT_DEBUG(id->qp != nullptr, "No QP associated with endpoint");
       ROME_TRACE("[Connect] (Node {}) Trying to connect to: {} (id={})", my_id_,
                  peer_id, fmt::ptr(id));
+
+      //
+      // Created a connection with the device now lets query the ports to find
+      // one that works for us and use that
+      //
+
+      ibv_device_attr dev_attr;
+      if (ibv_query_device(id->verbs, &dev_attr) != 0) {
+        ROME_FATAL("ibv_query_device(): "s + strerror(errno));
+      }
+
+      ROME_TRACE("Found device has "s + std::to_string(dev_attr.phys_port_cnt) + " ports"s); 
+
+      ibv_port_attr port_attr;
+      uint32_t LOOPBACK_PORT_NUM = 1;
+
+      // use first port that is active for loopback
+      for(int i = 1; i <= dev_attr.phys_port_cnt; ++i) {
+        if (ibv_query_port(id->verbs, i, &port_attr) != 0) {
+          ROME_FATAL("ibv_query_port(): "s + strerror(errno));
+        }
+        if (port_attr.state == IBV_PORT_ACTIVE) {
+          LOOPBACK_PORT_NUM = i;
+          ROME_DEBUG("Using physical port "s + std::to_string(i) 
+                     + " for loopback"s);
+          break;
+        }
+      }
+
+
+      //
+      //
+
       ibv_qp_attr attr = DefaultQpAttr();
       attr.qp_state = IBV_QPS_INIT;
       attr.port_num = LOOPBACK_PORT_NUM;
@@ -239,17 +272,48 @@ public:
       if (ibv_modify_qp(id->qp, &attr, attr_mask) != 0) {
         ROME_FATAL("ibv_modify_qp(): "s + strerror(errno));
       }
-      ibv_port_attr port_attr;
-      if (ibv_query_port(id->verbs, LOOPBACK_PORT_NUM, &port_attr) != 0) {
-        ROME_FATAL("ibv_query_port(): "s + strerror(errno));
-      }
-      attr.ah_attr.dlid = port_attr.lid;
 
-      ROME_ASSERT_DEBUG(port_attr.lid != 0x0, "LID of port uses reserved number");
+      attr.ah_attr.dlid = port_attr.lid;
+      attr.ah_attr.port_num = LOOPBACK_PORT_NUM;
+
+      if(port_attr.lid == 0x0 or
+         (port_attr.flags | IBV_QPF_GRH_REQUIRED) != 0) {
+
+        ROME_DEBUG("Creating a GRH is necessary");
+
+        // This LID is invalid and likely RoCE, so this is a hack to
+        // get around that or the GRH is required regardless
+        
+        // Our address handle has a global route
+        attr.ah_attr.is_global = 1;
+
+        // We query the first GID, which should always exist
+        // There may be others, but I don't think that should impact
+        // anything for us
+        // We can go from gid = 0 to gid = port_attr.gid_table_len - 1
+        ROME_ASSERT(port_attr.gid_tbl_len >= 1, 
+                    "Need a gid table that has at least one entry");
+        ibv_gid gid;
+        if (ibv_query_gid(id->verbs, LOOPBACK_PORT_NUM, 0, &gid)) {
+          ROME_FATAL("Fail on query gid"s);
+        }
+
+        // Set our gid
+        attr.ah_attr.grh.dgid = gid;
+        // we set our gid to the gid index we queried 
+        attr.ah_attr.grh.sgid_index = 0;
+        // allow for the max number of hops 
+        attr.ah_attr.grh.hop_limit = 0xFF;
+        attr.ah_attr.grh.traffic_class = 0; // some trafic class
+        // non-zero is support to give a hint to switches
+        // but we dont care; this is loopback
+        attr.ah_attr.grh.flow_label = 0;
+      }
+
+      //ROME_ASSERT_DEBUG(port_attr.lid != 0x0, "LID of port uses reserved number");
 
       attr.qp_state = IBV_QPS_RTR;
       attr.dest_qp_num = id->qp->qp_num;
-      attr.ah_attr.port_num = LOOPBACK_PORT_NUM;
       attr_mask =
           (IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
            IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);

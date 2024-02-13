@@ -22,7 +22,7 @@ int main() {
 
   ROME_INIT_LOG();
 
-  rome::rdma::Peer node0 = rome::rdma::Peer(0, "127.0.0.1", (child ? 8081 : 8080));
+  rome::rdma::Peer node0 = rome::rdma::Peer(0, "node0", (child ? 8081 : 8080));
   //rome::rdma::Peer node1 = rome::rdma::Peer(1, "127.0.0.1", (child ? 8080 : 8081));
 
   rome::rdma::Peer host = node0;
