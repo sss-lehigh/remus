@@ -76,6 +76,8 @@ class Listener {
       ROME_FATAL("rdma_getaddrinfo(): "s + gai_strerror(gai_ret));
     }
 
+    ROME_ASSERT(resolved != nullptr, "Did not find an appropriate RNIC");
+
     // Create an endpoint to receive incoming requests
     ibv_qp_init_attr init_attr = {0};
     init_attr.cap.max_send_wr = init_attr.cap.max_recv_wr = 16;
@@ -84,9 +86,11 @@ class Listener {
     init_attr.sq_sig_all = 1;
     auto err = rdma_create_ep(&listen_id_, resolved, nullptr, &init_attr);
     rdma_freeaddrinfo(resolved);
-    if (err) {
+    if (err != 0) {
       ROME_FATAL("rdma_create_ep(): "s + strerror(errno));
     }
+
+    ROME_ASSERT(listen_id_->pd != nullptr, "Should initialize a protection domain");
 
     // Migrate the new endpoint to an async channel
     listen_channel_ = rdma_create_event_channel();
