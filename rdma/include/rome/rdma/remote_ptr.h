@@ -52,19 +52,57 @@ public:
     raw_ = 0;
   }
 
-  // Increment operator
+  /// Increment operator
   remote_ptr &operator+=(size_t s) {
     const auto address = (raw_ + (sizeof(element_type) * s)) & kAddressBitmask;
     raw_ = (raw_ & kIdBitmask) | address;
     return *this;
   }
+
+  /// Increment operator
+  remote_ptr operator+(size_t s) {
+    remote_ptr new_ptr = *this;
+    new_ptr += s;
+    return new_ptr;
+  }
+
+  /// Pre-increment
   remote_ptr &operator++() {
     *this += 1;
     return *this;
   }
+
+  /// Post-increment
   remote_ptr operator++(int) {
     remote_ptr prev = *this;
     *this += 1;
+    return prev;
+  }
+
+  /// Decrement operator
+  remote_ptr &operator-=(size_t s) {
+    const auto address = (raw_ - (sizeof(element_type) * s)) & kAddressBitmask;
+    raw_ = (raw_ & kIdBitmask) | address;
+    return *this;
+  }
+  
+  /// Decrement operator
+  remote_ptr operator-(size_t s) {
+    remote_ptr new_ptr = *this;
+    new_ptr -= s;
+    return new_ptr;
+  }
+
+  /// Pre-decrement
+  remote_ptr &operator--() {
+    *this -= 1;
+    return *this;
+  }
+
+  /// Post-decrement
+  remote_ptr operator--(int) {
+    remote_ptr prev = *this;
+    *this -= 1;
     return prev;
   }
 
