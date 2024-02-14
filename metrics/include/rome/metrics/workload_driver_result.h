@@ -1,8 +1,8 @@
 #pragma once
 
+#include <nlohmann/json.hpp>
+
 #include "metrics_object.h"
-#include "../vendor/json-3.11.2/json.hpp"
-// https://github.com/nlohmann/json
 
 namespace rome::metrics {
 

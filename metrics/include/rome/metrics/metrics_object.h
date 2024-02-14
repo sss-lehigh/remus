@@ -4,10 +4,9 @@
 #include <memory>
 #include <string>
 #include <optional>
+#include <nlohmann/json.hpp>
 
 #include "rome/logging/logging.h"
-#include "../vendor/json-3.11.2/json.hpp"
-// https://github.com/nlohmann/json
 
 using namespace std;
 using namespace nlohmann;

@@ -5,6 +5,7 @@ target_include_directories(metrics INTERFACE
                            $<INSTALL_INTERFACE:include>)
 target_link_libraries(metrics INTERFACE protos) # TODO Remove this bloat
 target_link_libraries(metrics INTERFACE logging util)
+target_link_libraries(metrics INTERFACE nlohmann_json::nlohmann_json)
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include) 
 

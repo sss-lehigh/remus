@@ -277,7 +277,7 @@ public:
       attr.ah_attr.port_num = LOOPBACK_PORT_NUM;
 
       if(port_attr.lid == 0x0 or
-         (port_attr.flags | IBV_QPF_GRH_REQUIRED) != 0) {
+         (port_attr.flags & IBV_QPF_GRH_REQUIRED) != 0) {
 
         ROME_DEBUG("Creating a GRH is necessary");
 

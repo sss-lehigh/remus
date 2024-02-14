@@ -57,7 +57,7 @@ screenrc_dev=dev.screenrc
 # Names of packages that we need in order to run the code
 #
 # NB: It's a big string, because that's easier later :)
-package_deps="protobuf-compiler librdmacm-dev ibverbs-utils libspdlog-dev libfmt-dev"
+package_deps="protobuf-compiler librdmacm-dev ibverbs-utils libspdlog-dev libfmt-dev nlohmann-json3-dev"
 
 #
 # This section has internal configuration code.  You shouldn't need to edit it.

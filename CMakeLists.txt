@@ -67,6 +67,9 @@ message(STATUS "Using fmt version ${fmt_VERSION}")
 find_package(spdlog 1.9...<1.10 REQUIRED) #defines spdlog::spdlog
 message(STATUS "Using spdlog version ${spdlog_VERSION}")
 
+find_package(nlohmann_json REQUIRED) # should use 3.10 or 3.11
+message(STATUS "Using nlohmann_json version ${nlohmann_json_VERSION}")
+
 if(NUMA)
   message(STATUS "NUMA support enabled")
   find_package(NUMA REQUIRED)
@@ -108,12 +111,29 @@ endif()
 #######################################################################################################################
 ## Install
 
-install(TARGETS workload logging metrics rdma util protos 
-                EXPORT romeTargets
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib
-        RUNTIME DESTINATION bin
-        INCLUDES DESTINATION include)
+if(NUMA)
+
+  install(TARGETS workload logging metrics rdma util protos numa
+                  EXPORT romeTargets
+          LIBRARY DESTINATION lib
+          ARCHIVE DESTINATION lib
+          RUNTIME DESTINATION bin
+          INCLUDES DESTINATION include)
+  
+  install(FILES ${PROJECT_SOURCE_DIR}/cmake/FindNUMA.cmake DESTINATION lib/cmake/)
+  install(FILES ${PROJECT_SOURCE_DIR}/share/numa/romeConfig.cmake DESTINATION lib/cmake)
+
+else()
+
+  install(TARGETS workload logging metrics rdma util protos 
+                  EXPORT romeTargets
+          LIBRARY DESTINATION lib
+          ARCHIVE DESTINATION lib
+          RUNTIME DESTINATION bin
+          INCLUDES DESTINATION include)
+  install(FILES ${PROJECT_SOURCE_DIR}/share/romeConfig.cmake DESTINATION lib/cmake)
+
+endif()
 
 # install the include dirs
 install(FILES ${PROJECT_SOURCE_DIR}/protos/experiment.proto DESTINATION protos)
@@ -127,7 +147,6 @@ install(EXPORT romeTargets
         NAMESPACE rome::
         DESTINATION lib/cmake)
 
-install(FILES ${PROJECT_SOURCE_DIR}/share/romeConfig.cmake DESTINATION lib/cmake)
 
 install(FILES ${PROJECT_SOURCE_DIR}/cmake/FindRDMA.cmake DESTINATION lib/cmake)
 install(FILES ${PROJECT_SOURCE_DIR}/cmake/FindCoroutines.cmake DESTINATION lib/cmake)
