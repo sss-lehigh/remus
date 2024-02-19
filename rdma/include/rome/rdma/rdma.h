@@ -125,21 +125,11 @@ public:
     }
     ROME_DEBUG("Finished connecting to remotes");
 
-    // TODO:  This is a hack.  We can't send the memory region to all peers
-    //        until we know that all peers are connected.  Before, we had both
-    //        sides race to create each of the n^2 connections, which was
-    //        inefficient, but guaranteed that we would not exit the above loop
-    //        until there was a guaranteed connection (and only one!) between
-    //        each pair of nodes.  Now that we have no such guarantee, we will
-    //        need something else to ensure that we don't try to send to
-    //        nonexistent peers.  For now, we'll just wait 5 seconds, but that's
-    //        not going to work in the long run.
-    //
-    // TODO:  Maybe we could just spin on a synchronized method of the
-    //        ConnectionMap that reports its number of connections?  If we do
-    //        that, we should wait until the connections are fully established,
-    //        not just requested, which will require a small modification.
-    sleep(5);
+    // Spin until we have the right number of peers
+    while(true){
+      if (connection_manager_->size() == peers.size()) break;
+      if (connection_manager_->size() > peers.size()) ROME_FATAL("Unexpected number of connections in the map");
+    }
 
     // Create a memory region of the requested size
     auto mem = pool.init_memory(capacity, listener_->pd());

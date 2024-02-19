@@ -51,6 +51,12 @@ public:
     return res;
   }
 
+  /// Get the number of connections in the map
+  int size(){
+    std::lock_guard<std::mutex> lg(con_mu_);
+    return connections_.size();
+  }
+
   /// Destruct the ConnectionMap by iterating through its open connections,
   /// and for each one, shutting it down.
   ~ConnectionMap() {
