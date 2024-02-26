@@ -103,6 +103,9 @@ add_subdirectory(rdma)
 ## rome::util
 add_subdirectory(util)
 
+## rome::hds
+add_subdirectory(hds)
+
 if(NUMA)
   add_subdirectory(numa)
 endif()
@@ -113,7 +116,7 @@ endif()
 
 if(NUMA)
 
-  install(TARGETS workload logging metrics rdma util protos numa
+  install(TARGETS workload logging metrics rdma util protos numa hds
                   EXPORT romeTargets
           LIBRARY DESTINATION lib
           ARCHIVE DESTINATION lib
@@ -125,7 +128,7 @@ if(NUMA)
 
 else()
 
-  install(TARGETS workload logging metrics rdma util protos 
+  install(TARGETS workload logging metrics rdma util protos hds
                   EXPORT romeTargets
           LIBRARY DESTINATION lib
           ARCHIVE DESTINATION lib
@@ -170,5 +173,4 @@ include(CPack)
 ## Examples
 
 add_subdirectory(examples/iht)
-add_subdirectory(examples/hds)
 
