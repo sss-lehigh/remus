@@ -151,10 +151,6 @@ private:
     pool->Deallocate<lock_type>(temp, 8);
   }
 
-  template <typename T> inline bool is_local(rdma_ptr<T> ptr) {
-    return ptr.id() == self_.id;
-  }
-
   template <typename T> inline bool is_null(rdma_ptr<T> ptr) {
     return ptr == nullptr;
   }
@@ -178,7 +174,7 @@ private:
     // remote ptr...
     //             Otherwise I am forced to manually calculate the pointer of a
     //             bucket
-    if (!is_local(bucket_ptr)) {
+    if (!pool->is_local(bucket_ptr)) {
       // Have to use a temp variable to account for alignment. Remote pointer is
       // 8 bytes!
       // [esl] This "deallocate 8" is a hack to get around a rome memory leak.
@@ -232,7 +228,7 @@ private:
     // hash everything from the full elist into it
     remote_elist parent_bucket =
         static_cast<remote_elist>(parent->buckets[pidx].base);
-    remote_elist source = is_local(parent_bucket)
+    remote_elist source = pool->is_local(parent_bucket)
                               ? parent_bucket
                               : pool->Read<EList>(parent_bucket);
     for (size_t i = 0; i < source->count; i++) {
@@ -316,7 +312,7 @@ public:
       // We locked an elist, we can read the baseptr and progress
       remote_elist bucket_base =
           static_cast<remote_elist>(curr->buckets[bucket].base);
-      remote_elist e = is_local(bucket_base) || is_null(bucket_base)
+      remote_elist e = pool->is_local(bucket_base) || is_null(bucket_base)
                            ? bucket_base
                            : pool->Read<EList>(bucket_base);
 
@@ -337,7 +333,7 @@ public:
           V result = kv.val;
           unlock(pool, get_lock(parent_ptr, bucket), E_UNLOCKED);
           // Deallocate the elist and the plist used in descent
-          if (!is_local(bucket_base))
+          if (!pool->is_local(bucket_base))
             pool->Deallocate<EList>(e);
           pool->Deallocate<PList>(curr, 1 << (depth - 1));
           return std::make_optional<V>(result);
@@ -347,7 +343,7 @@ public:
       // Can't find, unlock and return false
       unlock(pool, get_lock(parent_ptr, bucket), E_UNLOCKED);
       // Deallocate elist and plist used in descent
-      if (!is_local(bucket_base))
+      if (!pool->is_local(bucket_base))
         pool->Deallocate<EList>(e);
       pool->Deallocate<PList>(curr, 1 << (depth - 1));
       return std::nullopt;
@@ -394,7 +390,7 @@ public:
       // We locked an elist, we can read the baseptr and progress
       remote_elist bucket_base =
           static_cast<remote_elist>(curr->buckets[bucket].base);
-      remote_elist e = is_local(bucket_base) || is_null(bucket_base)
+      remote_elist e = pool->is_local(bucket_base) || is_null(bucket_base)
                            ? bucket_base
                            : pool->Read<EList>(bucket_base);
 
@@ -423,7 +419,7 @@ public:
           // Contains the key => unlock and return false
           unlock(pool, get_lock(parent_ptr, bucket), E_UNLOCKED);
           // Deallocate elist and plist used in descent
-          if (!is_local(bucket_base))
+          if (!pool->is_local(bucket_base))
             pool->Deallocate<EList>(e);
           pool->Deallocate<PList>(curr, 1 << (depth - 1));
           return std::make_optional<V>(result);
@@ -436,11 +432,11 @@ public:
         e->elist_insert(key, value);
         // If we are modifying a local copy, we need to write to the remote at
         // the end
-        if (!is_local(bucket_base))
+        if (!pool->is_local(bucket_base))
           pool->Write<EList>(static_cast<remote_elist>(bucket_base), *e);
         // unlock and return true
         unlock(pool, get_lock(parent_ptr, bucket), E_UNLOCKED);
-        if (!is_local(bucket_base))
+        if (!pool->is_local(bucket_base))
           pool->Deallocate<EList>(e);
         pool->Deallocate<PList>(curr, 1 << (depth - 1));
         return std::nullopt;
@@ -458,7 +454,7 @@ public:
       // unlock bucket
       curr->buckets[bucket].lock = P_UNLOCKED;
       unlock(pool, get_lock(parent_ptr, bucket), P_UNLOCKED);
-      if (!is_local(bucket_base))
+      if (!pool->is_local(bucket_base))
         pool->Deallocate<EList>(e);
       // repeat from top, inserting into the bucket we just rehashed
     }
@@ -503,7 +499,7 @@ public:
       // We locked an elist, we can read the baseptr and progress
       remote_elist bucket_base =
           static_cast<remote_elist>(curr->buckets[bucket].base);
-      remote_elist e = is_local(bucket_base) || is_null(bucket_base)
+      remote_elist e = pool->is_local(bucket_base) || is_null(bucket_base)
                            ? bucket_base
                            : pool->Read<EList>(bucket_base);
 
@@ -528,12 +524,12 @@ public:
           }
           e->count -= 1;
           // If we are modifying the local copy, we need to write to the remote
-          if (!is_local(bucket_base))
+          if (!pool->is_local(bucket_base))
             pool->Write<EList>(static_cast<remote_elist>(bucket_base), *e);
           // Unlock and return
           unlock(pool, get_lock(parent_ptr, bucket), E_UNLOCKED);
           // Deallocate data used for descending
-          if (!is_local(bucket_base))
+          if (!pool->is_local(bucket_base))
             pool->Deallocate<EList>(e);
           pool->Deallocate<PList>(curr, 1 << (depth - 1));
           return std::make_optional<V>(result);
@@ -543,7 +539,7 @@ public:
       // Can't find, unlock and return false
       unlock(pool, get_lock(parent_ptr, bucket), E_UNLOCKED);
       // Deallocate data used for descending
-      if (!is_local(bucket_base))
+      if (!pool->is_local(bucket_base))
         pool->Deallocate<EList>(e);
       pool->Deallocate<PList>(curr, 1 << (depth - 1));
       return std::nullopt;
