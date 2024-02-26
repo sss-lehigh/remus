@@ -21,8 +21,8 @@ private:
   // "Super class" for the elist and plist structs
   struct Base {};
   typedef uint64_t lock_type;
-  typedef remote_ptr<Base> remote_baseptr;
-  typedef remote_ptr<lock_type> remote_lock;
+  typedef rdma_ptr<Base> remote_baseptr;
+  typedef rdma_ptr<lock_type> remote_lock;
 
   struct pair_t {
     K key;
@@ -71,8 +71,8 @@ private:
     plist_pair_t buckets[PLIST_SIZE]; // Pointer lock pairs
   };
 
-  typedef remote_ptr<PList> remote_plist;
-  typedef remote_ptr<EList> remote_elist;
+  typedef rdma_ptr<PList> remote_plist;
+  typedef rdma_ptr<EList> remote_elist;
 
   // Get the address of the lock at bucket (index)
   remote_lock get_lock(remote_plist arr_start, int index) {
@@ -82,10 +82,10 @@ private:
   }
 
   // Get the address of the baseptr at bucket (index)
-  remote_ptr<remote_baseptr> get_baseptr(remote_plist arr_start, int index) {
+  rdma_ptr<remote_baseptr> get_baseptr(remote_plist arr_start, int index) {
     uint64_t new_addy = arr_start.address();
     new_addy += sizeof(plist_pair_t) * index;
-    return remote_ptr<remote_baseptr>(arr_start.id(), new_addy);
+    return rdma_ptr<remote_baseptr>(arr_start.id(), new_addy);
   }
 
   /// @brief Initialize the plist with values.
@@ -96,7 +96,7 @@ private:
     assert(sizeof(plist_pair_t) == 16); // Assert I did my math right...
     for (size_t i = 0; i < PLIST_SIZE * mult_modder; i++) {
       p->buckets[i].lock = E_UNLOCKED;
-      p->buckets[i].base = remote_nullptr;
+      p->buckets[i].base = rdma_nullptr;
     }
   }
 
@@ -151,12 +151,12 @@ private:
     pool->Deallocate<lock_type>(temp, 8);
   }
 
-  template <typename T> inline bool is_local(remote_ptr<T> ptr) {
+  template <typename T> inline bool is_local(rdma_ptr<T> ptr) {
     return ptr.id() == self_.id;
   }
 
-  template <typename T> inline bool is_null(remote_ptr<T> ptr) {
-    return ptr == remote_nullptr;
+  template <typename T> inline bool is_null(rdma_ptr<T> ptr) {
+    return ptr == rdma_nullptr;
   }
 
   /// @brief Change the baseptr for a given bucket to point to a different EList
@@ -172,7 +172,7 @@ private:
   inline void change_bucket_pointer(std::shared_ptr<rdma_capability> pool,
                                     remote_plist list_start, uint64_t bucket,
                                     remote_baseptr baseptr) {
-    remote_ptr<remote_baseptr> bucket_ptr = get_baseptr(list_start, bucket);
+    rdma_ptr<remote_baseptr> bucket_ptr = get_baseptr(list_start, bucket);
     // [mfs] Can this address manipulation be hidden?
     // [esl] todo: I think Rome needs to support for the [] operator in the
     // remote ptr...
@@ -265,16 +265,16 @@ public:
   /// @brief Create a fresh iht
   /// @param pool the capability to init the IHT with
   /// @return the iht root pointer
-  remote_ptr<anon_ptr> InitAsFirst(std::shared_ptr<rdma_capability> pool) {
+  rdma_ptr<anon_ptr> InitAsFirst(std::shared_ptr<rdma_capability> pool) {
     remote_plist iht_root = pool->Allocate<PList>();
     InitPList(iht_root, 1);
     this->root = iht_root;
-    return static_cast<remote_ptr<anon_ptr>>(iht_root);
+    return static_cast<rdma_ptr<anon_ptr>>(iht_root);
   }
 
   /// @brief Initialize an IHT from the pointer of another IHT
   /// @param root_ptr the root pointer of the other iht from InitAsFirst();
-  void InitFromPointer(remote_ptr<anon_ptr> root_ptr) {
+  void InitFromPointer(rdma_ptr<anon_ptr> root_ptr) {
     this->root = static_cast<remote_plist>(root_ptr);
   }
 

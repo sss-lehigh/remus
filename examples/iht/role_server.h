@@ -36,7 +36,7 @@ inline void ClientStopBarrier(rome::util::tcp::SocketManager &socket_handle,
   // [esl] IMP: The purpose of the tcp module is not to be efficient, but rather
   // to be able to serve as a simple barrier at least until an efficient
   // RDMA-based one can be created It also serves the function of sending the
-  // remote_ptr, which is why the API is not a barrier but more of a
+  // rdma_ptr, which is why the API is not a barrier but more of a
   // server-client (one->many relationship)
 
   // Receive a message from all clients to sync

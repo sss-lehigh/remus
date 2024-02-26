@@ -18,7 +18,7 @@
 #include <protos/metrics.pb.h> // TODO should be a part of matrics
 #include <protos/rdma.pb.h> // TODO should be replaced with a JSON object
 
-#include <spdlog/fmt/fmt.h> // [mfs] Used in remote_ptr... factor away?
+#include <spdlog/fmt/fmt.h> // [mfs] Used in rdma_ptr... factor away?
 #include <vector>
 
 #include "rome/util/status.h"
@@ -27,29 +27,29 @@
 
 #include "connection.h"
 #include "peer.h"
-#include "remote_ptr.h"
+#include "rdma_ptr.h"
 #include "segment.h"
 
 #define THREAD_MAX 10
 
 // [mfs]  The entire dependency on fmt boils down to this template, used in one
 //        assertion?
-template <typename T> struct fmt::formatter<::rome::rdma::remote_ptr<T>> {
-  typedef ::rome::rdma::remote_ptr<T> remote_ptr;
+template <typename T> struct fmt::formatter<::rome::rdma::rdma_ptr<T>> {
+  typedef ::rome::rdma::rdma_ptr<T> rdma_ptr;
   constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
     return ctx.end();
   }
 
   template <typename FormatContext>
-  auto format(const remote_ptr &input, FormatContext &ctx)
+  auto format(const rdma_ptr &input, FormatContext &ctx)
       -> decltype(ctx.out()) {
     return format_to(ctx.out(), "(id={}, address=0x{:x})", input.id(),
                      input.address());
   }
 };
 
-template <typename T> struct std::hash<rome::rdma::remote_ptr<T>> {
-  std::size_t operator()(const rome::rdma::remote_ptr<T> &ptr) const {
+template <typename T> struct std::hash<rome::rdma::rdma_ptr<T>> {
+  std::size_t operator()(const rome::rdma::rdma_ptr<T> &ptr) const {
     return std::hash<uint64_t>()(static_cast<uint64_t>(ptr));
   }
 };
@@ -274,14 +274,14 @@ public:
   }
 
   /// Allocate some memory from the local RDMA heap
-  template <typename T> remote_ptr<T> Allocate(size_t size = 1) {
+  template <typename T> rdma_ptr<T> Allocate(size_t size = 1) {
     auto ret =
-        remote_ptr<T>(self_.id, rdma_memory_->template allocateT<T>(size));
+        rdma_ptr<T>(self_.id, rdma_memory_->template allocateT<T>(size));
     return ret;
   }
 
   /// Deallocate some memory to the local RDMA heap (must be from this node)
-  template <typename T> void Deallocate(remote_ptr<T> p, size_t size = 1) {
+  template <typename T> void Deallocate(rdma_ptr<T> p, size_t size = 1) {
     ROME_ASSERT(p.id() == self_.id,
                 "Alloc/dealloc on remote node not implemented...");
     rdma_memory_->template deallocateT<T>(std::to_address(p), size);
@@ -289,9 +289,9 @@ public:
 
   /// Read from RDMA, store the result in prealloc (may allocate)
   template <typename T>
-  remote_ptr<T> Read(remote_ptr<T> ptr,
-                     remote_ptr<T> prealloc = remote_nullptr) {
-    if (prealloc == remote_nullptr)
+  rdma_ptr<T> Read(rdma_ptr<T> ptr,
+                     rdma_ptr<T> prealloc = rdma_nullptr) {
+    if (prealloc == rdma_nullptr)
       prealloc = Allocate<T>();
     ReadInternal(ptr, 0, sizeof(T), sizeof(T), prealloc);
     return prealloc;
@@ -301,9 +301,9 @@ public:
   ///
   /// This version takes a `size` argument, for variable-length objects
   template <typename T>
-  remote_ptr<T> ExtendedRead(remote_ptr<T> ptr, int size,
-                             remote_ptr<T> prealloc = remote_nullptr) {
-    if (prealloc == remote_nullptr)
+  rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size,
+                             rdma_ptr<T> prealloc = rdma_nullptr) {
+    if (prealloc == rdma_nullptr)
       prealloc = Allocate<T>(size);
     // TODO: What happens if I decrease chunk size (sizeT * size --> sizeT)
     ReadInternal(ptr, 0, sizeof(T) * size, sizeof(T) * size, prealloc);
@@ -316,9 +316,9 @@ public:
   ///
   /// TODO: Does this require bytes < sizeof(T)?
   template <typename T>
-  remote_ptr<T> PartialRead(remote_ptr<T> ptr, size_t offset, size_t bytes,
-                            remote_ptr<T> prealloc = remote_nullptr) {
-    if (prealloc == remote_nullptr)
+  rdma_ptr<T> PartialRead(rdma_ptr<T> ptr, size_t offset, size_t bytes,
+                            rdma_ptr<T> prealloc = rdma_nullptr) {
+    if (prealloc == rdma_nullptr)
       prealloc = Allocate<T>();
     ReadInternal(ptr, offset, bytes, sizeof(T), prealloc);
     return prealloc;
@@ -326,8 +326,8 @@ public:
 
   /// Write to RDMA
   template <typename T>
-  void Write(remote_ptr<T> ptr, const T &val,
-             remote_ptr<T> prealloc = remote_nullptr) {
+  void Write(rdma_ptr<T> ptr, const T &val,
+             rdma_ptr<T> prealloc = rdma_nullptr) {
     auto info = conn_info_.at(ptr.id());
 
     // [esl] Getting the thread's index to determine it's owned flag
@@ -342,7 +342,7 @@ public:
     // -  Does the use of the copy constructor imply that we are assuming T is
     //    trivially copyable?
     T *local;
-    if (prealloc == remote_nullptr) {
+    if (prealloc == rdma_nullptr) {
       auto alloc = rdma_memory_.get();
       local = alloc->template allocateT<T>();
       ROME_TRACE("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
@@ -392,7 +392,7 @@ public:
     // [mfs]  It is odd that we have metrics for read (albeit with a bottleneck)
     //        but we don't have metrics for write/swap/cas?
 
-    if (prealloc == remote_nullptr) {
+    if (prealloc == rdma_nullptr) {
       auto alloc = rdma_memory_.get();
       alloc->template deallocateT<T>(local);
     }
@@ -405,7 +405,7 @@ public:
   ///       because of the overhead of trying from scratch, but we can certainly
   ///       optimize it a bit.
   template <typename T>
-  T AtomicSwap(remote_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
+  T AtomicSwap(rdma_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
 
@@ -466,7 +466,7 @@ public:
   ///       Or perhaps the question is "how does this work if the field to CAS
   ///       isn't the first field of the T?"
   template <typename T>
-  T CompareAndSwap(remote_ptr<T> ptr, uint64_t expected, uint64_t swap) {
+  T CompareAndSwap(rdma_ptr<T> ptr, uint64_t expected, uint64_t swap) {
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
 
@@ -518,11 +518,11 @@ public:
     return ret;
   }
 
-  template <typename T> inline remote_ptr<T> GetRemotePtr(const T *ptr) const {
-    return remote_ptr<T>(self_.id, reinterpret_cast<uint64_t>(ptr));
+  template <typename T> inline rdma_ptr<T> GetRemotePtr(const T *ptr) const {
+    return rdma_ptr<T>(self_.id, reinterpret_cast<uint64_t>(ptr));
   }
 
-  template <typename T> inline remote_ptr<T> GetBaseAddress() const {
+  template <typename T> inline rdma_ptr<T> GetBaseAddress() const {
     return GetRemotePtr<T>(
         reinterpret_cast<const T *>(rdma_memory_->mr()->addr));
   }
@@ -533,8 +533,8 @@ private:
   /// TODO: It appears that we *always* call this with bytes <= chunk_size.
   ///       Could we get rid of some of the complexity?
   template <typename T>
-  void ReadInternal(remote_ptr<T> ptr, size_t offset, size_t bytes,
-                    size_t chunk_size, remote_ptr<T> prealloc) {
+  void ReadInternal(rdma_ptr<T> ptr, size_t offset, size_t bytes,
+                    size_t chunk_size, rdma_ptr<T> prealloc) {
     const int num_chunks =
         bytes % chunk_size ? (bytes / chunk_size) + 1 : bytes / chunk_size;
     const size_t remainder = bytes % chunk_size;

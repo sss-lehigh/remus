@@ -13,7 +13,7 @@
 #include "memory_pool.h"
 #include "peer.h"
 
-#include "remote_ptr.h"
+#include "rdma_ptr.h"
 
 namespace rome::rdma {
 
@@ -33,7 +33,7 @@ namespace rome::rdma {
 ///       another layer sitting on top of this, when the goal was for this to be
 ///       the top-level object.
 ///
-/// TODO: It would also be nice if the remote_ptr infrastructure was fully
+/// TODO: It would also be nice if the rdma_ptr infrastructure was fully
 ///       encapsulated by this, rather than being an independent feature.
 ///
 /// TODO: The memory access functions currently have a lot of allocation
@@ -172,39 +172,39 @@ public:
   }
 
   /// Allocate some memory from the local RDMA heap
-  template <typename T> remote_ptr<T> Allocate(size_t size = 1) {
+  template <typename T> rdma_ptr<T> Allocate(size_t size = 1) {
     return pool.Allocate<T>(size);
   }
 
   /// Return some memory to the local RDMA heap
-  template <typename T> void Deallocate(remote_ptr<T> p, size_t size = 1) {
+  template <typename T> void Deallocate(rdma_ptr<T> p, size_t size = 1) {
     pool.Deallocate(p, size);
   }
 
   /// Write to an RDMA heap
   template <typename T>
-  void Write(remote_ptr<T> ptr, const T &val,
-             remote_ptr<T> prealloc = remote_nullptr) {
+  void Write(rdma_ptr<T> ptr, const T &val,
+             rdma_ptr<T> prealloc = rdma_nullptr) {
     pool.Write(ptr, val, prealloc);
   }
 
   /// Perform a CAS on the RDMA heap
   template <typename T>
-  T CompareAndSwap(remote_ptr<T> ptr, uint64_t expected, uint64_t swap) {
+  T CompareAndSwap(rdma_ptr<T> ptr, uint64_t expected, uint64_t swap) {
     return pool.CompareAndSwap<T>(ptr, expected, swap);
   }
 
   /// Read a variable-sized object from the RDMA heap
   template <typename T>
-  remote_ptr<T> ExtendedRead(remote_ptr<T> ptr, int size,
-                             remote_ptr<T> prealloc = remote_nullptr) {
+  rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size,
+                             rdma_ptr<T> prealloc = rdma_nullptr) {
     return pool.ExtendedRead(ptr, size, prealloc);
   }
 
   /// Read a fixed-sized object from the RDMA heap
   template <typename T>
-  remote_ptr<T> Read(remote_ptr<T> ptr,
-                     remote_ptr<T> prealloc = remote_nullptr) {
+  rdma_ptr<T> Read(rdma_ptr<T> ptr,
+                     rdma_ptr<T> prealloc = rdma_nullptr) {
     return pool.Read(ptr, prealloc);
   }
 

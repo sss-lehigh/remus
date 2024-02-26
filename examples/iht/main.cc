@@ -163,7 +163,7 @@ int main(int argc, char **argv) {
       }
       // Create a root ptr to the IHT
       IHT iht = IHT(host);
-      remote_ptr<anon_ptr> root_ptr = iht.InitAsFirst(pools[0]);
+      rdma_ptr<anon_ptr> root_ptr = iht.InitAsFirst(pools[0]);
       // Send the root pointer over
       rome::util::tcp::message ptr_message = rome::util::tcp::message(root_ptr.raw());
       socket_handle.send_to_all(&ptr_message);
@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
           // Get the data from the server to init the IHT
           rome::util::tcp::message ptr_message;
           endpoint_managers[thread_index].recv_server(&ptr_message);
-          iht->InitFromPointer(remote_ptr<anon_ptr>(ptr_message.get_first()));
+          iht->InitFromPointer(rdma_ptr<anon_ptr>(ptr_message.get_first()));
 
           ROME_DEBUG("Creating client");
           // Create and run a client in a thread
