@@ -4,11 +4,6 @@
 
 namespace rome::rdma {
 
-// Forward declarations
-//
-// TODO: If we had a base type for rdma_ptr, we could probably not need this?
-struct nullptr_type {};
-
 /// A "smart pointer" to memory on another machine
 ///
 /// TODO: This will need more documentation
@@ -29,28 +24,22 @@ public:
       : rdma_ptr(id, reinterpret_cast<uint64_t>(address)) {}
   rdma_ptr(id_type id, uint64_t address)
       : raw_((((uint64_t)id) << kAddressBits) | (address & kAddressBitmask)) {}
+  /// Able to set rdma_ptr to nullptr
+  constexpr rdma_ptr(std::nullptr_t) : raw_(0) {}
 
   // Copy and Move
-  template <typename _T = element_type,
-            std::enable_if_t<!std::is_same_v<_T, nullptr_type>>>
+  template <typename _T = element_type>
   rdma_ptr(const rdma_ptr &p) : raw_(p.raw_) {}
-  template <typename _T = element_type,
-            std::enable_if_t<!std::is_same_v<_T, nullptr_type>>>
+  template <typename _T = element_type>
   rdma_ptr(rdma_ptr &&p) : raw_(p.raw_) {}
-  constexpr rdma_ptr(const rdma_ptr<nullptr_type> &) : raw_(0) {}
 
   // Getters
-  uint64_t id() const { return (raw_ & kIdBitmask) >> kAddressBits; }
-  uint64_t address() const { return raw_ & kAddressBitmask; }
-  uint64_t raw() const { return raw_; }
+  constexpr uint64_t id() const volatile { return (raw_ & kIdBitmask) >> kAddressBits; }
+  constexpr uint64_t address() const volatile { return raw_ & kAddressBitmask; }
+  constexpr uint64_t raw() const volatile { return raw_; }
 
   // Assignment
   void operator=(const rdma_ptr &p) volatile { raw_ = p.raw_; }
-  template <typename _T = element_type,
-            std::enable_if_t<!std::is_same_v<_T, nullptr_type>>>
-  void operator=(const rdma_ptr<nullptr_type> &) volatile {
-    raw_ = 0;
-  }
 
   /// Increment operator
   rdma_ptr &operator+=(size_t s) {
@@ -108,14 +97,20 @@ public:
 
   // Conversion operators
   explicit operator uint64_t() const { return raw_; }
+
   template <typename U> explicit operator rdma_ptr<U>() const {
     return rdma_ptr<U>(raw_);
+  }
+
+  explicit operator T*() volatile const {
+    return reinterpret_cast<T*>(address());
   }
 
   // Pointer-like functions
   static constexpr element_type *to_address(const rdma_ptr &p) {
     return (element_type *)p.address();
   }
+
   static constexpr rdma_ptr pointer_to(element_type &p) {
     return rdma_ptr(-1, &p);
   }
@@ -128,9 +123,10 @@ public:
   friend std::ostream &operator<<(std::ostream &os, const rdma_ptr<U> &p);
 
   // Equivalence
-  bool operator==(const volatile rdma_ptr<nullptr_type> &) const volatile {
-    return raw_ == 0;
+  constexpr bool operator==(std::nullptr_t n) const volatile {
+    return static_cast<T*>(*this) == n;
   }
+
   bool operator==(rdma_ptr &n) { return raw_ == n.raw_; }
   template <typename U>
   friend bool operator==(rdma_ptr<U> &p1, rdma_ptr<U> &p2);
@@ -170,10 +166,5 @@ bool operator==(const volatile rdma_ptr<U> &p1,
                 const volatile rdma_ptr<U> &p2) {
   return p1.raw_ == p2.raw_;
 }
-
-using rdma_nullptr_t = rdma_ptr<nullptr_type>;
-
-/// A single global instance of a null rdma_ptr
-constexpr rdma_nullptr_t rdma_nullptr{};
 
 } // namespace rome::rdma

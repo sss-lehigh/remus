@@ -290,8 +290,8 @@ public:
   /// Read from RDMA, store the result in prealloc (may allocate)
   template <typename T>
   rdma_ptr<T> Read(rdma_ptr<T> ptr,
-                     rdma_ptr<T> prealloc = rdma_nullptr) {
-    if (prealloc == rdma_nullptr)
+                     rdma_ptr<T> prealloc = nullptr) {
+    if (prealloc == nullptr)
       prealloc = Allocate<T>();
     ReadInternal(ptr, 0, sizeof(T), sizeof(T), prealloc);
     return prealloc;
@@ -302,8 +302,8 @@ public:
   /// This version takes a `size` argument, for variable-length objects
   template <typename T>
   rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size,
-                             rdma_ptr<T> prealloc = rdma_nullptr) {
-    if (prealloc == rdma_nullptr)
+                             rdma_ptr<T> prealloc = nullptr) {
+    if (prealloc == nullptr)
       prealloc = Allocate<T>(size);
     // TODO: What happens if I decrease chunk size (sizeT * size --> sizeT)
     ReadInternal(ptr, 0, sizeof(T) * size, sizeof(T) * size, prealloc);
@@ -317,8 +317,8 @@ public:
   /// TODO: Does this require bytes < sizeof(T)?
   template <typename T>
   rdma_ptr<T> PartialRead(rdma_ptr<T> ptr, size_t offset, size_t bytes,
-                            rdma_ptr<T> prealloc = rdma_nullptr) {
-    if (prealloc == rdma_nullptr)
+                            rdma_ptr<T> prealloc = nullptr) {
+    if (prealloc == nullptr)
       prealloc = Allocate<T>();
     ReadInternal(ptr, offset, bytes, sizeof(T), prealloc);
     return prealloc;
@@ -327,7 +327,7 @@ public:
   /// Write to RDMA
   template <typename T>
   void Write(rdma_ptr<T> ptr, const T &val,
-             rdma_ptr<T> prealloc = rdma_nullptr) {
+             rdma_ptr<T> prealloc = nullptr) {
     auto info = conn_info_.at(ptr.id());
 
     // [esl] Getting the thread's index to determine it's owned flag
@@ -342,7 +342,7 @@ public:
     // -  Does the use of the copy constructor imply that we are assuming T is
     //    trivially copyable?
     T *local;
-    if (prealloc == rdma_nullptr) {
+    if (prealloc == nullptr) {
       auto alloc = rdma_memory_.get();
       local = alloc->template allocateT<T>();
       ROME_TRACE("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
@@ -392,7 +392,7 @@ public:
     // [mfs]  It is odd that we have metrics for read (albeit with a bottleneck)
     //        but we don't have metrics for write/swap/cas?
 
-    if (prealloc == rdma_nullptr) {
+    if (prealloc == nullptr) {
       auto alloc = rdma_memory_.get();
       alloc->template deallocateT<T>(local);
     }

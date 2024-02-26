@@ -96,7 +96,7 @@ private:
     assert(sizeof(plist_pair_t) == 16); // Assert I did my math right...
     for (size_t i = 0; i < PLIST_SIZE * mult_modder; i++) {
       p->buckets[i].lock = E_UNLOCKED;
-      p->buckets[i].base = rdma_nullptr;
+      p->buckets[i].base = nullptr;
     }
   }
 
@@ -156,7 +156,7 @@ private:
   }
 
   template <typename T> inline bool is_null(rdma_ptr<T> ptr) {
-    return ptr == rdma_nullptr;
+    return ptr == nullptr;
   }
 
   /// @brief Change the baseptr for a given bucket to point to a different EList

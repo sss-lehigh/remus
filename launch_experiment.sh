@@ -28,7 +28,7 @@ set -e # Halt the script on any error
 # WARNING:  Order matters for the machines, because there is an implicit
 #           conversion to names like node0, node1, etc.  Be sure to follow the
 #           order in the CloudLab "List View" for your experiment.
-machines=(apt137 apt148 apt149) #apt085)
+machines=(apt139 apt150 apt156) #apt085)
 domain=apt.emulab.net
 
 # The user who is going to be using ssh/scp to connect to cloudlab.  It is

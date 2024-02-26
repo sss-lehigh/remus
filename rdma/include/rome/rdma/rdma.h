@@ -184,7 +184,7 @@ public:
   /// Write to an RDMA heap
   template <typename T>
   void Write(rdma_ptr<T> ptr, const T &val,
-             rdma_ptr<T> prealloc = rdma_nullptr) {
+             rdma_ptr<T> prealloc = nullptr) {
     pool.Write(ptr, val, prealloc);
   }
 
@@ -197,14 +197,14 @@ public:
   /// Read a variable-sized object from the RDMA heap
   template <typename T>
   rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size,
-                             rdma_ptr<T> prealloc = rdma_nullptr) {
+                             rdma_ptr<T> prealloc = nullptr) {
     return pool.ExtendedRead(ptr, size, prealloc);
   }
 
   /// Read a fixed-sized object from the RDMA heap
   template <typename T>
   rdma_ptr<T> Read(rdma_ptr<T> ptr,
-                     rdma_ptr<T> prealloc = rdma_nullptr) {
+                     rdma_ptr<T> prealloc = nullptr) {
     return pool.Read(ptr, prealloc);
   }
 
