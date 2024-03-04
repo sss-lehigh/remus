@@ -230,5 +230,12 @@ public:
   ///       node to each other node.  Some thread safety issues are likely to
   ///       arise, too.
   void RegisterThread() { pool.RegisterThread(); }
+
+  /// Determine if a rdma_ptr is local to the machine
+  /// Utilizies the peer inputted to rdma_capability to check the id of the ptr
+  template <class T>
+  bool is_local(rdma_ptr<T> ptr){
+    return ptr.id() == self_.id;
+  }
 };
 } // namespace rome::rdma
