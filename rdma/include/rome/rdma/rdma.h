@@ -194,6 +194,12 @@ public:
     return pool.CompareAndSwap<T>(ptr, expected, swap);
   }
 
+  /// Perform a CAS on the RDMA heap that loops until it succeeds
+  template <typename T>
+  T AtomicSwap(rdma_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
+    return pool.AtomicSwap<T>(ptr, swap, hint);
+  }
+
   /// Read a variable-sized object from the RDMA heap
   template <typename T>
   rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size,
