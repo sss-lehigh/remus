@@ -50,4 +50,22 @@ We have the following configuration options/flags:
 * CXX\_STANDARD (20 or 23) for the C++ standard
 * CUDA\_ARCHITECTURES (semicolon seperated list of SM numbers) 
 
+## Using Remus
+
+`tools/install.sh` is a script to install Remus to `/opt/remus` on your machine.
+
+After installing you can include remus in any CMake project by setting:
+`-DCMAKE_PREFIX_PATH=/opt/remus/lib/cmake -DCMAKE_MODULE_PATH=/opt/remus/lib/cmake`
+when running cmake.
+
+Then in your CMakeLists.txt you can write `find_package(rome REQUIRED)`.
+
+Rome can be accessed by linking in CMake to any of these libraries: 
+- `rome::workload` 
+- `rome::logging`
+- `rome::metrics` 
+- `rome::rdma` 
+- `rome::util` 
+- `rome::protos` 
+- `rome::hds`
 
