@@ -2,17 +2,17 @@
 #include <concepts>
 #include <numeric>
 
-#include "../../utility/atomic.h"
-#include "../../utility/array.h"
-#include "../../utility/bitset.h"
+#include "../../../utility/atomic.h"
+#include "../../../utility/array.h"
+#include "../../../utility/bitset.h"
 
 #include "node_t.h"
 
 #pragma once
 
-namespace rome::hds::locked_nodes {
+namespace rome::hds::kv_linked_list::locked_nodes {
 
-template<typename T, int N>
+template<typename K, typename V, int N>
 struct reg_cached_node_pointer;
 
 template<size_t size>
@@ -23,15 +23,16 @@ struct tiling {
 };
 
 
-template<typename T, int N, typename Group>
+template<typename K, typename V, int N, typename Group>
 struct reg_cached_node_reference {
 
   constexpr static size_t size_of_group = Group::size;
 
-  HDS_HOST_DEVICE int index_of_key(T x, Group& group) {
+  HDS_HOST_DEVICE int index_of_key(K x, Group& group) {
+    int i = 0;
     bool found = false;
-    for(int i = 0; i < N / size_of_group; ++i) {
-      if(present.get(i) && regs[i] == x) {
+    for(; i < N / size_of_group; ++i) {
+      if(present.get(i) && k_regs[i] == x) {
         found = true;
         break;
       }
@@ -41,17 +42,21 @@ struct reg_cached_node_reference {
 
     if(index != -1) {
       tiling<size_of_group> tile{};
-      int offset = tile(index, group.thread_rank());
+      int offset = tile(i, group.thread_rank());
       return group.shfl(offset, index);
     } else {
       return -1;
     }
   }
 
-  HDS_HOST_DEVICE bool has_key(T x, Group& group) {
+  HDS_HOST_DEVICE V get(int idx) {
+    return atomic_ref<V>(self.ptr->values[idx]).load(memory_order_relaxed);
+  }
+
+  HDS_HOST_DEVICE bool has_key(K x, Group& group) {
     bool found = false;
     for(int i = 0; i < N / size_of_group; ++i) {
-      if(present.get(i) && regs[i] == x) {
+      if(present.get(i) && k_regs[i] == x) {
         found = true;
         break;
       }
@@ -81,10 +86,10 @@ struct reg_cached_node_reference {
     return -1;
   }
 
-  HDS_HOST_DEVICE bool has_any_lt_key(T x, Group& group) {
+  HDS_HOST_DEVICE bool has_any_lt_key(K x, Group& group) {
     bool found = false;
     for(int i = 0; i < N / size_of_group; ++i) {
-      if(present.get(i) && regs[i] < x) {
+      if(present.get(i) && k_regs[i] < x) {
         found = true;
         break;
       }
@@ -93,10 +98,10 @@ struct reg_cached_node_reference {
     return group.any(found);
   }
 
-  HDS_HOST_DEVICE bool has_any_gt_key(T x, Group& group) {
+  HDS_HOST_DEVICE bool has_any_gt_key(K x, Group& group) {
     bool found = false;
     for(int i = 0; i < N / size_of_group; ++i) {
-      if(present.get(i) && regs[i] > x) {
+      if(present.get(i) && k_regs[i] > x) {
         found = true;
         break;
       }
@@ -105,10 +110,10 @@ struct reg_cached_node_reference {
     return group.any(found);
   }
 
-  HDS_HOST_DEVICE bool has_any_gte_key(T x, Group& group) {
+  HDS_HOST_DEVICE bool has_any_gte_key(K x, Group& group) {
     bool found = false;
     for(int i = 0; i < N / size_of_group; ++i) {
-      if(present.get(i) && regs[i] >= x) {
+      if(present.get(i) && k_regs[i] >= x) {
         found = true;
         break;
       }
@@ -118,11 +123,11 @@ struct reg_cached_node_reference {
   }
 
 
-  HDS_HOST_DEVICE T max_key(Group& group) {
-    T max_key = std::numeric_limits<T>::min();
+  HDS_HOST_DEVICE K max_key(Group& group) {
+    K max_key = std::numeric_limits<K>::min();
     for(int i = 0; i < N / size_of_group; ++i) {
-      if(present.get(i) && regs[i] >= max_key) {
-        max_key = regs[i];
+      if(present.get(i) && k_regs[i] >= max_key) {
+        max_key = k_regs[i];
       }
     }
 
@@ -130,18 +135,18 @@ struct reg_cached_node_reference {
   }
 
 
-  HDS_HOST_DEVICE T min_key(Group& group) {
-    T min_key = std::numeric_limits<T>::max();
+  HDS_HOST_DEVICE K min_key(Group& group) {
+    K min_key = std::numeric_limits<K>::max();
     for(int i = 0; i < N / size_of_group; ++i) {
-      if(present.get(i) && regs[i] <= min_key) {
-        min_key = regs[i];
+      if(present.get(i) && k_regs[i] <= min_key) {
+        min_key = k_regs[i];
       }
     }
 
     return group.reduce_min(min_key);
   }
 
-  HDS_HOST_DEVICE void partition_by_and_insert(T x, reg_cached_node_pointer<T, N> left, Group& group) {
+  HDS_HOST_DEVICE void partition_by_and_insert(K k, V v, reg_cached_node_pointer<K, V, N> left, Group& group) {
 
     tiling<size_of_group> tile{};
 
@@ -150,11 +155,25 @@ struct reg_cached_node_reference {
     // Store all keys in left
     for(int i = 0; i < N / size_of_group; ++i) {
       int offset = tile(i, group.thread_rank());
-      atomic_ref<T>(left.ptr->values[offset]).store(regs[i], memory_order_relaxed);
+      atomic_ref<K>(left.ptr->keys[offset]).store(k_regs[i], memory_order_relaxed);
+    }
+      
+
+    // load values
+    array<K, N / Group::size> v_regs;
+    for(int i = 0; i < N / size_of_group; ++i) {
+      int offset = tile(i, group.thread_rank());
+      v_regs[i] = atomic_ref<V>(self.ptr->values[offset]).load(memory_order_relaxed);
+    }
+
+    // store values
+    for(int i = 0; i < N / size_of_group; ++i) {
+      int offset = tile(i, group.thread_rank());
+      atomic_ref<V>(left.ptr->values[offset]).store(v_regs[i], memory_order_relaxed);
     }
 
     for(int i = 0; i < N / size_of_group; ++i) {
-      if(present.get(i) && regs[i] < x) {
+      if(present.get(i) && k_regs[i] < k) {
         int offset = tile(i, group.thread_rank());
         // tell leader to store present bit set at i
         my_bits.set(offset);
@@ -179,11 +198,11 @@ struct reg_cached_node_reference {
 
       for(int i = 0; i < N; ++i) {
         if(!bits.get(i)) {
-          left.set(i, x);
+          left.set(i, k, v);
           break;
         }
         if(!new_present.get(i)) {
-          self.set(i, x);
+          self.set(i, k, v);
           break;
         }
       }
@@ -191,27 +210,27 @@ struct reg_cached_node_reference {
 
   }
 
-  HDS_HOST_DEVICE reg_cached_node_pointer<T, N> next(Group& group) {
+  HDS_HOST_DEVICE reg_cached_node_pointer<K, V, N> next(Group& group) {
     return next_;
   }
 
-  template<typename S, int O>
+  template<typename S, typename R, int O>
   friend struct reg_cached_node_pointer;
 
 private:
-  reg_cached_node_pointer<T, N> self;
+  reg_cached_node_pointer<K, V, N> self;
   utility::uint32_bitset<N / Group::size> present;
-  array<T, N / Group::size> regs;
-  reg_cached_node_pointer<T, N> next_;
+  array<K, N / Group::size> k_regs;
+  reg_cached_node_pointer<K, V, N> next_;
 };
 
-template<typename T, int N>
+template<typename K, typename V, int N>
 struct reg_cached_node_pointer {
 
-  template<typename S, int O, typename Group>
+  template<typename S, typename R, int O, typename Group>
   friend struct reg_cached_node_reference;
   
-  using node = node_t<T, N>;
+  using node = node_t<K, V, N>;
   
   HDS_HOST_DEVICE constexpr reg_cached_node_pointer(node* ptr_) : ptr(ptr_) {}
 
@@ -221,7 +240,7 @@ struct reg_cached_node_pointer {
   constexpr reg_cached_node_pointer& operator=(const reg_cached_node_pointer&) = default;
   constexpr reg_cached_node_pointer& operator=(reg_cached_node_pointer&&) = default;
 
-  HDS_HOST_DEVICE constexpr bool operator==(const reg_cached_node_pointer<T, N>& rhs) const {
+  HDS_HOST_DEVICE constexpr bool operator==(const reg_cached_node_pointer<K, V, N>& rhs) const {
     return ptr == rhs.ptr;
   }
 
@@ -230,19 +249,19 @@ struct reg_cached_node_pointer {
   }
 
   template<typename Group>
-  HDS_HOST_DEVICE reg_cached_node_reference<T, N, std::remove_cvref_t<Group>> load(Group& group) {
+  HDS_HOST_DEVICE reg_cached_node_reference<K, V, N, std::remove_cvref_t<Group>> load(Group& group) {
     static_assert(N % std::remove_cvref_t<Group>::size == 0);
     static_assert(std::remove_cvref_t<Group>::size <= N);
 
     tiling<std::remove_cvref_t<Group>::size> tile{};
-    reg_cached_node_reference<T, N, std::remove_cvref_t<Group>> result;
+    reg_cached_node_reference<K, V, N, std::remove_cvref_t<Group>> result;
     result.self = *this;
 
     auto tmp = atomic_ref<utility::uint32_bitset<N>>(ptr->present).load(memory_order_relaxed);
     
     if constexpr (tile(N / std::remove_cvref_t<Group>::size - 1, std::remove_cvref_t<Group>::size - 1) < N) {
       for(int i = 0; i < N / std::remove_cvref_t<Group>::size; ++i) {
-        result.regs[i] = atomic_ref<T>(ptr->values[tile(i, group.thread_rank())]).load(memory_order_relaxed);
+        result.k_regs[i] = atomic_ref<K>(ptr->keys[tile(i, group.thread_rank())]).load(memory_order_relaxed);
       }
       
       for(int i = 0; i < N / std::remove_cvref_t<Group>::size; ++i) {
@@ -253,7 +272,7 @@ struct reg_cached_node_pointer {
 
       for(int i = 0; i < N / std::remove_cvref_t<Group>::size; ++i) {
         if(tiling(i, group.thread_rank()) < N) {
-          result.regs[i] = atomic_ref<T>(ptr->values[tile(i, group.thread_rank())]).load(memory_order_relaxed);
+          result.k_regs[i] = atomic_ref<K>(ptr->keys[tile(i, group.thread_rank())]).load(memory_order_relaxed);
         }
       }
       
@@ -269,8 +288,9 @@ struct reg_cached_node_pointer {
     return result;
   }
 
-  HDS_HOST_DEVICE void set(int offset, T x) {
-    atomic_ref<T>(ptr->values[offset]).store(x, memory_order_relaxed);
+  HDS_HOST_DEVICE void set(int offset, K k, V v) {
+    atomic_ref<K>(ptr->keys[offset]).store(k, memory_order_relaxed);
+    atomic_ref<V>(ptr->values[offset]).store(v, memory_order_relaxed);
 
     auto tmp = atomic_ref<utility::uint32_bitset<N>>(ptr->present).load(memory_order_relaxed);
     tmp.set(offset, true);
@@ -366,26 +386,26 @@ struct reg_cached_node_pointer {
     printf("Node: %p\n", this);
 
     bool have_min = false;
-    T min_key;
+    K min_key;
 
     bool have_max = false;
-    T max_key;
+    K max_key;
     printf("Present : %x\n", static_cast<uint32_t>(ptr->present));
     for(int i = 0; i < N; ++i) {
       if(ptr->present.get(i)) {
-        printf("Key : %d\n", ptr->values[i]);
-        if(!have_min || ptr->values[i] < min_key) {
-          min_key = ptr->values[i];
+        printf("Key : %d Value : %d\n", static_cast<int>(ptr->keys[i]), static_cast<int>(ptr->values[i]));
+        if(!have_min || ptr->keys[i] < min_key) {
+          min_key = ptr->keys[i];
           have_min = true;
         }
-        if(!have_max || ptr->values[i] > max_key) {
+        if(!have_max || ptr->keys[i] > max_key) {
           max_key = ptr->values[i];
           have_max = true;
         }
       }
     }
 
-    printf("Min : %d | Max : %d\n", min_key, max_key);
+    printf("Min : %d | Max : %d\n", static_cast<int>(min_key), static_cast<int>(max_key));
     printf("Next : %p\n", ptr->next_);
     printf("\n");
   }

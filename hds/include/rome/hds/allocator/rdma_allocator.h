@@ -4,8 +4,8 @@
 
 namespace rome::hds::allocator {
 
-struct rdma_allocator {
-
+class rdma_allocator {
+public:
   rdma_allocator(rome::rdma::rdma_capability* ctx_) : ctx(ctx_) {}
 
   template<typename T>
@@ -18,6 +18,7 @@ struct rdma_allocator {
     return ctx->Deallocate(ptr, elements);
   }
 
+private:
   rome::rdma::rdma_capability* ctx;
 };
 

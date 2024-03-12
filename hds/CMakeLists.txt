@@ -12,3 +12,4 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include)
 add_library(rome::hds ALIAS hds)
 
 add_subdirectory(examples)
+add_subdirectory(benchmark)

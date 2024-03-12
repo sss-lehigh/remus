@@ -56,10 +56,10 @@ int main(int argc, char** argv) {
   rome::hds::locked_nodes::rdma_pointer_constructor constructor(ctx);
 
   using ll_t = rome::hds::lock_linked_list<int, 
-                                           10, 
-                                           rome::hds::locked_nodes::rdma_node_pointer, 
-                                           rome::hds::allocator::rdma_allocator, 
-                                           rome::hds::locked_nodes::rdma_pointer_constructor>;
+                                10, 
+                                rome::hds::locked_nodes::rdma_node_pointer, 
+                                rome::hds::allocator::rdma_allocator, 
+                                rome::hds::locked_nodes::rdma_pointer_constructor>;
 
   ll_t ll(alloc, constructor);
 
@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
         ASSERT(ll.insert(r, group) == inserted, r);
 
         //printf("\nInserted %d\n", r);
-        //ll.print(hds::threadgroup::single_threadgroup{});
+        //ll.print(rome::hds::threadgroup::single_threadgroup{});
 
       } else {
 
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
         ASSERT(ll.remove(r, group) == removed, r);
 
         //printf("\nRemoved %d\n", r);
-        //ll.print(hds::threadgroup::single_threadgroup{});
+        //ll.print(rome::hds::threadgroup::single_threadgroup{});
 
       }
 

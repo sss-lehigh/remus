@@ -2,67 +2,54 @@
 #include <concepts>
 #include <numeric>
 
-#include "../utility/optional.h"
-#include "../utility/atomic.h"
-#include "../utility/array.h"
-#include "../utility/bitset.h"
+#include "../../utility/optional.h"
+#include "../../utility/atomic.h"
+#include "../../utility/array.h"
+#include "../../utility/bitset.h"
+#include "utility.h"
 
 #pragma once
 
-namespace rome::hds {
+namespace rome::hds::kv_linked_list {
 
-template<typename T, 
-         int N, 
-         template<typename, int> typename node_pointer_>
-struct inplace_construct {
-
-  using node_pointer = node_pointer_<T, N>;
-  using node = typename node_pointer::node;
-  
-  constexpr HDS_HOST_DEVICE
-  node_pointer operator()(node* ptr) const {
-    return new (ptr) node(); 
-  }
-
-};
-
-template<typename T,
+template<typename K,
+         typename V,
          int N,
-         template<typename, int> typename node_pointer_,
+         template<typename, typename, int> typename node_pointer_,
          typename Allocator,
-         typename Constructor = inplace_construct<T, N, node_pointer_>>
-class lock_linked_list {
+         typename Constructor = kv_inplace_construct<K, V, N, node_pointer_>>
+class kv_lock_linked_list {
 private:
 
-  using node_pointer = node_pointer_<T, N>;
+  using node_pointer = node_pointer_<K, V, N>;
   using node = typename node_pointer::node;
 
 public:
 
-  HDS_HOST_DEVICE lock_linked_list() : lock_linked_list(Allocator{}) {}
+  HDS_HOST_DEVICE kv_lock_linked_list() : kv_lock_linked_list(Allocator{}) {}
 
   template<typename A>
     requires std::convertible_to<A, Allocator>
-  HDS_HOST_DEVICE lock_linked_list(A&& alloc_) : alloc(std::forward<A>(alloc_)) {
+  HDS_HOST_DEVICE kv_lock_linked_list(A&& alloc_) : alloc(std::forward<A>(alloc_)) {
     root = construct(alloc.template allocate<node>(1));
   }
 
   template<typename A, typename C>
     requires std::convertible_to<A, Allocator> and std::convertible_to<C, Constructor>
-  HDS_HOST_DEVICE lock_linked_list(A&& alloc_, C&& construct_) 
+  HDS_HOST_DEVICE kv_lock_linked_list(A&& alloc_, C&& construct_) 
     : alloc(std::forward<A>(alloc_)), 
       construct(std::forward<C>(construct_)) {
     root = construct(alloc.template allocate<node>(1));
   }
 
-  HDS_HOST_DEVICE ~lock_linked_list() {
+  HDS_HOST_DEVICE ~kv_lock_linked_list() {
     
     using pointer_t = decltype(alloc.template allocate<node>(1));
 
     node_pointer prev = root; 
     node_pointer current = root.unsafe_next();
 
-    while(current != nullptr) {
+    while (current != nullptr) {
       alloc.deallocate(static_cast<pointer_t>(prev), 1);
       prev = current;
       current = prev.unsafe_next();
@@ -77,19 +64,19 @@ public:
     node_pointer current = root.next(group);
     node_pointer next = nullptr;
 
-    if(current == nullptr) {
+    if (current == nullptr) {
       return;
     }
 
     auto current_ref = current.load(group);
     next = current_ref.next(group);
 
-    while(true) {
+    while (true) {
   
       current.print();
 
       current = next;
-      if(current == nullptr) {
+      if (current == nullptr) {
         return; 
       }
       current_ref = current.load(group);
@@ -103,26 +90,26 @@ public:
     auto current = root.next(group);
     node_pointer next = nullptr;
 
-    if(current == nullptr) {
+    if (current == nullptr) {
       return true;
     }
 
     auto current_ref = current.load(group);
     next = current_ref.next(group);
 
-    T prev_max = current_ref.max_key(group);
+    K prev_max = current_ref.max_key(group);
 
-    while(true) {
+    while (true) {
 
       current = next;
-      if(current == nullptr) {
+      if (current == nullptr) {
         return true; 
       }
 
       current_ref = current.load(group);
 
-      T current_min = current_ref.min_key(group);
-      if(current_min <= prev_max) {
+      K current_min = current_ref.min_key(group);
+      if (current_min <= prev_max) {
         return false;
       }
 
@@ -133,16 +120,16 @@ public:
   }
 
   template<typename Group>
-  HDS_HOST_DEVICE bool contains(T x, Group& group) {
+  HDS_HOST_DEVICE optional<V> get(K x, Group& group) {
 
-    while(true) {
+    while (true) {
       root.lock(group);
       node_pointer current = root.next(group);
       node_pointer next = nullptr;
 
-      if(current == nullptr) {
+      if (current == nullptr) {
         root.unlock(group);
-        return false;
+        return nullopt;
       }
 
       current.lock_unsync(group);
@@ -152,14 +139,24 @@ public:
       auto current_ref = current.load(group);
       next = current_ref.next(group);
 
-      while(true) {
+      while (true) {
 
-        if(current_ref.has_key(x, group)) {
+        if (current_ref.has_key(x, group)) {
+          
+          int idx = current_ref.index_of_key(x, group);
+
+          optional<V> value = nullopt;
+
+          if (group.is_leader()) {
+            value = current_ref.get(idx);
+          }
+
           current.unlock_unsync(group);
-          return true;
-        } else if(current_ref.has_any_gt_key(x, group) || next == nullptr) {
+          return value;
+
+        } else if (current_ref.has_any_gt_key(x, group) || next == nullptr) {
           current.unlock_unsync(group);
-          return false;
+          return nullopt;
         }
 
         next.lock_unsync(group);
@@ -175,9 +172,9 @@ public:
   }
 
   template<typename Group>
-  HDS_HOST_DEVICE bool insert(T x, Group& group) {
+  HDS_HOST_DEVICE bool insert(K k, V v, Group& group) {
 
-    while(true) {
+    while (true) {
       auto prev(root);
       prev.lock(group);
 
@@ -197,8 +194,8 @@ public:
         prev.store_next(new_node);
 
         // node is locked and we can insert in it
-        if(group.is_leader()) {
-          new_node.set(0, x);
+        if (group.is_leader()) {
+          new_node.set(0, k, v);
         }
 
         prev.unlock(group);
@@ -214,31 +211,32 @@ public:
       auto current_ref = current.load(group);
       auto next = current_ref.next(group);
 
-      while(true) {
+      while (true) {
 
         // prev and current are locked
 
         assert(prev != nullptr);
 
-        if (current_ref.has_key(x, group)) {
+        if (current_ref.has_key(k, group)) {
           group.sync();
           current.unlock_unsync(group);
           prev.unlock_unsync(group);
           return false;
-        } else if (current_ref.has_any_gt_key(x, group)) {
+        } else if (current_ref.has_any_gt_key(k, group)) {
+
+          //logging::print("Current has something gt key\n");
 
           bool prev_is_root = prev == root;
-          bool any_lt_key = current_ref.has_any_lt_key(x, group);
+          bool any_lt_key = current_ref.has_any_lt_key(k, group);
 
-          if(!prev_is_root && !any_lt_key) {
-
+          if (!prev_is_root && !any_lt_key) {
             // prev is not root and current only has keys gt our key
             auto prev_ref = prev.load(group); // reload node
             // try to insert into prev
             int idx = prev_ref.empty_index(group);
-            if(idx != -1) {
-              if(group.is_leader()) {
-                prev.set(idx, x);
+            if (idx != -1) {
+              if (group.is_leader()) {
+                prev.set(idx, k, v);
               }
               group.sync();
               current.unlock_unsync(group);
@@ -250,23 +248,21 @@ public:
           // insert into curr and maybe split
           int idx = current_ref.empty_index(group);
           
-          if(idx != -1) {
+          if (idx != -1) {
             // insert into current
-            if(group.is_leader()) {
-              current.set(idx, x);
+            if (group.is_leader()) {
+              current.set(idx, k, v);
             }
           } else {
-
-
             node_pointer left = nullptr;
-            if(group.is_leader()) {
+            if (group.is_leader()) {
               left = construct(alloc.template allocate<node>(1));
               node_pointer::init_locked_node(left);
               left.store_next(current);
               prev.store_next(left);
             }
             left = group.shfl(left, group.leader_rank());
-            current_ref.partition_by_and_insert(x, left, group);
+            current_ref.partition_by_and_insert(k, v, left, group);
             
             left.unlock(group);
           }
@@ -277,12 +273,14 @@ public:
           return true;
           
         } else if (next == nullptr) {
+          //logging::print("Next is nullptr\n");
           // insert into or after current
           int idx = current_ref.empty_index(group);
-          if(idx != -1) {
+          if (idx != -1) {
+            //logging::print("Inserting in current ", static_cast<node_pointer>(current), "\n");
             // insert into current
-            if(group.is_leader()) {
-              current.set(idx, x);
+            if (group.is_leader()) {
+              current.set(idx, k, v);
             }
             group.sync();
             current.unlock_unsync(group);
@@ -291,11 +289,11 @@ public:
           } else {
             // insert after current
 
-            if(group.is_leader()) {
+            if (group.is_leader()) {
               next = construct(alloc.template allocate<node>(1));
               node_pointer::init_locked_node(next);
               current.store_next(next);
-              next.set(0, x);
+              next.set(0, k, v);
               next.unlock_unsync_leader();
             }
             
@@ -322,14 +320,14 @@ public:
   }
 
   template<typename Group>
-  HDS_HOST_DEVICE bool remove(T x, Group& group) {
+  HDS_HOST_DEVICE bool remove(K x, Group& group) {
 
-    while(true) {
+    while (true) {
       node_pointer prev = root;
       root.lock(group);
       node_pointer current = root.next(group);
 
-      if(current == nullptr) {
+      if (current == nullptr) {
         root.unlock(group);
         return false;
       }
@@ -338,12 +336,12 @@ public:
 
       auto current_ref = current.load(group);
 
-      while(true) {
+      while (true) {
 
         auto next = current_ref.next(group);
         int idx = current_ref.index_of_key(x, group);
 
-        if(idx != -1) {
+        if (idx != -1) {
 
           bool reclaimed = false;
           if (group.is_leader()) {
@@ -356,19 +354,19 @@ public:
           current.unlock(group);
           prev.unlock(group); 
 
-          if(reclaimed) {
+          if (reclaimed) {
             using pointer_t = decltype(alloc.template allocate<node>(1));
             alloc.deallocate(static_cast<pointer_t>(current), 1);
           }
 
           return true;
-        } else if(current_ref.has_any_gt_key(x, group)) {
+        } else if (current_ref.has_any_gt_key(x, group)) {
           current.unlock(group);
           prev.unlock(group); 
           return false;
         }
 
-        if(next == nullptr) {
+        if (next == nullptr) {
           // reached the end
           prev.unlock(group);
           current.unlock(group);
