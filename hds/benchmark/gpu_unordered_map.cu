@@ -9,7 +9,7 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#include <rome/hds/unordered_map/gpu_unordered_map.h>
+#include <remus/hds/unordered_map/gpu_unordered_map.h>
 
 int test(auto& map, int read_percent, int population, int range, int ops) {
 
@@ -51,7 +51,7 @@ int test(auto& map, int read_percent, int population, int range, int ops) {
   }
 
   thrust::device_vector<long int> get_keys = h_get_keys;
-  thrust::device_vector<rome::hds::optional<long int>> get_result(h_get_keys.size());
+  thrust::device_vector<remus::hds::optional<long int>> get_result(h_get_keys.size());
   thrust::device_vector<long int> insert_keys = h_insert_keys;
   thrust::device_vector<long int> insert_values(h_insert_keys.size());
   thrust::device_vector<bool> insert_result(h_insert_keys.size());
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
     std::cout << "Size " << size << std::endl;
   }
 
-  rome::hds::gpu_unordered_map<long int, long int> map(size);
+  remus::hds::gpu_unordered_map<long int, long int> map(size);
 
   test(map, read_percent, population, range, ops);
 

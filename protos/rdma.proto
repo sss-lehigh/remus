@@ -1,6 +1,6 @@
 syntax = "proto2";
 
-package rome.rdma;
+package remus.rdma;
 
 // Represents a remotely accessible memory region. Used to convey the necessary information for remote nodes to interact with this memory, assuming that they have access to a QP that is connected to it.
 message RemoteObjectProto {

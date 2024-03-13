@@ -9,7 +9,7 @@ function(add_test_executable TARGET SOURCE)
     add_executable(${TARGET} ${SOURCE})
    
     foreach(NAME "${TARGET}")
-        target_link_libraries(${NAME} PRIVATE rome GTest::gtest GTest::gtest_main GTest::gmock ${__LIBS})
+        target_link_libraries(${NAME} PRIVATE remus GTest::gtest GTest::gtest_main GTest::gmock ${__LIBS})
     endforeach()
     
     if(NOT ${__DISABLE_TEST})

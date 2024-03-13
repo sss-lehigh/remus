@@ -1,6 +1,6 @@
 syntax = "proto2";
 
-package rome.metrics;
+package remus.metrics;
 
 message MetricProto {
   optional string name = 1;

@@ -1,10 +1,10 @@
 #include <vector>
 
 #include <protos/workloaddriver.pb.h>
-#include <rome/rdma/memory_pool.h>
-#include <rome/logging/logging.h>
-#include <rome/rdma/rdma.h>
-#include <rome/util/cli.h>
+#include <remus/rdma/memory_pool.h>
+#include <remus/logging/logging.h>
+#include <remus/rdma/rdma.h>
+#include <remus/util/cli.h>
 
 
 #include "common.h"
@@ -17,39 +17,39 @@
 ///
 /// TODO: Is this too specific to CloudLab?
 auto ARGS = {
-    rome::util::I64_ARG(
+    remus::util::I64_ARG(
         "--node_id",
         "The node's id. (nodeX in CloudLab should have X in this option)"),
-    rome::util::I64_ARG(
+    remus::util::I64_ARG(
         "--runtime",
         "How long to run the experiment for. Only valid if unlimited_stream"),
-    rome::util::BOOL_ARG_OPT(
+    remus::util::BOOL_ARG_OPT(
         "--unlimited_stream",
         "If the stream should be endless, stopping after runtime"),
-    rome::util::I64_ARG(
+    remus::util::I64_ARG(
         "--op_count",
         "How many operations to run. Only valid if not unlimited_stream"),
-    rome::util::I64_ARG("--region_size", "How big the region should be in 2^x bytes"),
-    rome::util::I64_ARG("--thread_count",
+    remus::util::I64_ARG("--region_size", "How big the region should be in 2^x bytes"),
+    remus::util::I64_ARG("--thread_count",
                  "How many threads to spawn with the operations"),
-    rome::util::I64_ARG("--node_count", "How many nodes are in the experiment"),
-    rome::util::I64_ARG(
+    remus::util::I64_ARG("--node_count", "How many nodes are in the experiment"),
+    remus::util::I64_ARG(
         "--qp_max",
         "The max number of queue pairs to allocate for the experiment."),
-    rome::util::I64_ARG("--contains", "Percentage of operations are contains, "
+    remus::util::I64_ARG("--contains", "Percentage of operations are contains, "
                                "(contains + insert + remove = 100)"),
-    rome::util::I64_ARG("--insert", "Percentage of operations are inserts, (contains "
+    remus::util::I64_ARG("--insert", "Percentage of operations are inserts, (contains "
                              "+ insert + remove = 100)"),
-    rome::util::I64_ARG("--remove", "Percentage of operations are removes, (contains "
+    remus::util::I64_ARG("--remove", "Percentage of operations are removes, (contains "
                              "+ insert + remove = 100)"),
-    rome::util::I64_ARG("--key_lb", "The lower limit of the key range for operations"),
-    rome::util::I64_ARG("--key_ub", "The upper limit of the key range for operations"),
+    remus::util::I64_ARG("--key_lb", "The lower limit of the key range for operations"),
+    remus::util::I64_ARG("--key_ub", "The upper limit of the key range for operations"),
 };
 
 #define PATH_MAX 4096
 #define PORT_NUM 18000
 
-using namespace rome::rdma;
+using namespace remus::rdma;
 
 // The optimal number of memory pools is mp=min(t, MAX_QP/n) where n is the
 // number of nodes and t is the number of threads To distribute mp (memory
@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
 
   // Configure the args object, parse the command line, and turn it into a
   // useful object
-  rome::util::ArgMap args;
+  remus::util::ArgMap args;
   if (auto res = args.import_args(ARGS); res) {
     ROME_FATAL(res.value());
   }
@@ -154,7 +154,7 @@ int main(int argc, char **argv) {
     // to finish
     threads.emplace_back(std::thread([&]() {
       // Initialize X connections
-      rome::util::tcp::SocketManager socket_handle = rome::util::tcp::SocketManager(PORT_NUM);
+      remus::util::tcp::SocketManager socket_handle = remus::util::tcp::SocketManager(PORT_NUM);
       for (int i = 0; i < params.thread_count * params.node_count; i++) {
         // TODO: Can we have a per-node connection?
         // I haven't gotten around to coming up with a clean way to reduce the
@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
       IHT iht = IHT(host);
       rdma_ptr<anon_ptr> root_ptr = iht.InitAsFirst(pools[0]);
       // Send the root pointer over
-      rome::util::tcp::message ptr_message = rome::util::tcp::message(root_ptr.raw());
+      remus::util::tcp::message ptr_message = remus::util::tcp::message(root_ptr.raw());
       socket_handle.send_to_all(&ptr_message);
       // We are the server
       ExperimentManager::ClientStopBarrier(socket_handle, params.runtime);
@@ -174,9 +174,9 @@ int main(int argc, char **argv) {
   }
 
   // Initialize T endpoints, one for each thread
-  rome::util::tcp::EndpointManager endpoint_managers[params.thread_count];
+  remus::util::tcp::EndpointManager endpoint_managers[params.thread_count];
   for (uint16_t i = 0; i < params.thread_count; i++) {
-    endpoint_managers[i] = rome::util::tcp::EndpointManager(PORT_NUM, host.address.c_str());
+    endpoint_managers[i] = remus::util::tcp::EndpointManager(PORT_NUM, host.address.c_str());
   }
 
   // Barrier to start all the clients at the same time
@@ -184,7 +184,7 @@ int main(int argc, char **argv) {
   // [mfs]  This starts all the clients *on this thread*, but that's not really
   //        a sufficient barrier.  A tree barrier is needed, to coordinate
   //        across nodes.
-  // [esl]  Is this something that would need to be implemented using rome?
+  // [esl]  Is this something that would need to be implemented using remus?
   //        I'm not exactly sure what the implementation of an RDMA barrier
   //        would look like. If you have one in mind, lmk and I can start
   //        working on it.
@@ -196,7 +196,7 @@ int main(int argc, char **argv) {
   //        an object.
   // TODO:  In the refactoring of the client adaptor, remove dependency on
   //        ProtoBufs for a workload object
-  rome::WorkloadDriverProto workload_results[params.thread_count];
+  remus::WorkloadDriverProto workload_results[params.thread_count];
   for (int i = 0; i < params.thread_count; i++) {
     threads.emplace_back(std::thread(
         [&](int thread_index) {
@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
           // remote_barrier data structure would be much better
           std::this_thread::sleep_for(std::chrono::milliseconds(10));
           // Get the data from the server to init the IHT
-          rome::util::tcp::message ptr_message;
+          remus::util::tcp::message ptr_message;
           endpoint_managers[thread_index].recv_server(&ptr_message);
           iht->InitFromPointer(rdma_ptr<anon_ptr>(ptr_message.get_first()));
 
@@ -222,7 +222,7 @@ int main(int argc, char **argv) {
                   std::move(iht), pool);
           double populate_frac =
               0.5 / (double)(params.node_count * params.thread_count);
-          rome::util::StatusVal<WorkloadDriverProto> output =
+          remus::util::StatusVal<WorkloadDriverProto> output =
               Client<IHT_Op<int, int>>::Run(std::move(client), thread_index,
                                             populate_frac);
           // [mfs]  It would be good to document how a client can fail, because
@@ -231,7 +231,7 @@ int main(int argc, char **argv) {
           // [esl]  I agree. A strange thing though: I think the output of
           //        Client::Run is always OK.  Any errors just crash the script,
           //        which lead to no results being generated?
-          if (output.status.t == rome::util::StatusType::Ok &&
+          if (output.status.t == remus::util::StatusType::Ok &&
               output.val.has_value()) {
             workload_results[thread_index] = output.val.value();
           } else {

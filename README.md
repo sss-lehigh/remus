@@ -1,20 +1,15 @@
-*DO NOT MERGE INTO LIBROME*
-
 # Overview
 
-Rome is a collection of useful utilities for research-oriented programming. 
+Remus is a collection of useful utilities for research-oriented programming. 
 This is the ethos of this project, to accumulate helpful tools that can serve as the basis for development.
 
-Remus is Romulus's brother that Romulus killed over disagreeing about where Rome should be.
-Any features here may be killed off at some point before making it to rome, hence the name.
-
 Remus Supports:
-* Workload driver library (see `rome/workload`) for experimental evaluation
-* Logging utilities (see `rome/logging`)
-* Measurements library (see `rome/metrics`)
-* Sundry other utilities that we don't know where to place yet (see `rome/util`)
-* RDMA (see `rome/rdma`)
-* NUMA (see `rome/numa`)
+* Workload driver library (see `remus/workload`) for experimental evaluation
+* Logging utilities (see `remus/logging`)
+* Measurements library (see `remus/metrics`)
+* Sundry other utilities that we don't know where to place yet (see `remus/util`)
+* RDMA (see `remus/rdma`)
+* NUMA (see `remus/numa`)
 
 ## Building
 
@@ -45,7 +40,7 @@ We have the following configuration options/flags:
 * GPU (ON or OFF) will compile with GPU support
 * KEEP (ON or OFF) will keep ptx and cubin files
 * DOCS (ON or OFF) will create documentation
-* NUMA (ON or OFF) will enable rome::numa
+* NUMA (ON or OFF) will enable remus::numa
 * LOG\_LEVEL (TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, or OFF) for logging
 * CXX\_STANDARD (20 or 23) for the C++ standard
 * CUDA\_ARCHITECTURES (semicolon seperated list of SM numbers) 
@@ -58,14 +53,14 @@ After installing you can include remus in any CMake project by setting:
 `-DCMAKE_PREFIX_PATH=/opt/remus/lib/cmake -DCMAKE_MODULE_PATH=/opt/remus/lib/cmake`
 when running cmake.
 
-Then in your CMakeLists.txt you can write `find_package(rome REQUIRED)`.
+Then in your CMakeLists.txt you can write `find_package(remus REQUIRED)`.
 
 Rome can be accessed by linking in CMake to any of these libraries: 
-- `rome::workload` 
-- `rome::logging`
-- `rome::metrics` 
-- `rome::rdma` 
-- `rome::util` 
-- `rome::protos` 
-- `rome::hds`
+- `remus::workload` 
+- `remus::logging`
+- `remus::metrics` 
+- `remus::rdma` 
+- `remus::util` 
+- `remus::protos` 
+- `remus::hds`
 

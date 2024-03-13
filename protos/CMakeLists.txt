@@ -4,7 +4,7 @@ protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS metrics.proto workloaddriver.proto e
 install(FILES ${PROTO_HDRS} DESTINATION include/protos)
 
 add_library(protos STATIC ${PROTO_SRCS})
-add_library(rome::protos ALIAS protos)
+add_library(remus::protos ALIAS protos)
 target_include_directories(protos PUBLIC 
                             $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
                             $<INSTALL_INTERFACE:include>)

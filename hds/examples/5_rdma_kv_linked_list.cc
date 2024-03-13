@@ -6,10 +6,10 @@
 #include <cstring>
 #include <iostream>
 
-#include <rome/hds/allocator/rdma_allocator.h>
-#include <rome/hds/unordered_map/kv_linked_list/lock_linked_list.h>
-#include <rome/hds/unordered_map/kv_linked_list/locked_nodes/rdma_nodes.h>
-#include <rome/hds/threadgroup/threadgroup.h>
+#include <remus/hds/allocator/rdma_allocator.h>
+#include <remus/hds/unordered_map/kv_linked_list/lock_linked_list.h>
+#include <remus/hds/unordered_map/kv_linked_list/locked_nodes/rdma_nodes.h>
+#include <remus/hds/threadgroup/threadgroup.h>
 #include <unordered_map>
 
 HDS_HOST_DEVICE void error() {
@@ -43,30 +43,30 @@ int main(int argc, char** argv) {
 
   std::cerr << "Using IP/name " << name << std::endl;
 
-  std::vector<rome::rdma::Peer> peers;
-  peers.push_back(rome::rdma::Peer(0, name));
+  std::vector<remus::rdma::Peer> peers;
+  peers.push_back(remus::rdma::Peer(0, name));
  
   auto host = peers.at(0);
 
   ROME_DEBUG("Creating pool");
-  auto ctx = new rome::rdma::rdma_capability(host);
+  auto ctx = new remus::rdma::rdma_capability(host);
   ctx->init_pool(1 << 24, peers);
   ctx->RegisterThread(); // need to register thread?
 
-  rome::hds::allocator::rdma_allocator alloc(ctx);
-  rome::hds::kv_linked_list::locked_nodes::rdma_pointer_constructor constructor(ctx);
+  remus::hds::allocator::rdma_allocator alloc(ctx);
+  remus::hds::kv_linked_list::locked_nodes::rdma_pointer_constructor constructor(ctx);
 
-  using ll_t = rome::hds::kv_linked_list::kv_lock_linked_list<
+  using ll_t = remus::hds::kv_linked_list::kv_lock_linked_list<
                 int, 
                 long,
                 10, 
-                rome::hds::kv_linked_list::locked_nodes::rdma_node_pointer, 
-                rome::hds::allocator::rdma_allocator, 
-                rome::hds::kv_linked_list::locked_nodes::rdma_pointer_constructor>;
+                remus::hds::kv_linked_list::locked_nodes::rdma_node_pointer, 
+                remus::hds::allocator::rdma_allocator, 
+                remus::hds::kv_linked_list::locked_nodes::rdma_pointer_constructor>;
 
   ll_t ll(alloc, constructor);
 
-  auto group = rome::hds::threadgroup::single_threadgroup{};
+  auto group = remus::hds::threadgroup::single_threadgroup{};
 
   try {
 
@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
         ASSERT(ll.insert(r, 1, group) == inserted, r);
 
         //printf("\nInserted %d\n", r);
-        //ll.print(rome::hds::threadgroup::single_threadgroup{});
+        //ll.print(remus::hds::threadgroup::single_threadgroup{});
 
       } else {
 
@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
         ASSERT(ll.remove(r, group) == removed, r);
 
         //printf("\nRemoved %d\n", r);
-        //ll.print(rome::hds::threadgroup::single_threadgroup{});
+        //ll.print(remus::hds::threadgroup::single_threadgroup{});
 
       }
 
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
 
       for(auto elm : reference) {
         auto res = ll.get(elm.first, group);
-        ASSERT(res != rome::hds::nullopt and *res == elm.second, elm.first);
+        ASSERT(res != remus::hds::nullopt and *res == elm.second, elm.first);
       }
     }
 

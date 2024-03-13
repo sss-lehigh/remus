@@ -24,5 +24,5 @@ message ExperimentParams {
 
 message ResultProto {
     optional ExperimentParams params = 1;
-    repeated rome.WorkloadDriverProto driver = 2; 
+    repeated remus.WorkloadDriverProto driver = 2; 
 }

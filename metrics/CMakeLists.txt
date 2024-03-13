@@ -9,5 +9,5 @@ target_link_libraries(metrics INTERFACE nlohmann_json::nlohmann_json)
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include) 
 
-add_library(rome::metrics ALIAS metrics)
+add_library(remus::metrics ALIAS metrics)
 

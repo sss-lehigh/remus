@@ -3,8 +3,8 @@
 
 #include <protos/experiment.pb.h>
 
-#include <rome/logging/logging.h>
-#include <rome/rdma/rdma.h>
+#include <remus/logging/logging.h>
+#include <remus/rdma/rdma.h>
 
 #include "common.h"
 #include "iht_ds.h"
@@ -23,7 +23,7 @@ namespace ExperimentManager {
 ///            function to allow for things such as remote deallocation.
 /// [esl]      TODO: the code in this file is small, it could be moved to main?
 /// @return ok status
-inline void ClientStopBarrier(rome::util::tcp::SocketManager &socket_handle,
+inline void ClientStopBarrier(remus::util::tcp::SocketManager &socket_handle,
                               int runtime_s) {
   // Sleep while clients are running if there is a set runtime.
   if (runtime_s > 0) {
@@ -40,13 +40,13 @@ inline void ClientStopBarrier(rome::util::tcp::SocketManager &socket_handle,
   // server-client (one->many relationship)
 
   // Receive a message from all clients to sync
-  rome::util::tcp::message recv_buffer[socket_handle.num_clients()];
+  remus::util::tcp::message recv_buffer[socket_handle.num_clients()];
   socket_handle.recv_from_all(recv_buffer);
   ROME_DEBUG("SERVER :: received ack");
 
   // Once we receive a message from everyone, everyone is done
   // So we now send an OK to exit message
-  rome::util::tcp::message send_buffer;
+  remus::util::tcp::message send_buffer;
   socket_handle.send_to_all(&send_buffer);
   ROME_DEBUG("SERVER :: sent ack");
 }

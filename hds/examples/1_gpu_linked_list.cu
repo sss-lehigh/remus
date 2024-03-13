@@ -1,9 +1,9 @@
 #include <cstdio>
 
-#include <rome/hds/allocator/allocator.h>
-#include <rome/hds/linked_list/lock_linked_list.h>
-#include <rome/hds/linked_list/locked_nodes/reg_cached_nodes.h>
-#include <rome/hds/threadgroup/threadgroup.h>
+#include <remus/hds/allocator/allocator.h>
+#include <remus/hds/linked_list/lock_linked_list.h>
+#include <remus/hds/linked_list/locked_nodes/reg_cached_nodes.h>
+#include <remus/hds/threadgroup/threadgroup.h>
 #include <set>
 
 HDS_HOST_DEVICE void error() {
@@ -16,11 +16,11 @@ exit(1);
 
 #define ASSERT(x, y) if(!(x)) { printf("%s did not evaluate to true for i = %d\n", #x, (y)); error(); }
 
-__global__ void single_thread_test(rome::hds::lock_linked_list<int, 2, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>* ll) {
+__global__ void single_thread_test(remus::hds::lock_linked_list<int, 2, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>* ll) {
 
-  ll = new (ll) rome::hds::lock_linked_list<int, 2, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>(); 
+  ll = new (ll) remus::hds::lock_linked_list<int, 2, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>(); 
 
-  auto group = rome::hds::threadgroup::single_threadgroup{};
+  auto group = remus::hds::threadgroup::single_threadgroup{};
 
   ASSERT(!ll->contains(1, group), 1);
 
@@ -44,14 +44,14 @@ __global__ void single_thread_test(rome::hds::lock_linked_list<int, 2, rome::hds
     }
   }
 
-  ll->~lock_linked_list<int, 2, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>(); 
+  ll->~lock_linked_list<int, 2, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>(); 
 }
 
-__global__ void warp_test(rome::hds::lock_linked_list<int, 32, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>* ll) {
+__global__ void warp_test(remus::hds::lock_linked_list<int, 32, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>* ll) {
 
-  auto warp = rome::hds::threadgroup::warp_threadgroup{};
+  auto warp = remus::hds::threadgroup::warp_threadgroup{};
   if (warp.is_leader()) {
-    new (ll) rome::hds::lock_linked_list<int, 32, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>(); 
+    new (ll) remus::hds::lock_linked_list<int, 32, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>(); 
   }
   warp.sync();
 
@@ -81,13 +81,13 @@ __global__ void warp_test(rome::hds::lock_linked_list<int, 32, rome::hds::locked
 
   warp.sync();
   if (warp.is_leader()) {
-    ll->~lock_linked_list<int, 32, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>(); 
+    ll->~lock_linked_list<int, 32, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>(); 
   }
 }
 
 int main() {
-  rome::hds::lock_linked_list<int, 2, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator> ll;
-  auto group = rome::hds::threadgroup::single_threadgroup{};
+  remus::hds::lock_linked_list<int, 2, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator> ll;
+  auto group = remus::hds::threadgroup::single_threadgroup{};
   ASSERT(!ll.contains(1, group), 1);
 
   std::set<int> reference;
@@ -126,9 +126,9 @@ int main() {
     }
   }
 
-  rome::hds::allocator::device_allocator dev_mem;
-  rome::hds::lock_linked_list<int, 2, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>* st_gpu_ll;
-  st_gpu_ll = dev_mem.allocate<rome::hds::lock_linked_list<int, 2, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>>(1);
+  remus::hds::allocator::device_allocator dev_mem;
+  remus::hds::lock_linked_list<int, 2, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>* st_gpu_ll;
+  st_gpu_ll = dev_mem.allocate<remus::hds::lock_linked_list<int, 2, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>>(1);
 
   single_thread_test<<<1, 1>>>(st_gpu_ll);
 
@@ -140,8 +140,8 @@ int main() {
 
   dev_mem.deallocate(st_gpu_ll, 1);
 
-  rome::hds::lock_linked_list<int, 32, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>* w_gpu_ll;
-  w_gpu_ll = dev_mem.allocate<rome::hds::lock_linked_list<int, 32, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>>(1);
+  remus::hds::lock_linked_list<int, 32, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>* w_gpu_ll;
+  w_gpu_ll = dev_mem.allocate<remus::hds::lock_linked_list<int, 32, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>>(1);
 
   warp_test<<<1, 32>>>(w_gpu_ll);
 
@@ -157,9 +157,9 @@ int main() {
 }
 
 __launch_bounds__(1024, 1)
-__global__ void warp_insert(rome::hds::lock_linked_list<int, 32, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>* ll, int i) {
+__global__ void warp_insert(remus::hds::lock_linked_list<int, 32, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>* ll, int i) {
 
-  auto warp = rome::hds::threadgroup::warp_threadgroup{};
+  auto warp = remus::hds::threadgroup::warp_threadgroup{};
 
   static_assert(decltype(warp)::size == 32);
 
@@ -168,9 +168,9 @@ __global__ void warp_insert(rome::hds::lock_linked_list<int, 32, rome::hds::lock
 }
 
 __launch_bounds__(1024, 1)
-__global__ void warp_remove(rome::hds::lock_linked_list<int, 32, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>* ll, int i) {
+__global__ void warp_remove(remus::hds::lock_linked_list<int, 32, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>* ll, int i) {
 
-  auto warp = rome::hds::threadgroup::warp_threadgroup{};
+  auto warp = remus::hds::threadgroup::warp_threadgroup{};
 
   static_assert(decltype(warp)::size == 32);
 
@@ -178,9 +178,9 @@ __global__ void warp_remove(rome::hds::lock_linked_list<int, 32, rome::hds::lock
 
 }
 
-__global__ void warp_contains(rome::hds::lock_linked_list<int, 32, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator>* ll, int i) {
+__global__ void warp_contains(remus::hds::lock_linked_list<int, 32, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator>* ll, int i) {
 
-  auto warp = rome::hds::threadgroup::warp_threadgroup{};
+  auto warp = remus::hds::threadgroup::warp_threadgroup{};
 
   static_assert(decltype(warp)::size == 32);
 

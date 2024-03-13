@@ -2,10 +2,10 @@
 
 #include <random>
 
-#include <rome/rdma/rdma.h>
+#include <remus/rdma/rdma.h>
 #include "common.h"
 
-using namespace rome::rdma;
+using namespace remus::rdma;
 
 template <class K, class V, int ELIST_SIZE, int PLIST_SIZE> class RdmaIHT {
 private:
@@ -146,8 +146,8 @@ private:
     remote_lock temp = pool->Allocate<lock_type>();
     pool->Write<lock_type>(lock, unlock_status, temp);
     // Have to deallocate "8" of them to account for alignment
-    // [esl] This "deallocate 8" is a hack to get around a rome memory leak.
-    // (must fix rome to fix this)
+    // [esl] This "deallocate 8" is a hack to get around a remus memory leak.
+    // (must fix remus to fix this)
     pool->Deallocate<lock_type>(temp, 8);
   }
 
@@ -177,8 +177,8 @@ private:
     if (!pool->is_local(bucket_ptr)) {
       // Have to use a temp variable to account for alignment. Remote pointer is
       // 8 bytes!
-      // [esl] This "deallocate 8" is a hack to get around a rome memory leak.
-      // todo: Must be fixed in rome
+      // [esl] This "deallocate 8" is a hack to get around a remus memory leak.
+      // todo: Must be fixed in remus
       auto temp =
           pool->Allocate<remote_baseptr>(); // ? because of alignment, this
                                             // might be 8 bytes. which is why

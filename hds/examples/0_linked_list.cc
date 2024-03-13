@@ -1,9 +1,9 @@
 #include <cstdio>
 
-#include <rome/hds/allocator/allocator.h>
-#include <rome/hds/linked_list/lock_linked_list.h>
-#include <rome/hds/linked_list/locked_nodes/reg_cached_nodes.h>
-#include <rome/hds/threadgroup/threadgroup.h>
+#include <remus/hds/allocator/allocator.h>
+#include <remus/hds/linked_list/lock_linked_list.h>
+#include <remus/hds/linked_list/locked_nodes/reg_cached_nodes.h>
+#include <remus/hds/threadgroup/threadgroup.h>
 #include <set>
 
 HDS_HOST_DEVICE void error() {
@@ -18,8 +18,8 @@ exit(1);
 
 int main() {
 
-  auto group = rome::hds::threadgroup::single_threadgroup{};
-  rome::hds::lock_linked_list<int, 2, rome::hds::locked_nodes::reg_cached_node_pointer, rome::hds::allocator::heap_allocator> ll;
+  auto group = remus::hds::threadgroup::single_threadgroup{};
+  remus::hds::lock_linked_list<int, 2, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator> ll;
   ASSERT(!ll.contains(1, group), 1);
 
   std::set<int> reference;

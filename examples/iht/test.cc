@@ -1,14 +1,14 @@
-#include <rome/rdma/memory_pool.h>
+#include <remus/rdma/memory_pool.h>
 
 #include <google/protobuf/text_format.h>
 #include <protos/experiment.pb.h>
 #include <protos/workloaddriver.pb.h>
 #include <vector>
 
-#include <rome/logging/logging.h>
-#include <rome/util/cli.h>
+#include <remus/logging/logging.h>
+#include <remus/util/cli.h>
 
-#include <rome/rdma/rdma.h>
+#include <remus/rdma/rdma.h>
 
 #include "common.h"
 #include "iht_ds.h"
@@ -16,16 +16,16 @@
 #include "role_server.h"
 
 auto ARGS = {
-    rome::util::BOOL_ARG_OPT("--send_bulk",
+    remus::util::BOOL_ARG_OPT("--send_bulk",
                       "If to run test operations multithreaded"),
-    rome::util::BOOL_ARG_OPT("--send_test",
+    remus::util::BOOL_ARG_OPT("--send_test",
                       "If to test the functionality of the methods"),
 };
 
 #define PATH_MAX 4096
 #define PORT_NUM 18000
 
-using namespace rome::rdma;
+using namespace remus::rdma;
 
 // The optimial number of memory pools is mp=min(t, MAX_QP/n) where n is the
 // number of nodes and t is the number of threads To distribute mp (memory
@@ -34,7 +34,7 @@ using namespace rome::rdma;
 int main(int argc, char **argv) {
   ROME_INIT_LOG();
 
-  rome::util::ArgMap args;
+  remus::util::ArgMap args;
   // import_args will validate that the newly added args don't conflict with
   // those already added.
   auto res = args.import_args(ARGS);

@@ -1,11 +1,11 @@
 #include <cstdio>
 
-#include <rome/hds/allocator/allocator.h>
-#include <rome/hds/unordered_map/kv_linked_list/lock_linked_list.h>
-#include <rome/hds/unordered_map/kv_linked_list/locked_nodes/reg_cached_nodes.h>
-#include <rome/hds/unordered_map/kv_linked_list/lazy_linked_list.h>
-#include <rome/hds/unordered_map/kv_linked_list/lazy_nodes/reg_cached_nodes.h>
-#include <rome/hds/threadgroup/threadgroup.h>
+#include <remus/hds/allocator/allocator.h>
+#include <remus/hds/unordered_map/kv_linked_list/lock_linked_list.h>
+#include <remus/hds/unordered_map/kv_linked_list/locked_nodes/reg_cached_nodes.h>
+#include <remus/hds/unordered_map/kv_linked_list/lazy_linked_list.h>
+#include <remus/hds/unordered_map/kv_linked_list/lazy_nodes/reg_cached_nodes.h>
+#include <remus/hds/threadgroup/threadgroup.h>
 #include <set>
 
 HDS_HOST_DEVICE void error() {
@@ -18,8 +18,8 @@ exit(1);
 
 #define ASSERT(x, y) if(!(x)) { printf("%s did not evaluate to true for i = %d\n", #x, (y)); error(); }
 
-using namespace rome::hds::kv_linked_list;
-using namespace rome::hds;
+using namespace remus::hds::kv_linked_list;
+using namespace remus::hds;
 
 template<typename T>
 __global__ void single_thread_test(T* ll) {

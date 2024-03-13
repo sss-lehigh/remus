@@ -6,5 +6,5 @@ target_include_directories(util INTERFACE
 target_link_libraries(util INTERFACE logging)
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include) 
-add_library(rome::util ALIAS util)
+add_library(remus::util ALIAS util)
 

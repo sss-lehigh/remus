@@ -1,11 +1,11 @@
 #include <thread>
 #include <iostream>
 
-#include <rome/numa/numa.h>
+#include <remus/numa/numa.h>
 
 int main() {
 
-  rome::numa::Policy p(rome::numa::NEXT_CORE_IN_NODE, rome::numa::NEXT_CORE_ACROSS_NODE, rome::numa::NEXT_CORE_SIBLING);
+  remus::numa::Policy p(remus::numa::NEXT_CORE_IN_NODE, remus::numa::NEXT_CORE_ACROSS_NODE, remus::numa::NEXT_CORE_SIBLING);
 
   std::cerr << "Found " << p.num_cores() << " cores" << std::endl;
 

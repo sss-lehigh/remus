@@ -11,16 +11,16 @@ Rome is built using CMake on Ubuntu 22.04 machines. You can download all the req
 ### Quick Cloudlab Deploy
 
 1. Environment: Ubuntu 22.04 (OS), r320 (Node Type)
-2. If on cloudlab, edit ./rome/scripts/nodefiles/r320.csv with data from listview
+2. If on cloudlab, edit ./remus/scripts/nodefiles/r320.csv with data from listview
 3. conda activate rdma
-4. cd into rome/scripts
+4. cd into remus/scripts
 5. Sync and download dependencies
 
 ```{bash}
-python rexec.py --nodefile=nodefiles/r320.csv --remote_user=esl225 --remote_root=/users/esl225/librome_iht --local_root=/Users/ethan/Research/librome_iht --sync --cmd="cd librome_iht/iht_rdma_minimal && sh cloudlab_depend.sh"
+python rexec.py --nodefile=nodefiles/r320.csv --remote_user=esl225 --remote_root=/users/esl225/libremus_iht --local_root=/Users/ethan/Research/libremus_iht --sync --cmd="cd libremus_iht/iht_rdma_minimal && sh cloudlab_depend.sh"
 ```
 
-7. Wait while configuring. Can check /tmp/rome/logs/cmd for updates.
+7. Wait while configuring. Can check /tmp/remus/logs/cmd for updates.
 8. [ONCE FINISHED] Login to nodes or continue to run commands using launch.py
 
 ```{bash}
@@ -56,6 +56,6 @@ OOM!!
 
 This signifies out of memory.
 
-## Installing librome in Docker container
+## Installing libremus in Docker container
 
 TODO!

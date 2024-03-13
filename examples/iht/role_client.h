@@ -5,9 +5,9 @@
 #include <protos/experiment.pb.h>
 #include <random>
 
-#include <rome/workload/workload_driver.h>
-#include <rome/logging/logging.h>
-#include <rome/rdma/rdma.h>
+#include <remus/workload/workload_driver.h>
+#include <remus/logging/logging.h>
+#include <remus/rdma/rdma.h>
 
 #include "common.h"
 #include "experiment.h"
@@ -15,9 +15,9 @@
 // #include "structures/hashtable.h"
 #include "iht_ds.h"
 
-using rome::WorkloadDriver;
-using rome::WorkloadDriverProto;
-using namespace rome::rdma;
+using remus::WorkloadDriver;
+using remus::WorkloadDriverProto;
+using namespace remus::rdma;
 using namespace std;
 
 // [mfs] This should really be defined somewhere else
@@ -39,7 +39,7 @@ inline bool test_output(bool show_passing, optional<int> actual,
 }
 
 template <class Operation> class Client {
-  // static_assert(::rome::IsClientAdapter<Client, Operation>);
+  // static_assert(::remus::IsClientAdapter<Client, Operation>);
 
 public:
   // [mfs]  Here and in Server, I don't understand the factory pattern.  It's
@@ -56,7 +56,7 @@ public:
   /// @param barr a barrier to synchonize local clients
   /// @param iht a pointer to an IHT
   /// @return a unique ptr
-  static unique_ptr<Client> Create(const Peer &server, rome::util::tcp::EndpointManager &ep,
+  static unique_ptr<Client> Create(const Peer &server, remus::util::tcp::EndpointManager &ep,
                                    BenchmarkParams &params, barrier<> *barr,
                                    unique_ptr<IHT> iht,
                                    shared_ptr<rdma_capability> pool) {
@@ -71,7 +71,7 @@ public:
   /// @param frac if 0, won't populate. Otherwise, will do this fraction of the
   /// population
   /// @return the resultproto
-  static rome::util::StatusVal<rome::WorkloadDriverProto>
+  static remus::util::StatusVal<remus::WorkloadDriverProto>
   Run(unique_ptr<Client> client, int thread_id, double frac) {
     // [mfs]  I was hopeful that this code was going to actually populate the
     //        data structure from *multiple nodes* simultaneously.  It should,
@@ -138,12 +138,12 @@ public:
 
     // Generate two streams based on what the user wants (operation count or
     // timed stream)
-    unique_ptr<rome::Stream<Operation>> workload_stream;
+    unique_ptr<remus::Stream<Operation>> workload_stream;
     if (client->params_.unlimited_stream) {
-      workload_stream = make_unique<rome::EndlessStream<Operation>>(generator);
+      workload_stream = make_unique<remus::EndlessStream<Operation>>(generator);
     } else {
       // Deliver a workload
-      workload_stream = make_unique<rome::FixedLengthStream<Operation>>(
+      workload_stream = make_unique<remus::FixedLengthStream<Operation>>(
           generator, client->params_.op_count);
     }
 
@@ -154,7 +154,7 @@ public:
     bool unlimited_stream = client->params_.unlimited_stream;
 
     // [mfs] Again, it looks like Create() is an unnecessary factory
-    auto driver = rome::WorkloadDriver<Client, Operation>::Create(
+    auto driver = remus::WorkloadDriver<Client, Operation>::Create(
         std::move(client), std::move(workload_stream),
         std::chrono::milliseconds(10));
     // [mfs]  This is quite odd.  The current thread is invoking an async thread
@@ -184,11 +184,11 @@ public:
     //        then to spend the time to refactor, which is why they haven't been
     //        changed yet. There probably needs to be a class for storing the
     //        result of an experiment.
-    return {rome::util::Status::Ok(), driver->ToProto()};
+    return {remus::util::Status::Ok(), driver->ToProto()};
   }
 
   // Start the client
-  rome::util::Status Start() {
+  remus::util::Status Start() {
     ROME_INFO("CLIENT :: Starting client...");
     pool_->RegisterThread(); // TODO? REMOVE?
     // [mfs]  The entire barrier infrastructure is odd.  Nobody is using it to
@@ -198,11 +198,11 @@ public:
     //        You make a good point, synchronizing among nodes would be good
     if (barrier_ != nullptr)
       barrier_->arrive_and_wait();
-    return rome::util::Status::Ok();
+    return remus::util::Status::Ok();
   }
 
   // Runs the next operation
-  rome::util::Status Apply(const Operation &op) {
+  remus::util::Status Apply(const Operation &op) {
     count++;
     optional<int> res;
     switch (op.op_type) {
@@ -252,7 +252,7 @@ public:
       ROME_FATAL("Expected CONTAINS, INSERT, or REMOVE operation.");
       break;
     }
-    return rome::util::Status::Ok();
+    return remus::util::Status::Ok();
   }
 
   // A function for communicating with the server that we are done. Will wait
@@ -261,20 +261,20 @@ public:
   // [mfs]  This is really just trying to create a Barrier over RPC.  There's
   //        nothing wrong with that, in principle, but if all we really need is
   //        a barrier, then why not just make a barrier?
-  rome::util::Status Stop() {
+  remus::util::Status Stop() {
     ROME_DEBUG("CLIENT :: Stopping client...");
 
     // send the ack to let the server know that we are done
-    rome::util::tcp::message send_buffer;
+    remus::util::tcp::message send_buffer;
     endpoint_.send_server(&send_buffer);
     ROME_DEBUG("CLIENT :: Sent Ack");
 
     // Wait to receive an ack back. Letting us know that the other clients are
     // done.
-    rome::util::tcp::message recv_buffer;
+    remus::util::tcp::message recv_buffer;
     endpoint_.recv_server(&recv_buffer);
     ROME_DEBUG("CLIENT :: Received Ack");
-    return rome::util::Status::Ok();
+    return remus::util::Status::Ok();
   }
 
 private:
@@ -288,7 +288,7 @@ private:
   /// @param iht a pointer to an IHT
   /// @param pool the memory pool capability for the IHT
   /// @return a unique ptr
-  Client(const Peer &host, rome::util::tcp::EndpointManager &ep, BenchmarkParams &params,
+  Client(const Peer &host, remus::util::tcp::EndpointManager &ep, BenchmarkParams &params,
          barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool)
       : host_(host), endpoint_(ep), params_(params), barrier_(barr),
         iht_(std::move(iht)), pool_(pool) {
@@ -304,7 +304,7 @@ private:
   const Peer host_;
   /// @brief Represents an endpoint to be used for communication with the host
   /// peer
-  rome::util::tcp::EndpointManager endpoint_;
+  remus::util::tcp::EndpointManager endpoint_;
   /// @brief Experimental parameters
   const BenchmarkParams params_;
   /// @brief a barrier for syncing amount clients locally

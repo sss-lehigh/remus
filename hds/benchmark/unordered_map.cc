@@ -5,18 +5,18 @@
 #include <chrono>
 #include <getopt.h>
 
-#include <rome/hds/allocator/allocator.h>
-#include <rome/hds/unordered_map/kv_linked_list/lock_linked_list.h>
-#include <rome/hds/unordered_map/kv_linked_list/locked_nodes/reg_cached_nodes.h>
-#include <rome/hds/unordered_map/unordered_map.h>
-#include <rome/hds/threadgroup/threadgroup.h>
+#include <remus/hds/allocator/allocator.h>
+#include <remus/hds/unordered_map/kv_linked_list/lock_linked_list.h>
+#include <remus/hds/unordered_map/kv_linked_list/locked_nodes/reg_cached_nodes.h>
+#include <remus/hds/unordered_map/unordered_map.h>
+#include <remus/hds/threadgroup/threadgroup.h>
 
 int test(auto map, int read_percent, int population, int range, int nthreads, int ops) {
 
   std::default_random_engine gen;
   std::uniform_int_distribution<int> key_dist(1, range);
 
-  auto group = rome::hds::threadgroup::single_threadgroup{};
+  auto group = remus::hds::threadgroup::single_threadgroup{};
   int count = 0;
   while (count < population) {
     if (map->insert(key_dist(gen), 1, group)) {
@@ -33,7 +33,7 @@ int test(auto map, int read_percent, int population, int range, int nthreads, in
       std::uniform_int_distribution<int> key_dist(1, range);
       std::uniform_int_distribution<int> op_dist(0, 99);
       bool last_insert = false;
-      auto group = rome::hds::threadgroup::single_threadgroup{};
+      auto group = remus::hds::threadgroup::single_threadgroup{};
 
       bar.arrive_and_wait();
       
@@ -167,42 +167,42 @@ int main(int argc, char** argv) {
 
   if (node_size == 1) {
 
-    auto map = new rome::hds::unordered_map<int, 
+    auto map = new remus::hds::unordered_map<int, 
                                             int, 
                                             1, 
-                                            rome::hds::kv_linked_list::kv_lock_linked_list,
-                                            rome::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
-                                            rome::hds::allocator::heap_allocator>(size);
+                                            remus::hds::kv_linked_list::kv_lock_linked_list,
+                                            remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
+                                            remus::hds::allocator::heap_allocator>(size);
 
     test(map, read_percent, population, range, nthreads, ops);
   } else if (node_size == 2) {
 
-    auto map = new rome::hds::unordered_map<int, 
+    auto map = new remus::hds::unordered_map<int, 
                                             int, 
                                             2, 
-                                            rome::hds::kv_linked_list::kv_lock_linked_list,
-                                            rome::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
-                                            rome::hds::allocator::heap_allocator>(size);
+                                            remus::hds::kv_linked_list::kv_lock_linked_list,
+                                            remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
+                                            remus::hds::allocator::heap_allocator>(size);
 
     test(map, read_percent, population, range, nthreads, ops);
   } else if (node_size == 4) {
 
-    auto map = new rome::hds::unordered_map<int, 
+    auto map = new remus::hds::unordered_map<int, 
                                             int, 
                                             4, 
-                                            rome::hds::kv_linked_list::kv_lock_linked_list,
-                                            rome::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
-                                            rome::hds::allocator::heap_allocator>(size);
+                                            remus::hds::kv_linked_list::kv_lock_linked_list,
+                                            remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
+                                            remus::hds::allocator::heap_allocator>(size);
 
     test(map, read_percent, population, range, nthreads, ops);
   } else if (node_size == 8) {
 
-    auto map = new rome::hds::unordered_map<int, 
+    auto map = new remus::hds::unordered_map<int, 
                                             int, 
                                             8, 
-                                            rome::hds::kv_linked_list::kv_lock_linked_list,
-                                            rome::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
-                                            rome::hds::allocator::heap_allocator>(size);
+                                            remus::hds::kv_linked_list::kv_lock_linked_list,
+                                            remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
+                                            remus::hds::allocator::heap_allocator>(size);
 
     test(map, read_percent, population, range, nthreads, ops);
   } else {

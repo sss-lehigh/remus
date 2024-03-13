@@ -6,5 +6,5 @@ target_include_directories(workload INTERFACE
 target_link_libraries(workload INTERFACE metrics)
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include) 
-add_library(rome::workload ALIAS workload)
+add_library(remus::workload ALIAS workload)
 

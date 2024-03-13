@@ -1,6 +1,6 @@
 #pragma once
 
-#include <rome/util/tcp/tcp.h>
+#include <remus/util/tcp/tcp.h>
 
 /// @brief a type used for templating remote pointers as anonymous (for
 /// exchanging over the network where the types are "lost")

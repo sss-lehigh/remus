@@ -88,22 +88,22 @@ add_subdirectory(protos) #TODO get rid of this requirement
 #                           $<INSTALL_INTERFACE:include>)
 #install(DIRECTORY ${PROJECT_SOURCE_DIR}/vendor/spdlog-1.12.0 DESTINATION include) 
 
-## rome::workload
+## remus::workload
 add_subdirectory(workload)
 
-## rome::logging
+## remus::logging
 add_subdirectory(logging)
 
-## rome::metrics
+## remus::metrics
 add_subdirectory(metrics)
 
-## rome::rdma
+## remus::rdma
 add_subdirectory(rdma)
 
-## rome::util
+## remus::util
 add_subdirectory(util)
 
-## rome::hds
+## remus::hds
 add_subdirectory(hds)
 
 if(NUMA)
@@ -117,24 +117,24 @@ endif()
 if(NUMA)
 
   install(TARGETS workload logging metrics rdma util protos numa hds
-                  EXPORT romeTargets
+                  EXPORT remusTargets
           LIBRARY DESTINATION lib
           ARCHIVE DESTINATION lib
           RUNTIME DESTINATION bin
           INCLUDES DESTINATION include)
   
   install(FILES ${PROJECT_SOURCE_DIR}/cmake/FindNUMA.cmake DESTINATION lib/cmake/)
-  install(FILES ${PROJECT_SOURCE_DIR}/share/numa/romeConfig.cmake DESTINATION lib/cmake)
+  install(FILES ${PROJECT_SOURCE_DIR}/share/numa/remusConfig.cmake DESTINATION lib/cmake)
 
 else()
 
   install(TARGETS workload logging metrics rdma util protos hds
-                  EXPORT romeTargets
+                  EXPORT remusTargets
           LIBRARY DESTINATION lib
           ARCHIVE DESTINATION lib
           RUNTIME DESTINATION bin
           INCLUDES DESTINATION include)
-  install(FILES ${PROJECT_SOURCE_DIR}/share/romeConfig.cmake DESTINATION lib/cmake)
+  install(FILES ${PROJECT_SOURCE_DIR}/share/remusConfig.cmake DESTINATION lib/cmake)
 
 endif()
 
@@ -145,9 +145,9 @@ install(FILES ${PROJECT_SOURCE_DIR}/protos/metrics.proto DESTINATION protos)
 install(FILES ${PROJECT_SOURCE_DIR}/protos/workloaddriver.proto DESTINATION protos)
 # install protos for reuse
 
-install(EXPORT romeTargets
-        FILE romeTargets.cmake
-        NAMESPACE rome::
+install(EXPORT remusTargets
+        FILE remusTargets.cmake
+        NAMESPACE remus::
         DESTINATION lib/cmake)
 
 
