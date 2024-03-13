@@ -77,7 +77,15 @@ template<typename K,
             = kv_linked_list::lazy_nodes::reg_cached_node_pointer>
 class gpu_unordered_map {
 private:
-  using um_t = unordered_map<K, V, 32, linked_list_, node_pointer_, Allocator, Hash>;
+  using um_t = unordered_map<K, 
+                             V, 
+                             32, 
+                             linked_list_, 
+                             node_pointer_, 
+                             Allocator, 
+                             kv_linked_list::kv_inplace_construct<K, V, 32, node_pointer_>, 
+                             Allocator,
+                             Hash>;
 public:
 
   HDS_HOST gpu_unordered_map(uint32_t size) : gpu_unordered_map(size, Allocator{}) {}

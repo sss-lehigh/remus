@@ -22,6 +22,10 @@ target_link_libraries(4_gpu_kv_linked_list PRIVATE hds)
 add_test(4_gpu_kv_linked_list 4_gpu_kv_linked_list)
 endif()
 
+add_executable(5_rdma_kv_linked_list 5_rdma_kv_linked_list.cc)
+target_link_libraries(5_rdma_kv_linked_list PRIVATE hds)
+add_test(5_rdma_kv_linked_list 5_rdma_kv_linked_list)
+
 add_executable(6_unordered_map 6_unordered_map.cc)
 target_link_libraries(6_unordered_map PRIVATE hds)
 add_test(6_unordered_map 6_unordered_map)
@@ -32,4 +36,7 @@ target_link_libraries(7_gpu_unordered_map PRIVATE hds)
 add_test(7_gpu_unordered_map 7_gpu_unordered_map)
 endif()
 
+add_executable(8_rdma_unordered_map 8_rdma_unordered_map.cc)
+target_link_libraries(8_rdma_unordered_map PRIVATE hds)
+add_test(8_rdma_unordered_map 8_rdma_unordered_map)
 

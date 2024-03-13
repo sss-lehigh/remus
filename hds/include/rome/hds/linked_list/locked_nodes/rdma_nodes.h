@@ -9,27 +9,26 @@
 
 #pragma once
 
-namespace rome::hds::kv_linked_list::locked_nodes {
+namespace rome::hds::locked_nodes {
 
-template<typename K, typename V, int N>
+template<typename T, int N>
 struct rdma_node_t {
   alignas(128) uint64_t lock_ = 0;
   alignas(128) utility::uint32_bitset<N> present = 0;
-  alignas(128) K keys[N];
-  rome::rdma::rdma_ptr<rdma_node_t<K,V,N>> next_ = nullptr;
-  alignas(128) V values[N];
+  alignas(128) T values[N];
+  rome::rdma::rdma_ptr<rdma_node_t<T,N>> next_ = nullptr;
 };
 
-template<typename K, typename V, int N>
+
+template<typename T, int N>
 struct rdma_node_pointer;
 
-template<typename K, typename V, int N, typename Group>
+template<typename T, int N, typename Group>
 struct rdma_node_reference {
 
   static_assert(Group::size == 1, "Only support single thread group for now");
   
-  using node = rdma_node_t<K, V, N>;
-
+  using node = rdma_node_t<T, N>;
   template<typename U>
   using rdma_ptr = rome::rdma::rdma_ptr<U>;
 
@@ -37,23 +36,19 @@ struct rdma_node_reference {
 
   constexpr static size_t size_of_group = Group::size;
 
-  HDS_HOST_DEVICE int index_of_key(K x, Group& group) {
+  HDS_HOST_DEVICE int index_of_key(T x, Group& group) {
     bool found = false;
     for(int i = 0; i < N; ++i) {
-      if(local->present.get(i) && local->keys[i] == x) {
+      if(local->present.get(i) && local->values[i] == x) {
         return i;
       }
     }
     return -1;
   }
 
-  HDS_HOST_DEVICE V get(int idx) {
-    return local->values[idx];
-  }
-
-  HDS_HOST_DEVICE bool has_key(K x, Group& group) {
+  HDS_HOST_DEVICE bool has_key(T x, Group& group) {
     for(int i = 0; i < N; ++i) {
-      if(local->present.get(i) && local->keys[i] == x) {
+      if(local->present.get(i) && local->values[i] == x) {
         return true;
       }
     }
@@ -69,9 +64,9 @@ struct rdma_node_reference {
     return -1;
   }
 
-  HDS_HOST_DEVICE bool has_any_lt_key(K x, Group& group) {
+  HDS_HOST_DEVICE bool has_any_lt_key(T x, Group& group) {
     for(int i = 0; i < N; ++i) {
-      if(local->present.get(i) && local->keys[i] < x) {
+      if(local->present.get(i) && local->values[i] < x) {
         return true;
       }
     }
@@ -79,9 +74,9 @@ struct rdma_node_reference {
     return false;
   }
 
-  HDS_HOST_DEVICE bool has_any_gt_key(K x, Group& group) {
+  HDS_HOST_DEVICE bool has_any_gt_key(T x, Group& group) {
     for(int i = 0; i < N; ++i) {
-      if(local->present.get(i) && local->keys[i] > x) {
+      if(local->present.get(i) && local->values[i] > x) {
         return true;
       }
     }
@@ -89,9 +84,9 @@ struct rdma_node_reference {
     return false;
   }
 
-  HDS_HOST_DEVICE bool has_any_gte_key(K x, Group& group) {
+  HDS_HOST_DEVICE bool has_any_gte_key(T x, Group& group) {
     for(int i = 0; i < N / size_of_group; ++i) {
-      if(local->present.get(i) && local->keys[i] >= x) {
+      if(local->present.get(i) && local->values[i] >= x) {
         return true;
       }
     }
@@ -100,11 +95,11 @@ struct rdma_node_reference {
   }
 
 
-  HDS_HOST_DEVICE K max_key(Group& group) {
-    K max_key_ = std::numeric_limits<K>::min();
+  HDS_HOST_DEVICE T max_key(Group& group) {
+    T max_key_ = std::numeric_limits<T>::min();
     for(int i = 0; i < N; ++i) {
-      if(local->present.get(i) && local->keys[i] >= max_key_) {
-        max_key_ = local->keys[i];
+      if(local->present.get(i) && local->values[i] >= max_key_) {
+        max_key_ = local->values[i];
       }
     }
 
@@ -112,18 +107,18 @@ struct rdma_node_reference {
   }
 
 
-  HDS_HOST_DEVICE K min_key(Group& group) {
-    K min_key_ = std::numeric_limits<K>::max();
+  HDS_HOST_DEVICE T min_key(Group& group) {
+    T min_key_ = std::numeric_limits<T>::max();
     for(int i = 0; i < N; ++i) {
-      if(local->present.get(i) && local->keys[i] <= min_key_) {
-        min_key_ = local->keys[i];
+      if(local->present.get(i) && local->values[i] <= min_key_) {
+        min_key_ = local->values[i];
       }
     }
 
     return min_key_;
   }
 
-  HDS_HOST_DEVICE void partition_by_and_insert(K k, V v, rdma_node_pointer<K, V, N> left, Group& group) {
+  HDS_HOST_DEVICE void partition_by_and_insert(T x, rdma_node_pointer<T, N> left, Group& group) {
 
     // TODO check left is local and assume it is
 
@@ -132,11 +127,10 @@ struct rdma_node_reference {
     utility::uint32_bitset<N> bits = 0;
 
     // src, dst 
-    std::ranges::copy(std::span<K, N>(local->keys), left.ptr->keys);
-    std::ranges::copy(std::span<V, N>(local->values), left.ptr->values);
+    std::ranges::copy(std::span<T, N>(local->values), left.ptr->values);
 
     for(int i = 0; i < N; ++i) {
-      if(local->present.get(i) && local->keys[i] < k) {
+      if(local->present.get(i) && local->values[i] < x) {
         // tell leader to store present bit set at i
         bits.set(i);
       }
@@ -151,25 +145,25 @@ struct rdma_node_reference {
 
     for(int i = 0; i < N; ++i) {
       if(!bits.get(i)) {
-        left.set(i, k, v);
+        left.set(i, x);
         break;
       }
       if(!new_present.get(i)) {
-        self.set(i, k, v);
+        self.set(i, x);
         break;
       }
     }
   }
 
-  HDS_HOST_DEVICE rdma_node_pointer<K, V, N> next(Group& group) {
-    return rdma_node_pointer<K, V, N>(local->next_, ctx);
+  HDS_HOST_DEVICE rdma_node_pointer<T, N> next(Group& group) {
+    return rdma_node_pointer<T, N>(local->next_, ctx);
   }
 
-  template<typename S, typename T, int O>
+  template<typename S, int O>
   friend struct rdma_node_pointer;
 
 private:
-  rdma_node_pointer<K, V, N> self;
+  rdma_node_pointer<T, N> self;
   rdma_ptr<node> local;
   rdma_capability* ctx;
 };
@@ -178,25 +172,24 @@ struct rdma_pointer_constructor {
 
   rdma_pointer_constructor(rome::rdma::rdma_capability* ctx_) : ctx(ctx_) {}
 
-  template<typename K, typename V, int N>
-  rdma_node_pointer<K, V, N> operator()(rome::rdma::rdma_ptr<rdma_node_t<K, V, N>> ptr) {
-    return rdma_node_pointer<K, V, N>(ptr, ctx);
+  template<typename T, int N>
+  rdma_node_pointer<T, N> operator()(rome::rdma::rdma_ptr<rdma_node_t<T, N>> ptr) {
+    return rdma_node_pointer<T, N>(ptr, ctx);
   }
 
   rome::rdma::rdma_capability* ctx;
 };
 
-template<typename K, typename V, int N>
+template<typename T, int N>
 struct rdma_node_pointer {
 
-  template<typename S, typename T, int O, typename Group>
+  template<typename S, int O, typename Group>
   friend struct rdma_node_reference;
   
-  using node = rdma_node_t<K, V, N>;
+  using node = rdma_node_t<T, N>;
   
   template<typename U>
   using rdma_ptr = rome::rdma::rdma_ptr<U>;
-
   using rdma_capability = rome::rdma::rdma_capability;
   
   
@@ -215,7 +208,7 @@ struct rdma_node_pointer {
   constexpr rdma_node_pointer& operator=(const rdma_node_pointer&) = default;
   constexpr rdma_node_pointer& operator=(rdma_node_pointer&&) = default;
 
-  HDS_HOST_DEVICE constexpr bool operator==(const rdma_node_pointer<K, V, N>& rhs) const {
+  HDS_HOST_DEVICE constexpr bool operator==(const rdma_node_pointer<T, N>& rhs) const {
     return ptr == rhs.ptr;
   }
 
@@ -228,12 +221,12 @@ struct rdma_node_pointer {
   }
 
   template<typename Group>
-  HDS_HOST_DEVICE rdma_node_reference<K, V, N, std::remove_cvref_t<Group>> load(Group& group) {
+  HDS_HOST_DEVICE rdma_node_reference<T, N, std::remove_cvref_t<Group>> load(Group& group) {
     static_assert(std::remove_cvref_t<Group>::size == 1, "Only support single thread group for now");
     static_assert(N % std::remove_cvref_t<Group>::size == 0);
     static_assert(std::remove_cvref_t<Group>::size <= N);
 
-    rdma_node_reference<K, V, N, std::remove_cvref_t<Group>> result;
+    rdma_node_reference<T, N, std::remove_cvref_t<Group>> result;
     result.self = *this;
     result.local = ctx->Read<node>(ptr);
     local_copy = result.local;
@@ -242,16 +235,14 @@ struct rdma_node_pointer {
     return result;
   }
 
-  HDS_HOST_DEVICE void set(int offset, K k, V v) {
+  HDS_HOST_DEVICE void set(int offset, T x) {
    
     if(local_copy == nullptr) {
       local_copy = ctx->Read<node>(ptr);
     }
 
-    auto keys_ptr = rdma_ptr<char>(ptr) + offsetof(node, keys) + sizeof(K) * offset;
-    auto values_ptr = rdma_ptr<char>(ptr) + offsetof(node, values) + sizeof(V) * offset;
-    ctx->Write(rdma_ptr<K>(keys_ptr), k);
-    ctx->Write(rdma_ptr<V>(values_ptr), v);
+    auto values_ptr = rdma_ptr<char>(ptr) + offsetof(node, values) + sizeof(T) * offset;
+    ctx->Write(rdma_ptr<T>(values_ptr), x);
 
     auto tmp = local_copy->present;
     tmp.set(offset, true);
@@ -367,20 +358,20 @@ struct rdma_node_pointer {
     printf("Node: %p\n", this);
 
     bool have_min = false;
-    K min_key;
+    T min_key;
 
     bool have_max = false;
-    K max_key;
+    T max_key;
     printf("Present : %x\n", static_cast<uint32_t>(ptr->present));
     for(int i = 0; i < N; ++i) {
       if(local_copy->present.get(i)) {
-        printf("Key : %d Value : %d\n", static_cast<int>(local_copy->keys[i]), static_cast<int>(local_copy->values[i]));
-        if(!have_min || local_copy->keys[i] < min_key) {
-          min_key = local_copy->keys[i];
+        printf("Key : %d\n", local_copy->values[i]);
+        if(!have_min || local_copy->values[i] < min_key) {
+          min_key = local_copy->values[i];
           have_min = true;
         }
-        if(!have_max || local_copy->keys[i] > max_key) {
-          max_key = local_copy->keys[i];
+        if(!have_max || local_copy->values[i] > max_key) {
+          max_key = local_copy->values[i];
           have_max = true;
         }
       }

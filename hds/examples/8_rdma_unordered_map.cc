@@ -7,6 +7,7 @@
 #include <iostream>
 
 #include <rome/hds/allocator/rdma_allocator.h>
+#include <rome/hds/unordered_map/unordered_map.h>
 #include <rome/hds/unordered_map/kv_linked_list/lock_linked_list.h>
 #include <rome/hds/unordered_map/kv_linked_list/locked_nodes/rdma_nodes.h>
 #include <rome/hds/threadgroup/threadgroup.h>
@@ -56,15 +57,16 @@ int main(int argc, char** argv) {
   rome::hds::allocator::rdma_allocator alloc(ctx);
   rome::hds::kv_linked_list::locked_nodes::rdma_pointer_constructor constructor(ctx);
 
-  using ll_t = rome::hds::kv_linked_list::kv_lock_linked_list<
-                int, 
-                long,
-                10, 
-                rome::hds::kv_linked_list::locked_nodes::rdma_node_pointer, 
-                rome::hds::allocator::rdma_allocator, 
-                rome::hds::kv_linked_list::locked_nodes::rdma_pointer_constructor>;
+  using map_t = rome::hds::unordered_map<int, 
+                                        int, 
+                                        10, 
+                                        rome::hds::kv_linked_list::kv_lock_linked_list,
+                                        rome::hds::kv_linked_list::locked_nodes::rdma_node_pointer, 
+                                        rome::hds::allocator::rdma_allocator, 
+                                        rome::hds::kv_linked_list::locked_nodes::rdma_pointer_constructor,
+                                        rome::hds::allocator::heap_allocator>;
 
-  ll_t ll(alloc, constructor);
+  map_t map(10000, alloc, rome::hds::allocator::heap_allocator{}, constructor);
 
   auto group = rome::hds::threadgroup::single_threadgroup{};
 
@@ -79,7 +81,7 @@ int main(int argc, char** argv) {
         int r = rand();
 
         bool inserted = reference.insert({r, 1}).second;
-        ASSERT(ll.insert(r, 1, group) == inserted, r);
+        ASSERT(map.insert(r, 1, group) == inserted, r);
 
         //printf("\nInserted %d\n", r);
         //ll.print(rome::hds::threadgroup::single_threadgroup{});
@@ -90,19 +92,15 @@ int main(int argc, char** argv) {
 
         bool removed = (reference.erase(r) == 1);
 
-        ASSERT(ll.remove(r, group) == removed, r);
+        ASSERT(map.remove(r, group) == removed, r);
 
         //printf("\nRemoved %d\n", r);
         //ll.print(rome::hds::threadgroup::single_threadgroup{});
 
       }
 
-      if(!ll.validate(group)) {
-        return 1;
-      }
-
       for(auto elm : reference) {
-        auto res = ll.get(elm.first, group);
+        auto res = map.get(elm.first, group);
         ASSERT(res != rome::hds::nullopt and *res == elm.second, elm.first);
       }
     }
@@ -116,7 +114,6 @@ int main(int argc, char** argv) {
   delete ctx;
 
   std::cout << "Success" << std::endl;
-
 
   return 1;
 }

@@ -1,5 +1,6 @@
 #include "kv_linked_list/lock_linked_list.h"
 #include "kv_linked_list/utility.h"
+#include "../allocator/allocator.h"
 
 #pragma once
 
@@ -63,10 +64,12 @@ template<typename K,
                   typename linked_list_,
          template<typename, typename, int> typename node_pointer_,
          typename Allocator,
+         typename Constructor = kv_linked_list::kv_inplace_construct<K, V, N, node_pointer_>,
+         typename ArrayAllocator = Allocator,
          typename Hash = BasicHash<K>>
 class unordered_map {
 private:
-  using kv_ll_t = linked_list_<K, V, N, node_pointer_, Allocator, kv_linked_list::kv_inplace_construct<K, V, N, node_pointer_>>;
+  using kv_ll_t = linked_list_<K, V, N, node_pointer_, Allocator, Constructor>;
 public:
 
   HDS_HOST_DEVICE unordered_map(uint32_t buckets_) 
@@ -82,10 +85,32 @@ public:
     
   template<typename A>
     requires std::convertible_to<A, Allocator>
-  HDS_HOST_DEVICE unordered_map(fast_div_mod divmod_, A&& alloc_) : divmod(divmod_), alloc(std::forward<A>(alloc_)) {
-    buckets_array = alloc.template allocate<kv_ll_t>(divmod.divisor);
+  HDS_HOST_DEVICE unordered_map(fast_div_mod divmod_, A&& alloc_) : divmod(divmod_), alloc(std::forward<A>(alloc_)), aalloc(alloc) {
+    buckets_array = aalloc.template allocate<kv_ll_t>(divmod.divisor);
     for(uint32_t i = 0; i < divmod.divisor; ++i) {
       new (buckets_array + i) kv_ll_t(alloc);
+    }
+  }
+
+  template<typename A, typename B, typename C>
+    requires std::convertible_to<A, Allocator> and 
+             std::convertible_to<B, ArrayAllocator> and 
+             std::convertible_to<C, Constructor>
+  HDS_HOST_DEVICE unordered_map(uint32_t buckets_, A&& alloc_, B&& aalloc_,  C&& construct) 
+    : unordered_map(fast_div_mod(buckets_), std::forward<A>(alloc_), std::forward<B>(aalloc_), std::forward<C>(construct)) {}
+
+  template<typename A, typename B, typename C>
+    requires std::convertible_to<A, Allocator> and 
+             std::convertible_to<B, ArrayAllocator> and 
+             std::convertible_to<C, Constructor>
+  HDS_HOST_DEVICE unordered_map(fast_div_mod divmod_, A&& alloc_, B&& aalloc_, C&& construct) 
+    : divmod(divmod_), 
+      alloc(std::forward<A>(alloc_)), 
+      aalloc(std::forward<B>(aalloc_))
+  {
+    buckets_array = aalloc.template allocate<kv_ll_t>(divmod.divisor);
+    for(uint32_t i = 0; i < divmod.divisor; ++i) {
+      new (buckets_array + i) kv_ll_t(alloc, std::forward<C>(construct));
     }
   }
 
@@ -95,7 +120,7 @@ public:
       (buckets_array + i)->~kv_ll_t();
     }
 
-    alloc.deallocate(buckets_array, divmod.divisor);
+    aalloc.deallocate(buckets_array, divmod.divisor);
   }
 
   template<typename Group>
@@ -121,6 +146,7 @@ private:
   kv_ll_t* buckets_array;
   fast_div_mod divmod;
   Allocator alloc;
+  ArrayAllocator aalloc;
 };
 
 };
