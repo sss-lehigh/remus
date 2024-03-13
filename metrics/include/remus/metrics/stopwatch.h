@@ -85,23 +85,23 @@ public:
     std::ifstream file;
     file.open(kTscFreqKhzFilePath);
     if (file.is_open()) {
-      ROME_TRACE("Loading tsc_freq from tsc_freq_khz");
+      REMUS_TRACE("Loading tsc_freq from tsc_freq_khz");
       file >> tsc_freq_khz;
     } else {
       file.clear();
       file.open(kMaxFreqFilePath);
       if (file.is_open()) {
-        ROME_TRACE("Loading tsc_freq from max_cpu_freq");
+        REMUS_TRACE("Loading tsc_freq from max_cpu_freq");
         file >> tsc_freq_khz;
       } else {
-        ROME_WARN("Could not determine CPU frequency. Using compile time "
+        REMUS_WARN("Could not determine CPU frequency. Using compile time "
                   "value: {} KHz "
                   "[RESULTS MAY BE INACCURATE]",
                   kDefaultCpuFreqKhz);
         tsc_freq_khz = kDefaultCpuFreqKhz;
       }
     }
-    ROME_DEBUG("Using tsc_freq: {}", tsc_freq_khz);
+    REMUS_DEBUG("Using tsc_freq: {}", tsc_freq_khz);
     return std::unique_ptr<Stopwatch>(new Stopwatch(name, tsc_freq_khz));
   }
 

@@ -1,12 +1,12 @@
 # Interlocked Hash Table in RDMA
 
-A Rome based IHT implementation.
+A Remus based IHT implementation.
 
 ## Deploying
 
 ### Downloading dependencies
 
-Rome is built using CMake on Ubuntu 22.04 machines. You can download all the required dependencies for running IHT using cloudlab_depend.sh
+Remus is built using CMake on Ubuntu 22.04 machines. You can download all the required dependencies for running IHT using cloudlab_depend.sh
 
 ### Quick Cloudlab Deploy
 

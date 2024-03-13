@@ -28,12 +28,12 @@ inline bool test_output(bool show_passing, optional<int> actual,
                         optional<int> expected, string message) {
   if (actual.has_value() != expected.has_value() &&
       actual.value_or(0) != expected.value_or(0)) {
-    ROME_INFO("[-] {} func():(Has Value {}=>{}) != expected:(Has Value {}=>{})",
+    REMUS_INFO("[-] {} func():(Has Value {}=>{}) != expected:(Has Value {}=>{})",
               message, actual.has_value(), actual.value_or(0),
               expected.has_value(), expected.value_or(0));
     return false;
   } else if (show_passing) {
-    ROME_INFO("[+] Test Case {} Passed!", message);
+    REMUS_INFO("[+] Test Case {} Passed!", message);
   }
   return true;
 }
@@ -82,7 +82,7 @@ public:
     // at the same time...
     int key_lb = client->params_.key_lb, key_ub = client->params_.key_ub;
     int op_count = (key_ub - key_lb) * frac;
-    ROME_INFO("CLIENT :: Data structure ({}%) is being populated ({} items "
+    REMUS_INFO("CLIENT :: Data structure ({}%) is being populated ({} items "
               "inserted) by this client",
               frac * 100, op_count);
     client->pool_->RegisterThread();
@@ -91,7 +91,7 @@ public:
     client->barrier_->arrive_and_wait();
     client->iht_->populate(client->pool_, op_count, key_lb, key_ub,
                            [=](int key) { return key; });
-    ROME_DEBUG("CLIENT :: Done with populate!");
+    REMUS_DEBUG("CLIENT :: Done with populate!");
     // TODO: Sleeping for 1 second to account for difference between remote
     // client start times. Must fix this in the future to a better solution
     // The idea is even though remote nodes won't be starting a workload at the
@@ -168,7 +168,7 @@ public:
     // TODO: It would be nice to redesign the dependency anyways, so maybe this
     // won't need to be fixed
     this_thread::sleep_for(chrono::seconds(runtime));
-    ROME_DEBUG("Done here, stop sequence");
+    REMUS_DEBUG("Done here, stop sequence");
     // Wait for all the clients to stop. Then set the done to true to release
     // the server
     if (barr != nullptr) {
@@ -176,7 +176,7 @@ public:
     }
     // [mfs] If we didn't use WorkloadDriver, then we wouldn't need Stop()
     OK_OR_FAIL(driver->Stop());
-    ROME_INFO("CLIENT :: Driver generated {}", driver->ToString());
+    REMUS_INFO("CLIENT :: Driver generated {}", driver->ToString());
     // [mfs]  It seems like these protos aren't being sent across machines.  Are
     //        they really needed?
     // [esl]  TODO: They are used by the workload driver. It was easier to live
@@ -189,7 +189,7 @@ public:
 
   // Start the client
   remus::util::Status Start() {
-    ROME_INFO("CLIENT :: Starting client...");
+    REMUS_INFO("CLIENT :: Starting client...");
     pool_->RegisterThread(); // TODO? REMOVE?
     // [mfs]  The entire barrier infrastructure is odd.  Nobody is using it to
     //        know when to get time, and it's completely per-node.
@@ -212,36 +212,36 @@ public:
       //        experiment's latency, so it's probably a bad idea.
       // [esl]  Periodic output helps me determine faster if my code is still
       // running or if I've deadlocked
-      //        Changing it to ROME_DEBUG to try and avoid hurting latency...
+      //        Changing it to REMUS_DEBUG to try and avoid hurting latency...
       if (count % progression == 0) {
-        ROME_DEBUG("Running Operation {}: contains({})", count, op.key);
+        REMUS_DEBUG("Running Operation {}: contains({})", count, op.key);
       }
       res = iht_->contains(pool_, op.key);
       if (res.has_value()) {
-        ROME_ASSERT(res.value() == op.key,
+        REMUS_ASSERT(res.value() == op.key,
                     "Invalid result of contains operation {}!={}", res.value(),
                     op.key);
       }
       break;
     case (INSERT):
       if (count % progression == 0) {
-        ROME_DEBUG("Running Operation {}: insert({}, {})", count, op.key,
+        REMUS_DEBUG("Running Operation {}: insert({}, {})", count, op.key,
                    op.value);
       }
       res = iht_->insert(pool_, op.key, op.value);
       if (res.has_value()) {
-        ROME_ASSERT(res.value() == op.key,
+        REMUS_ASSERT(res.value() == op.key,
                     "Invalid result of insert operation {}!={}", res.value(),
                     op.key);
       }
       break;
     case (REMOVE):
       if (count % progression == 0) {
-        ROME_DEBUG("Running Operation {}: remove({})", count, op.key);
+        REMUS_DEBUG("Running Operation {}: remove({})", count, op.key);
       }
       res = iht_->remove(pool_, op.key);
       if (res.has_value()) {
-        ROME_ASSERT(res.value() == op.key,
+        REMUS_ASSERT(res.value() == op.key,
                     "Invalid result of remove operation {}!={}", res.value(),
                     op.key);
       }
@@ -249,7 +249,7 @@ public:
     default:
       // if we get something other than a contains, insert, or remove, the
       // program probably should die
-      ROME_FATAL("Expected CONTAINS, INSERT, or REMOVE operation.");
+      REMUS_FATAL("Expected CONTAINS, INSERT, or REMOVE operation.");
       break;
     }
     return remus::util::Status::Ok();
@@ -262,18 +262,18 @@ public:
   //        nothing wrong with that, in principle, but if all we really need is
   //        a barrier, then why not just make a barrier?
   remus::util::Status Stop() {
-    ROME_DEBUG("CLIENT :: Stopping client...");
+    REMUS_DEBUG("CLIENT :: Stopping client...");
 
     // send the ack to let the server know that we are done
     remus::util::tcp::message send_buffer;
     endpoint_.send_server(&send_buffer);
-    ROME_DEBUG("CLIENT :: Sent Ack");
+    REMUS_DEBUG("CLIENT :: Sent Ack");
 
     // Wait to receive an ack back. Letting us know that the other clients are
     // done.
     remus::util::tcp::message recv_buffer;
     endpoint_.recv_server(&recv_buffer);
-    ROME_DEBUG("CLIENT :: Received Ack");
+    REMUS_DEBUG("CLIENT :: Received Ack");
     return remus::util::Status::Ok();
   }
 

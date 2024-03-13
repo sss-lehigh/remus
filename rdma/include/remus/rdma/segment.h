@@ -68,13 +68,13 @@ class Segment {
     // NB: The file just contains a single int
     std::ifstream file(HUGE_PAGE_PATH);
     if (!file.is_open()) {
-      ROME_TRACE("Failed to open file: "s + HUGE_PAGE_PATH);
+      REMUS_TRACE("Failed to open file: "s + HUGE_PAGE_PATH);
       return 0;
     }
     int nr_huge_pages;
     file >> nr_huge_pages;
     if (file.fail()) {
-      ROME_TRACE("Failed to read nr_huge_pages");
+      REMUS_TRACE("Failed to read nr_huge_pages");
       return 0;
     }
     return nr_huge_pages;
@@ -91,18 +91,18 @@ public:
 
     // Allocate raw memory
     if (GetNumHugePages() <= 0) {
-      ROME_TRACE("Not using huge pages; performance might suffer.");
+      REMUS_TRACE("Not using huge pages; performance might suffer.");
       // [mfs] Does the next line turn 64B into 128B?  Looks like it's not just
       // rounding?
       auto bytes = ((capacity >> 6) + 1) << 6; // Round up to nearest 64B
       raw_ = malloc_unique_ptr((uint8_t *)(std::aligned_alloc(64, bytes)));
-      ROME_ASSERT(std::get<0>(raw_) != nullptr, "Allocation failed.");
+      REMUS_ASSERT(std::get<0>(raw_) != nullptr, "Allocation failed.");
     } else {
-      ROME_INFO("Using huge pages");
+      REMUS_INFO("Using huge pages");
       raw_ = mmap_unique_ptr(reinterpret_cast<uint8_t *>(
           mmap(nullptr, capacity_, PROT_READ | PROT_WRITE,
                MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0)));
-      ROME_ASSERT((void *)(std::get<1>(raw_).get()) != MAP_FAILED,
+      REMUS_ASSERT((void *)(std::get<1>(raw_).get()) != MAP_FAILED,
                   "mmap failed.");
     }
 
@@ -112,9 +112,9 @@ public:
     memory_region_ =
         ibv_mr_unique_ptr(ibv_reg_mr(pd, base, capacity_, DEFAULT_ACCESS_MODE));
     if (memory_region_ == nullptr) {
-      ROME_FATAL("RegisterMemoryRegion :: ibv_reg_mr failed")
+      REMUS_FATAL("RegisterMemoryRegion :: ibv_reg_mr failed")
     }
-    ROME_TRACE("Memory region registered: @ {} to {} (length={})",
+    REMUS_TRACE("Memory region registered: @ {} to {} (length={})",
                fmt::ptr(base), fmt::ptr(base + capacity_), capacity_);
   }
 

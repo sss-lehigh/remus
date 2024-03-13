@@ -13,7 +13,7 @@ class ATreeNode;
 // optimized. The simplest form of the `ATree` is a set containing only nodes
 // with a key and pointers to its children.
 template <class Key, class... OptionalInfo>
-class ROME_PACKED ATreeNodeRequiredInfo {
+class REMUS_PACKED ATreeNodeRequiredInfo {
   typedef ATreeNode<Key, OptionalInfo...> node_type;
 
 public:

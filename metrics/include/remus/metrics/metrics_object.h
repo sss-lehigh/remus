@@ -216,7 +216,7 @@ public:
     json j = json::parse(data);
     name = j["name"];
     if (type != j["type"]){
-      ROME_WARN("Overriding type in deserialize old={} new={}", MetricType::stringify(type), MetricType::stringify(j["type"]));
+      REMUS_WARN("Overriding type in deserialize old={} new={}", MetricType::stringify(type), MetricType::stringify(j["type"]));
     }
     type = j["type"];
     if (type == MetricType::Summary){

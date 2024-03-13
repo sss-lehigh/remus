@@ -69,7 +69,7 @@ public:
                             uint16_t port) {
     using namespace std::string_literals;
     if (peer_id == my_id_)
-      ROME_FATAL("Cannot connect to localhost via ConnectRemote");
+      REMUS_FATAL("Cannot connect to localhost via ConnectRemote");
 
     while (true) {
       // Compute the info for the node we're connecting to
@@ -86,7 +86,7 @@ public:
       if (int gai_ret = rdma_getaddrinfo(server.data(), port_str.data(), &hints,
                                          &resolved);
           gai_ret != 0) {
-        ROME_FATAL("rdma_getaddrinfo(): "s + gai_strerror(gai_ret));
+        REMUS_FATAL("rdma_getaddrinfo(): "s + gai_strerror(gai_ret));
       }
 
       // Start connecting to the remote node
@@ -95,9 +95,9 @@ public:
       auto err = rdma_create_ep(&id, resolved, pd_, &init_attr);
       rdma_freeaddrinfo(resolved);
       if (err) {
-        ROME_FATAL("rdma_create_ep(): "s + strerror(errno));
+        REMUS_FATAL("rdma_create_ep(): "s + strerror(errno));
       }
-      ROME_TRACE("[Connect] (Node {}) Trying to connect to: {} (id={})", my_id_,
+      REMUS_TRACE("[Connect] (Node {}) Trying to connect to: {} (id={})", my_id_,
                  peer_id, fmt::ptr(id));
 
       // Migrate the new endpoint to a nonblocking event channel and do more
@@ -105,7 +105,7 @@ public:
       auto *event_channel = rdma_create_event_channel();
       make_nonblocking(event_channel->fd);
       if (rdma_migrate_id(id, event_channel) != 0) {
-        ROME_FATAL("rdma_migrate_id(): "s + strerror(errno));
+        REMUS_FATAL("rdma_migrate_id(): "s + strerror(errno));
       }
       rdma_conn_param conn_param = {0};
       conn_param.private_data = &my_id_;
@@ -115,7 +115,7 @@ public:
       conn_param.responder_resources = 8;
       conn_param.initiator_depth = 8;
       if (rdma_connect(id, &conn_param) != 0) {
-        ROME_FATAL("rdma_connect(): "s + strerror(errno));
+        REMUS_FATAL("rdma_connect(): "s + strerror(errno));
       }
 
       // It takes a few events before the channel is ready to use
@@ -128,14 +128,14 @@ public:
         while (result < 0 && errno == EAGAIN) {
           result = rdma_get_cm_event(id->channel, &event);
         }
-        ROME_TRACE("[Connect] (Node {}) Got event: {} (id={})", my_id_,
+        REMUS_TRACE("[Connect] (Node {}) Got event: {} (id={})", my_id_,
                    rdma_event_str(event->event), fmt::ptr(id));
 
         switch (event->event) {
         case RDMA_CM_EVENT_ESTABLISHED: {
           // On an "established" event, we can make and save the connection
           if (rdma_ack_cm_event(event) != 0) {
-            ROME_FATAL("rdma_ack_cm_event(): "s + strerror(errno));
+            REMUS_FATAL("rdma_ack_cm_event(): "s + strerror(errno));
           }
           make_sync(event_channel->fd); // TODO: Why sync instead of nonblocking
           make_nonblocking(id->recv_cq->channel->fd);
@@ -146,7 +146,7 @@ public:
           // TODO: Does the caller ever use the return value?
           auto new_conn = new Connection(my_id_, peer_id, id);
           connection_saver(peer_id, new_conn);
-          ROME_TRACE(
+          REMUS_TRACE(
               "Connected: dev={}, addr={}, port={}", id->verbs->device->name,
               inet_ntoa(reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(id))
                             ->sin_addr),
@@ -157,7 +157,7 @@ public:
         case RDMA_CM_EVENT_ADDR_RESOLVED:
           // On an ADDR_RESOLVED, we just ack
           if (rdma_ack_cm_event(event) != 0) {
-            ROME_FATAL("rdma_ack_cm_event(): "s + strerror(errno));
+            REMUS_FATAL("rdma_ack_cm_event(): "s + strerror(errno));
           }
           break;
 
@@ -165,13 +165,13 @@ public:
           // If we get a REJECTED, we can wait and try again.  Otherwise fail
           auto cm_event = event->event;
           if (rdma_ack_cm_event(event) != 0) {
-            ROME_FATAL("rdma_ack_cm_event(): "s + strerror(errno));
+            REMUS_FATAL("rdma_ack_cm_event(): "s + strerror(errno));
           }
           // Destruct intermediate state...
           rdma_destroy_ep(id);
           rdma_destroy_event_channel(event_channel);
           if (cm_event == RDMA_CM_EVENT_REJECTED) {
-            ROME_WARN("ROME_CM_EVENT_REJECTED... backing off"s +
+            REMUS_WARN("REMUS_CM_EVENT_REJECTED... backing off"s +
                       std::to_string(peer_id));
             backoff_us_ = backoff_us_ > 0
                               ? std::min((backoff_us_ + (100 * my_id_)) * 2,
@@ -180,7 +180,7 @@ public:
             std::this_thread::sleep_for(std::chrono::microseconds(backoff_us_));
             do_inner = false;
           } else {
-            ROME_FATAL("Got unexpected event: "s + rdma_event_str(cm_event));
+            REMUS_FATAL("Got unexpected event: "s + rdma_event_str(cm_event));
           }
         }
         }
@@ -195,7 +195,7 @@ public:
     using namespace std::string_literals;
 
     if (peer_id != my_id_) {
-      ROME_FATAL("Cannot connect to remote machine via ConnectLoopback");
+      REMUS_FATAL("Cannot connect to remote machine via ConnectLoopback");
     }
 
     while (true) {
@@ -217,7 +217,7 @@ public:
       if (int gai_ret = rdma_getaddrinfo(server.data(), port_str.data(), &hints,
                                          &resolved);
           gai_ret != 0) {
-        ROME_FATAL("rdma_getaddrinfo(): "s + gai_strerror(gai_ret));
+        REMUS_FATAL("rdma_getaddrinfo(): "s + gai_strerror(gai_ret));
       }
 
       // Start making a connection
@@ -226,10 +226,10 @@ public:
       auto err = rdma_create_ep(&id, resolved, pd_, &init_attr);
       rdma_freeaddrinfo(resolved);
       if (err) {
-        ROME_FATAL("rdma_create_ep(): "s + strerror(errno));
+        REMUS_FATAL("rdma_create_ep(): "s + strerror(errno));
       }
-      ROME_ASSERT_DEBUG(id->qp != nullptr, "No QP associated with endpoint");
-      ROME_TRACE("[Connect] (Node {}) Trying to connect to: {} (id={})", my_id_,
+      REMUS_ASSERT_DEBUG(id->qp != nullptr, "No QP associated with endpoint");
+      REMUS_TRACE("[Connect] (Node {}) Trying to connect to: {} (id={})", my_id_,
                  peer_id, fmt::ptr(id));
 
       //
@@ -239,10 +239,10 @@ public:
 
       ibv_device_attr dev_attr;
       if (ibv_query_device(id->verbs, &dev_attr) != 0) {
-        ROME_FATAL("ibv_query_device(): "s + strerror(errno));
+        REMUS_FATAL("ibv_query_device(): "s + strerror(errno));
       }
 
-      ROME_TRACE("Found device has "s + std::to_string(dev_attr.phys_port_cnt) + " ports"s); 
+      REMUS_TRACE("Found device has "s + std::to_string(dev_attr.phys_port_cnt) + " ports"s); 
 
       ibv_port_attr port_attr;
       uint32_t LOOPBACK_PORT_NUM = 1;
@@ -250,11 +250,11 @@ public:
       // use first port that is active for loopback
       for(int i = 1; i <= dev_attr.phys_port_cnt; ++i) {
         if (ibv_query_port(id->verbs, i, &port_attr) != 0) {
-          ROME_FATAL("ibv_query_port(): "s + strerror(errno));
+          REMUS_FATAL("ibv_query_port(): "s + strerror(errno));
         }
         if (port_attr.state == IBV_PORT_ACTIVE) {
           LOOPBACK_PORT_NUM = i;
-          ROME_DEBUG("Using physical port "s + std::to_string(i) 
+          REMUS_DEBUG("Using physical port "s + std::to_string(i) 
                      + " for loopback"s);
           break;
         }
@@ -270,7 +270,7 @@ public:
       int attr_mask =
           IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
       if (ibv_modify_qp(id->qp, &attr, attr_mask) != 0) {
-        ROME_FATAL("ibv_modify_qp(): "s + strerror(errno));
+        REMUS_FATAL("ibv_modify_qp(): "s + strerror(errno));
       }
 
       attr.ah_attr.dlid = port_attr.lid;
@@ -279,7 +279,7 @@ public:
       if(port_attr.lid == 0x0 or
          (port_attr.flags & IBV_QPF_GRH_REQUIRED) != 0) {
 
-        ROME_DEBUG("Creating a GRH is necessary");
+        REMUS_DEBUG("Creating a GRH is necessary");
 
         // This LID is invalid and likely RoCE, so this is a hack to
         // get around that or the GRH is required regardless
@@ -291,11 +291,11 @@ public:
         // There may be others, but I don't think that should impact
         // anything for us
         // We can go from gid = 0 to gid = port_attr.gid_table_len - 1
-        ROME_ASSERT(port_attr.gid_tbl_len >= 1, 
+        REMUS_ASSERT(port_attr.gid_tbl_len >= 1, 
                     "Need a gid table that has at least one entry");
         ibv_gid gid;
         if (ibv_query_gid(id->verbs, LOOPBACK_PORT_NUM, 0, &gid)) {
-          ROME_FATAL("Fail on query gid"s);
+          REMUS_FATAL("Fail on query gid"s);
         }
 
         // Set our gid
@@ -310,7 +310,7 @@ public:
         attr.ah_attr.grh.flow_label = 0;
       }
 
-      //ROME_ASSERT_DEBUG(port_attr.lid != 0x0, "LID of port uses reserved number");
+      //REMUS_ASSERT_DEBUG(port_attr.lid != 0x0, "LID of port uses reserved number");
 
       attr.qp_state = IBV_QPS_RTR;
       attr.dest_qp_num = id->qp->qp_num;
@@ -318,15 +318,15 @@ public:
           (IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
            IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
       if (ibv_modify_qp(id->qp, &attr, attr_mask) != 0) {
-        ROME_FATAL("ibv_modify_qp(): "s + strerror(errno));
+        REMUS_FATAL("ibv_modify_qp(): "s + strerror(errno));
       }
       attr.qp_state = IBV_QPS_RTS;
       attr_mask =
           (IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
            IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
-      ROME_TRACE("Loopback: IBV_QPS_RTS");
+      REMUS_TRACE("Loopback: IBV_QPS_RTS");
       if (ibv_modify_qp(id->qp, &attr, attr_mask) != 0) {
-        ROME_FATAL("ibv_modify_qp(): "s + strerror(errno));
+        REMUS_FATAL("ibv_modify_qp(): "s + strerror(errno));
       }
       make_nonblocking(id->recv_cq->channel->fd);
       make_nonblocking(id->send_cq->channel->fd);
@@ -336,7 +336,7 @@ public:
       // TODO: Does the caller ever use the return value?
       auto res = new Connection(my_id_, my_id_, id);
       connection_saver(my_id_, res);
-      ROME_TRACE(
+      REMUS_TRACE(
           "Connected Loopback: dev={}, addr={}, port={}",
           id->verbs->device->name,
           inet_ntoa(reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(id))

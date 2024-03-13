@@ -40,7 +40,7 @@ for machine in ${machines[@]}; do
 done
 
 # The executable file that needs to be sent over to cloudlab
-exefile="./build/examples/iht/iht_rome"
+exefile="./build/examples/iht/iht_remus"
 exename=$(basename ${exefile})
 
 # Configuration command... we're going to make this file on the remote machines

@@ -140,11 +140,11 @@ def main():
             bazel_path = f"/users/{ARGS.ssh_user}/go/bin/bazelisk"
             payload = f"cd {bin_dir} && cmake . && make && LD_LIBRARY_PATH=.:./protos ./"
             if ARGS.runtype == "test":
-                payload += "iht_rome_test --send_test"
+                payload += "iht_remus_test --send_test"
             elif ARGS.runtype == "concurrent_test":
-                payload += "iht_rome_test --send_bulk"
+                payload += "iht_remus_test --send_bulk"
             elif ARGS.runtype == "bench":
-                payload += "iht_rome"
+                payload += "iht_remus"
                 # Adding experiment flags
                 payload += process_exp_flags(node_id)
             else:

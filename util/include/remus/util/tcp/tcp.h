@@ -85,7 +85,7 @@ private:
   /// @brief Throw an exception with an error message
   /// @param message the message to print
   void error(const char *message) {
-    ROME_WARN(strerror(errno));
+    REMUS_WARN(strerror(errno));
     throw std::runtime_error(message);
   }
 
@@ -237,7 +237,7 @@ private:
   /// @brief Throw an exception with an error message
   /// @param message the message to print
   void error(const char *message) {
-    ROME_WARN(strerror(errno));
+    REMUS_WARN(strerror(errno));
     throw std::runtime_error(message);
   }
 

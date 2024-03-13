@@ -118,14 +118,14 @@ class MemoryPool {
       auto slabclass = UpperLog2(bytes);
       slabclass = std::max(kMinSlabClass, static_cast<uint8_t>(slabclass));
       auto slabclass_idx = slabclass - kMinSlabClass;
-      ROME_ASSERT(slabclass_idx >= 0 && slabclass_idx < kNumSlabClasses,
+      REMUS_ASSERT(slabclass_idx >= 0 && slabclass_idx < kNumSlabClasses,
                   "Invalid allocation requested: {} bytes", bytes);
-      ROME_ASSERT(alignment <= kMaxAlignment, "Invalid alignment: {} bytes",
+      REMUS_ASSERT(alignment <= kMaxAlignment, "Invalid alignment: {} bytes",
                   alignment);
 
       if (alignments_[slabclass_idx] & alignment) {
         auto *freelist = &freelists_[slabclass_idx];
-        ROME_ASSERT_DEBUG(!freelist->empty(), "Freelist should not be empty");
+        REMUS_ASSERT_DEBUG(!freelist->empty(), "Freelist should not be empty");
         for (auto f = freelist->begin(); f != freelist->end(); ++f) {
           if (f->first >= alignment) {
             auto *ptr = f->second;
@@ -133,7 +133,7 @@ class MemoryPool {
             if (f == freelist->end())
               alignments_[slabclass_idx] &= ~alignment;
             std::memset(ptr, 0, 1 << slabclass);
-            ROME_TRACE("(Re)allocated {} bytes @ {}", bytes, fmt::ptr(ptr));
+            REMUS_TRACE("(Re)allocated {} bytes @ {}", bytes, fmt::ptr(ptr));
             return ptr;
           }
         }
@@ -143,17 +143,17 @@ class MemoryPool {
       do {
         __d = (uint8_t *)((uint64_t)__e & ~(alignment - 1)) - bytes;
         if ((void *)(__d) < rdma_memory_->raw()) {
-          ROME_CRITICAL("OOM!");
+          REMUS_CRITICAL("OOM!");
           return nullptr;
         }
       } while (!head_.compare_exchange_strong(__e, __d));
 
-      ROME_TRACE("Allocated {} bytes @ {}", bytes, fmt::ptr(__d));
+      REMUS_TRACE("Allocated {} bytes @ {}", bytes, fmt::ptr(__d));
       return reinterpret_cast<void *>(__d);
     }
 
     void do_deallocate(void *p, size_t bytes, size_t alignment) override {
-      ROME_TRACE("Deallocating {} bytes @ {}", bytes, fmt::ptr(p));
+      REMUS_TRACE("Deallocating {} bytes @ {}", bytes, fmt::ptr(p));
       auto slabclass = UpperLog2(bytes);
       slabclass = std::max(kMinSlabClass, static_cast<uint8_t>(slabclass));
       auto slabclass_idx = slabclass - kMinSlabClass;
@@ -175,7 +175,7 @@ class MemoryPool {
         : rdma_memory_(std::make_unique<Segment>(bytes, pd)),
           head_(rdma_memory_->raw() + bytes) {
       std::memset(alignments_.data(), 0, sizeof(alignments_));
-      ROME_TRACE("rdma_memory_resource: {} to {} (length={})",
+      REMUS_TRACE("rdma_memory_resource: {} to {} (length={})",
                  fmt::ptr(rdma_memory_->raw()), fmt::ptr(head_.load()), bytes);
     }
 
@@ -262,10 +262,10 @@ public:
     control_lock_.lock();
     std::thread::id mid = std::this_thread::get_id();
     if (this->thread_ids.find(mid) != this->thread_ids.end()) {
-      ROME_FATAL("Cannot register the same thread twice");
+      REMUS_FATAL("Cannot register the same thread twice");
     }
     if (this->id_gen >= THREAD_MAX) {
-      ROME_FATAL("Hit upper limit on THREAD_MAX. todo: fix this condition");
+      REMUS_FATAL("Hit upper limit on THREAD_MAX. todo: fix this condition");
     }
     this->thread_ids.insert(std::make_pair(mid, this->id_gen));
     this->reordering_counters[this->id_gen] = 0;
@@ -282,7 +282,7 @@ public:
 
   /// Deallocate some memory to the local RDMA heap (must be from this node)
   template <typename T> void Deallocate(rdma_ptr<T> p, size_t size = 1) {
-    ROME_ASSERT(p.id() == self_.id,
+    REMUS_ASSERT(p.id() == self_.id,
                 "Alloc/dealloc on remote node not implemented...");
     rdma_memory_->template deallocateT<T>(std::to_address(p), size);
   }
@@ -345,15 +345,15 @@ public:
     if (prealloc == nullptr) {
       auto alloc = rdma_memory_.get();
       local = alloc->template allocateT<T>();
-      ROME_TRACE("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
+      REMUS_TRACE("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
                  (uint64_t)local);
     } else {
       local = std::to_address(prealloc);
-      ROME_TRACE("Preallocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
+      REMUS_TRACE("Preallocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
                  (uint64_t)local);
     }
 
-    ROME_ASSERT((uint64_t)local != ptr.address(), "WTF");
+    REMUS_ASSERT((uint64_t)local != ptr.address(), "WTF");
     std::memset(local, 0, sizeof(T));
     *local = val;
     ibv_sge sge{};
@@ -382,11 +382,11 @@ public:
       if (poll == 0 || (poll < 0 && errno == EAGAIN))
         continue;
       // Assert a good result
-      ROME_ASSERT(wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})",
+      REMUS_ASSERT(wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})",
                   (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)),
                   (std::stringstream() << ptr).str());
       int old = reordering_counters[wc.wr_id].fetch_sub(1);
-      ROME_ASSERT(old >= 1, "Broken synchronization");
+      REMUS_ASSERT(old >= 1, "Broken synchronization");
     }
 
     // [mfs]  It is odd that we have metrics for read (albeit with a bottleneck)
@@ -444,11 +444,11 @@ public:
         if (poll == 0 || (poll < 0 && errno == EAGAIN))
           continue;
         // Assert a good result
-        ROME_ASSERT(
+        REMUS_ASSERT(
             poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
             (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
         int old = reordering_counters[wc.wr_id].fetch_sub(1);
-        ROME_ASSERT(old >= 1, "Broken synchronization");
+        REMUS_ASSERT(old >= 1, "Broken synchronization");
       }
 
       if (*prev_ == send_wr_.wr.atomic.compare_add)
@@ -507,10 +507,10 @@ public:
       if (poll == 0 || (poll < 0 && errno == EAGAIN))
         continue;
       // Assert a good result
-      ROME_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
+      REMUS_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
                   (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
       int old = reordering_counters[wc.wr_id].fetch_sub(1);
-      ROME_ASSERT(old >= 1, "Broken synchronization");
+      REMUS_ASSERT(old >= 1, "Broken synchronization");
     }
 
     T ret = T(*prev_);
@@ -582,11 +582,11 @@ private:
       if (poll == 0 || (poll < 0 && errno == EAGAIN))
         continue;
       // Assert a good result
-      ROME_ASSERT(
+      REMUS_ASSERT(
           poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
           (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
       int old = reordering_counters[wc.wr_id].fetch_sub(1);
-      ROME_ASSERT(old >= 1, "Broken synchronization");
+      REMUS_ASSERT(old >= 1, "Broken synchronization");
     }
 
     // Update rdma per read

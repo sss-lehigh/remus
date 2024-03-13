@@ -55,7 +55,7 @@ def main():
             # Construct ssh command and payload
             ssh_login = f"ssh {ARGS.ssh_user}@{nodealias}.{domain_name(nodetype)}"
             # !!! The purpose here is to shutdown running instances of the program if its gets stuck somewhere !!!
-            payload = f"/usr/bin/killall -15 iht_rome; /usr/bin/killall -15 iht_rome_test"
+            payload = f"/usr/bin/killall -15 iht_remus; /usr/bin/killall -15 iht_remus_test"
             # Tuple: (Creating Command | Output File Name)
             commands.append((' '.join([ssh_login, quote(payload)]), nodename))
     # Execute the commands and let us know we've finished

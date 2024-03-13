@@ -65,7 +65,7 @@ public:
 
   ~rdma_capability() {
     // TODO: Make sure we aren't using the word "broker" anymore?
-    ROME_TRACE("Stopping listening thread...");
+    REMUS_TRACE("Stopping listening thread...");
     listener_->StopListeningThread();
   }
 
@@ -114,7 +114,7 @@ public:
     // collisions between nodes trying to connect with each other.
     for (const auto &p : peers) {
       if (p.id != self_.id && p.id > self_.id) {
-        ROME_DEBUG("Connecting to remote peer"s + p.address + ":" +
+        REMUS_DEBUG("Connecting to remote peer"s + p.address + ":" +
                    std::to_string(p.port) + " (id = " + std::to_string(p.id) +
                    ") from " + std::to_string(self_.id));
         // Connect to the remote nodes
@@ -123,12 +123,12 @@ public:
         connector_->ConnectRemote(p.id, p.address, p.port);
       }
     }
-    ROME_DEBUG("Finished connecting to remotes");
+    REMUS_DEBUG("Finished connecting to remotes");
 
     // Spin until we have the right number of peers
     while(true){
       if (connection_manager_->size() == peers.size()) break;
-      if (connection_manager_->size() > peers.size()) ROME_FATAL("Unexpected number of connections in the map");
+      if (connection_manager_->size() > peers.size()) REMUS_FATAL("Unexpected number of connections in the map");
     }
 
     // Create a memory region of the requested size
@@ -151,7 +151,7 @@ public:
       auto conn = connection_manager_->GetConnection(p.id);
       auto status = conn->Send(rm_proto);
       if (status.t != remus::util::Ok) {
-        ROME_FATAL(status.message.value());
+        REMUS_FATAL(status.message.value());
       }
     }
 
@@ -161,14 +161,14 @@ public:
       auto conn = connection_manager_->GetConnection(p.id);
       auto got = conn->template Deliver<RemoteObjectProto>();
       if (got.status.t != remus::util::Ok) {
-        ROME_FATAL(got.status.message.value());
+        REMUS_FATAL(got.status.message.value());
       }
       // [mfs] I don't understand why we use mr_->lkey?
       pool.receive_conn(p.id, conn, got.val.value().rkey(), mem->mr()->lkey);
     }
 
     // TODO: This message isn't informative enough
-    ROME_INFO("Created memory pool");
+    REMUS_INFO("Created memory pool");
   }
 
   /// Allocate some memory from the local RDMA heap

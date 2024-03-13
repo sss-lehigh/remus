@@ -59,26 +59,26 @@ using namespace remus::rdma;
 int main(int argc, char **argv) {
   using namespace std::string_literals;
 
-  ROME_INIT_LOG();
+  REMUS_INIT_LOG();
 
   // Configure the args object, parse the command line, and turn it into a
   // useful object
   remus::util::ArgMap args;
   if (auto res = args.import_args(ARGS); res) {
-    ROME_FATAL(res.value());
+    REMUS_FATAL(res.value());
   }
   if (auto res = args.parse_args(argc, argv); res) {
     args.usage();
-    ROME_FATAL(res.value());
+    REMUS_FATAL(res.value());
   }
   BenchmarkParams params(args);
 
   // Check node count, ensure this node is part of the experiment
   if (params.node_count <= 0 || params.thread_count <= 0) {
-    ROME_FATAL("Node count and thread count cannot be zero");
+    REMUS_FATAL("Node count and thread count cannot be zero");
   }
   if (params.node_id >= params.node_count) {
-    ROME_INFO("This node is not in the experiment. Exiting...");
+    REMUS_INFO("This node is not in the experiment. Exiting...");
     exit(0);
   }
 
@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
                     (int)std::floor(params.qp_max / params.node_count));
   if (mp == 0)
     mp = 1;
-  ROME_INFO("Distributing {} MemoryPools across {} threads", mp,
+  REMUS_INFO("Distributing {} MemoryPools across {} threads", mp,
             params.thread_count);
 
   // Initialize the vector of peers.  A node can appear more than once, as long
@@ -117,7 +117,7 @@ int main(int argc, char **argv) {
   for (uint16_t n = 0; n < mp * params.node_count; n++) {
     Peer next(n, "node"s + std::to_string((int)n / mp), PORT_NUM + n + 1);
     peers.push_back(next);
-    ROME_DEBUG("Peer list {}:{}@{}", n, peers.at(n).id, peers.at(n).address);
+    REMUS_DEBUG("Peer list {}:{}@{}", n, peers.at(n).id, peers.at(n).address);
   }
 
   Peer host = peers.at(0);
@@ -132,9 +132,9 @@ int main(int argc, char **argv) {
   for (int i = 0; i < mp; i++) {
     mempool_threads.emplace_back(std::thread(
         [&](int mp_index, int self_index) {
-          ROME_DEBUG("Creating pool");
+          REMUS_DEBUG("Creating pool");
           Peer self = peers.at(self_index);
-          ROME_DEBUG(mp != params.thread_count ? "Is shared" : "Is not shared");
+          REMUS_DEBUG(mp != params.thread_count ? "Is shared" : "Is not shared");
           std::shared_ptr<rdma_capability> pool =
               std::make_shared<rdma_capability>(self);
           pool->init_pool(block_size, peers);
@@ -169,7 +169,7 @@ int main(int argc, char **argv) {
       socket_handle.send_to_all(&ptr_message);
       // We are the server
       ExperimentManager::ClientStopBarrier(socket_handle, params.runtime);
-      ROME_INFO("[SERVER THREAD] -- End of execution; -- ");
+      REMUS_INFO("[SERVER THREAD] -- End of execution; -- ");
     }));
   }
 
@@ -214,7 +214,7 @@ int main(int argc, char **argv) {
           endpoint_managers[thread_index].recv_server(&ptr_message);
           iht->InitFromPointer(rdma_ptr<anon_ptr>(ptr_message.get_first()));
 
-          ROME_DEBUG("Creating client");
+          REMUS_DEBUG("Creating client");
           // Create and run a client in a thread
           std::unique_ptr<Client<IHT_Op<int, int>>> client =
               Client<IHT_Op<int, int>>::Create(
@@ -235,9 +235,9 @@ int main(int argc, char **argv) {
               output.val.has_value()) {
             workload_results[thread_index] = output.val.value();
           } else {
-            ROME_ERROR("Client run failed");
+            REMUS_ERROR("Client run failed");
           }
-          ROME_INFO("[CLIENT THREAD] -- End of execution; -- ");
+          REMUS_INFO("[CLIENT THREAD] -- End of execution; -- ");
         },
         i));
   }
@@ -247,7 +247,7 @@ int main(int argc, char **argv) {
   for (auto it = threads.begin(); it != threads.end(); it++) {
     // For debug purposes, sometimes it helps to see which threads haven't
     // deadlocked
-    ROME_DEBUG("Syncing {}", ++i);
+    REMUS_DEBUG("Syncing {}", ++i);
     auto t = it;
     t->join();
   }
@@ -284,7 +284,7 @@ int main(int argc, char **argv) {
       result[i].p999 = qps.p999();
       result[i].max = qps.max();
     }
-    ROME_DEBUG("Protobuf Result {}\n{}", i, result[i].result_as_debug_string());
+    REMUS_DEBUG("Protobuf Result {}\n{}", i, result[i].result_as_debug_string());
   }
 
   // [mfs] Does this produce one file per node?
@@ -297,6 +297,6 @@ int main(int argc, char **argv) {
     file_stream << result[0].result_as_string();
   }
   file_stream.close();
-  ROME_INFO("[EXPERIMENT] -- End of execution; -- ");
+  REMUS_INFO("[EXPERIMENT] -- End of execution; -- ");
   return 0;
 }

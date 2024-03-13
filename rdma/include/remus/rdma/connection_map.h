@@ -60,7 +60,7 @@ public:
   /// Destruct the ConnectionMap by iterating through its open connections,
   /// and for each one, shutting it down.
   ~ConnectionMap() {
-    ROME_TRACE("Shutting down: {}", fmt::ptr(this));
+    REMUS_TRACE("Shutting down: {}", fmt::ptr(this));
     // NB: By the time this runs, we should be sequential, so no synchronization
     // is needed
     for (auto &vec : connections_)
@@ -83,7 +83,7 @@ public:
     std::lock_guard<std::mutex> lg(con_mu_);
     auto vec = connections_.find(peer_id);
     if (vec == connections_.end() || vec->second.size() == 0)
-      ROME_FATAL("Connection not found: "s + std::to_string(peer_id));
+      REMUS_FATAL("Connection not found: "s + std::to_string(peer_id));
     return vec->second[0].get();
   }
 };

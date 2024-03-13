@@ -201,7 +201,7 @@ class Connection {
             remus::util::Status::Ok(),
             std::make_optional(std::vector<uint8_t>(recv_span.begin(), recv_span.end()))};
 
-        ROME_TRACE("{} {}", res.val->data(), res.val->size());
+        REMUS_TRACE("{} {}", res.val->data(), res.val->size());
 
         // If the tail reached the end of the receive buffer then all posted
         // wrs have been consumed and we can post new ones.
@@ -227,7 +227,7 @@ class Connection {
   // only be called when all posted receives have corresponding completions,
   // otherwise there may be a race on memory by posted recvs.
   void PrepareRecvBuffer() {
-    ROME_ASSERT(recv_total_ % (kCapacity / kRecvMaxBytes) == 0,
+    REMUS_ASSERT(recv_total_ % (kCapacity / kRecvMaxBytes) == 0,
                 "Unexpected number of completions from RQ");
     // Prepare the recv buffer for incoming messages with the assumption
     // that the maximum received message will be `max_recv_` bytes long.

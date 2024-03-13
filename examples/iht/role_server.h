@@ -27,7 +27,7 @@ inline void ClientStopBarrier(remus::util::tcp::SocketManager &socket_handle,
                               int runtime_s) {
   // Sleep while clients are running if there is a set runtime.
   if (runtime_s > 0) {
-    ROME_INFO("SERVER :: Sleeping for {}", runtime_s);
+    REMUS_INFO("SERVER :: Sleeping for {}", runtime_s);
 
     // Sleep for runtime seconds while the clients are running
     std::this_thread::sleep_for(std::chrono::seconds(runtime_s));
@@ -42,12 +42,12 @@ inline void ClientStopBarrier(remus::util::tcp::SocketManager &socket_handle,
   // Receive a message from all clients to sync
   remus::util::tcp::message recv_buffer[socket_handle.num_clients()];
   socket_handle.recv_from_all(recv_buffer);
-  ROME_DEBUG("SERVER :: received ack");
+  REMUS_DEBUG("SERVER :: received ack");
 
   // Once we receive a message from everyone, everyone is done
   // So we now send an OK to exit message
   remus::util::tcp::message send_buffer;
   socket_handle.send_to_all(&send_buffer);
-  ROME_DEBUG("SERVER :: sent ack");
+  REMUS_DEBUG("SERVER :: sent ack");
 }
 }; // namespace ExperimentManager

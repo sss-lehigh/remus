@@ -55,7 +55,7 @@ when running cmake.
 
 Then in your CMakeLists.txt you can write `find_package(remus REQUIRED)`.
 
-Rome can be accessed by linking in CMake to any of these libraries: 
+Remus can be accessed by linking in CMake to any of these libraries: 
 - `remus::workload` 
 - `remus::logging`
 - `remus::metrics` 

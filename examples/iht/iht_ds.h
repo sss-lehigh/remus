@@ -170,7 +170,7 @@ private:
                                     remote_baseptr baseptr) {
     rdma_ptr<remote_baseptr> bucket_ptr = get_baseptr(list_start, bucket);
     // [mfs] Can this address manipulation be hidden?
-    // [esl] todo: I think Rome needs to support for the [] operator in the
+    // [esl] todo: I think Remus needs to support for the [] operator in the
     // remote ptr...
     //             Otherwise I am forced to manually calculate the pointer of a
     //             bucket
@@ -251,10 +251,10 @@ public:
     // I want to make sure we are choosing PLIST_SIZE and ELIST_SIZE to best use
     // the space (b/c of alignment)
     if ((PLIST_SIZE * sizeof(plist_pair_t)) % 64 != 0) {
-      ROME_WARN("Suboptimal PLIST_SIZE b/c PList aligned to 64 bytes");
+      REMUS_WARN("Suboptimal PLIST_SIZE b/c PList aligned to 64 bytes");
     }
     if (((ELIST_SIZE * sizeof(pair_t)) + sizeof(size_t)) % 64 < 60) {
-      ROME_WARN("Suboptimal ELIST_SIZE b/c EList aligned to 64 bytes");
+      REMUS_WARN("Suboptimal ELIST_SIZE b/c EList aligned to 64 bytes");
     }
   };
 

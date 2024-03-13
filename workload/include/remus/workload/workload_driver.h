@@ -218,7 +218,7 @@ public:
   // Then, the client's `Stop` method is called so that any pending operations
   // can be finalized.
   util::Status Stop() {
-    ROME_INFO("Stopping Workload Driver...");
+    REMUS_INFO("Stopping Workload Driver...");
     if (terminated_) {
       return {util::Unavailable, "Workload driver was already terminated"};
     }

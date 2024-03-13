@@ -20,7 +20,7 @@ int main() {
 
   bool child = false;//pid == 0;
 
-  ROME_INIT_LOG();
+  REMUS_INIT_LOG();
 
   remus::rdma::Peer node0 = remus::rdma::Peer(0, "node0", (child ? 8081 : 8080));
   //remus::rdma::Peer node1 = remus::rdma::Peer(1, "127.0.0.1", (child ? 8080 : 8081));

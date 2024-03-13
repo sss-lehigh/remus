@@ -40,22 +40,22 @@ python shutdown.py -u esl225
 
 ### Manual Normal
 
-LD_LIBRARY_PATH=./build:./build/protos ./iht_rome --node_id 0 --runtime 10 --op_count 0 --contains 80 --insert 10 --remove 10 --key_lb 0 --key_ub 10000 --region_size 25 --thread_count 1 --node_count 1 --qp_max 1 --unlimited_stream
+LD_LIBRARY_PATH=./build:./build/protos ./iht_remus --node_id 0 --runtime 10 --op_count 0 --contains 80 --insert 10 --remove 10 --key_lb 0 --key_ub 10000 --region_size 25 --thread_count 1 --node_count 1 --qp_max 1 --unlimited_stream
 
 ### Manual for GDB
 
-LD_LIBRARY_PATH=./build:./build/protos gdb ./iht_rome
+LD_LIBRARY_PATH=./build:./build/protos gdb ./iht_remus
 
 run --node_id 0 --runtime 10 --op_count 0 --contains 80 --insert 10 --remove 10 --key_lb 0 --key_ub 10000 --region_size 25 --thread_count 1 --node_count 1 --qp_max 1 --unlimited_stream
 
 ### Manual Testing
 
-LD_LIBRARY_PATH=.:./protos ./iht_rome_test --send_test
+LD_LIBRARY_PATH=.:./protos ./iht_remus_test --send_test
 
-LD_LIBRARY_PATH=.:./protos gdb ./iht_rome_test
+LD_LIBRARY_PATH=.:./protos gdb ./iht_remus_test
 run --send_test
 
-LD_LIBRARY_PATH=.:./protos ./iht_rome_test --send_bulk
+LD_LIBRARY_PATH=.:./protos ./iht_remus_test --send_bulk
 
-LD_LIBRARY_PATH=.:./protos gdb ./iht_rome_test
+LD_LIBRARY_PATH=.:./protos gdb ./iht_remus_test
 run --send_bulk

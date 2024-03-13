@@ -32,7 +32,7 @@ std::string hostname() {
 
 int main(int argc, char** argv) {
 
-  ROME_INIT_LOG();
+  REMUS_INIT_LOG();
 
   std::string name;
   if (argc == 2) {
@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
  
   auto host = peers.at(0);
 
-  ROME_DEBUG("Creating pool");
+  REMUS_DEBUG("Creating pool");
   auto ctx = new remus::rdma::rdma_capability(host);
   ctx->init_pool(1 << 24, peers);
   ctx->RegisterThread(); // need to register thread?
