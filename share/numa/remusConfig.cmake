@@ -6,4 +6,4 @@ find_package(spdlog 1.9...<1.10 REQUIRED) #defines spdlog::spdlog
 find_package(nlohmann_json REQUIRED)
 find_package(NUMA REQUIRED)
 
-include(${CMAKE_CURRENT_LIST_DIR}/romeTargets.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/remusTargets.cmake)
