@@ -43,15 +43,12 @@
 namespace remus {
 
 // Necessary forward declaration (used in `ATreeRequiredInfo`).
-template <class Key, class V, class M, typename value_type,
-          typename metadata_type>
-class ATreeNode;
+template <class Key, class V, class M, typename value_type, typename metadata_type> class ATreeNode;
 
 // Encapsulates the required information of a node, these are never empty-base
 // optimized. The simplest form of the `ATree` is a set containing only nodes
 // with a key and pointers to its children.
-template <class Key, class... OptionalInfo>
-class __attribute__((packed)) ATreeNodeRequiredInfo {
+template <class Key, class... OptionalInfo> class __attribute__((packed)) ATreeNodeRequiredInfo {
   typedef ATreeNode<Key, OptionalInfo...> node_type;
 
 public:
@@ -80,24 +77,20 @@ template <class ValueType, class MetadataType>
 class __attribute__((packed)) ATreeNodeOptionalInfo : ValueType, MetadataType {
 public:
   ATreeNodeOptionalInfo(const ValueType &value, const MetadataType &metadata)
-      : ValueType(value), MetadataType(metadata) {}
+    : ValueType(value), MetadataType(metadata) {}
 
   // Getters
-  inline typename ValueType::data_type value() const {
-    return dynamic_cast<const ValueType *>(this)->value();
-  }
+  inline typename ValueType::data_type value() const { return dynamic_cast<const ValueType *>(this)->value(); }
   inline typename MetadataType::data_type metadata() const {
     return dynamic_cast<const MetadataType *>(this)->metadata();
   }
 
   // Setters
-  template <class V = ValueType,
-            std::enable_if_t<!std::is_empty<V>::value, bool> = true>
+  template <class V = ValueType, std::enable_if_t<!std::is_empty<V>::value, bool> = true>
   inline void set_value(const typename V::data_type &value) {
     dynamic_cast<V *>(this)->set_value(value);
   }
-  template <class M = MetadataType,
-            std::enable_if_t<!std::is_empty<M>::value, bool> = true>
+  template <class M = MetadataType, std::enable_if_t<!std::is_empty<M>::value, bool> = true>
   inline void set_metadata(const typename M::data_type &metadata) {
     dynamic_cast<M *>(this)->set_metadata(metadata);
   }
@@ -109,13 +102,10 @@ public:
 // then they are wrapped in the respective classes (see `Value` and `Metadata`
 // above).
 template <class Key, class V, class M,
-          typename ValueType = typename std::conditional<
-              std::is_empty<V>::value, EmptyValue, internal::Value<V>>::type,
+          typename ValueType = typename std::conditional<std::is_empty<V>::value, EmptyValue, internal::Value<V>>::type,
           typename MetadataType =
-              typename std::conditional<std::is_empty<M>::value, EmptyMetadata,
-                                        internal::Metadata<M>>::type>
-class ATreeNode : protected ATreeNodeRequiredInfo<Key, V, M>,
-                  protected ATreeNodeOptionalInfo<ValueType, MetadataType> {
+            typename std::conditional<std::is_empty<M>::value, EmptyMetadata, internal::Metadata<M>>::type>
+class ATreeNode : protected ATreeNodeRequiredInfo<Key, V, M>, protected ATreeNodeOptionalInfo<ValueType, MetadataType> {
   typedef ATreeNodeRequiredInfo<Key, V, M> required_info;
   typedef ATreeNodeOptionalInfo<ValueType, MetadataType> optional_info;
 
@@ -124,28 +114,21 @@ public:
   typedef M metadata_type;
 
   ATreeNode(const Key &key, const V &value, const M &metadata)
-      : required_info(key),
-        optional_info(ValueType(value), MetadataType(metadata)) {}
+    : required_info(key), optional_info(ValueType(value), MetadataType(metadata)) {}
 
   // Getters
   inline Key key() const { return required_info::key(); }
-  inline typename ValueType::data_type value() const {
-    return optional_info::value();
-  }
-  inline typename MetadataType::data_type metadata() {
-    return optional_info::metadata();
-  }
+  inline typename ValueType::data_type value() const { return optional_info::value(); }
+  inline typename MetadataType::data_type metadata() { return optional_info::metadata(); }
   inline ATreeNode *left() const { return required_info::left(); }
   inline ATreeNode *right() const { return required_info::right(); }
 
   // Setters
-  template <class _V_t = ValueType,
-            std::enable_if_t<!std::is_empty<_V_t>::value, bool> = true>
+  template <class _V_t = ValueType, std::enable_if_t<!std::is_empty<_V_t>::value, bool> = true>
   inline void set_value(const V &value) {
     optional_info::set_value(value);
   }
-  template <class _M_t = MetadataType,
-            std::enable_if_t<!std::is_empty<_M_t>::value, bool> = true>
+  template <class _M_t = MetadataType, std::enable_if_t<!std::is_empty<_M_t>::value, bool> = true>
   inline void set_metadata(const M &metadata) {
     optional_info::set_metadata(metadata);
   }
@@ -161,8 +144,7 @@ template <typename T> struct AccessorWrapper {
 // `ATreeNode`s that hold various data and metadata. A user can disable either
 // values or metadata by passing in empty base classes (i.e., `EmptyValue` and
 // `EmptyMetadata`) as the template parameters.
-template <class Key, class V, class M, class Visitor, class Accessor = void>
-class ATree {
+template <class Key, class V, class M, class Visitor, class Accessor = void> class ATree {
 public:
   ~ATree();
   ATree() : size_(0), root_(Key(), V(), M()) {}
@@ -186,13 +168,11 @@ private:
   // and to the node corresponding to `key` if one exists. If `stack` is not
   // `std::nullopt` then all nodes found in the traversal will be pushed onto
   // the back of the stack.
-  std::pair<node_type *, node_type *>
-  FindInternal(const Key &key, std::optional<std::deque<node_type *> *> stack);
+  std::pair<node_type *, node_type *> FindInternal(const Key &key, std::optional<std::deque<node_type *> *> stack);
 
   // Returns a pointer to a newly inserted node initialized with `key`, `value`
   // and `metadata`. The inserted node will be the child of `parent`.
-  node_type *InsertInternal(const Key &key, const V &value, const M &metadata,
-                            node_type *parent);
+  node_type *InsertInternal(const Key &key, const V &value, const M &metadata, node_type *parent);
 
   std::pair<node_type *, node_type *> FindSuccessors(node_type *curr);
 
@@ -206,8 +186,7 @@ private:
 // Implementation |
 // ---------------|
 
-template <class K, class V, class M, class Visitor, class Accessor>
-ATree<K, V, M, Visitor, Accessor>::~ATree() {
+template <class K, class V, class M, class Visitor, class Accessor> ATree<K, V, M, Visitor, Accessor>::~ATree() {
   // if (root_ == nullptr) return;  // Nothing to do
   cleared_.push_back(root_.left());
   for (auto *c : cleared_) {
@@ -227,8 +206,7 @@ ATree<K, V, M, Visitor, Accessor>::~ATree() {
 
 template <class K, class V, class M, class Visitor, class Accessor>
 std::pair<ATreeNode<K, V, M> *, ATreeNode<K, V, M> *>
-ATree<K, V, M, Visitor, Accessor>::FindInternal(
-    const K &key, std::optional<std::deque<node_type *> *> stack) {
+ATree<K, V, M, Visitor, Accessor>::FindInternal(const K &key, std::optional<std::deque<node_type *> *> stack) {
   node_type *parent = &root_;
   node_type *curr = root_.left();
   while (curr != nullptr && curr->key() != key) {
@@ -245,8 +223,7 @@ ATree<K, V, M, Visitor, Accessor>::FindInternal(
 }
 
 template <class K, class V, class M, class Visitor, class Accessor>
-std::optional<ATreeNode<K, V, M> *>
-ATree<K, V, M, Visitor, Accessor>::Find(const K &key) {
+std::optional<ATreeNode<K, V, M> *> ATree<K, V, M, Visitor, Accessor>::Find(const K &key) {
   auto found = FindInternal(key, std::nullopt);
   if (found.second != nullptr && found.second->key() == key) {
     return {found.second};
@@ -257,9 +234,7 @@ ATree<K, V, M, Visitor, Accessor>::Find(const K &key) {
 
 template <class K, class V, class M, class Visitor, class Accessor>
 typename ATree<K, V, M, Visitor, Accessor>::node_type *
-ATree<K, V, M, Visitor, Accessor>::InsertInternal(const K &key, const V &value,
-                                                  const M &metadata,
-                                                  node_type *parent) {
+ATree<K, V, M, Visitor, Accessor>::InsertInternal(const K &key, const V &value, const M &metadata, node_type *parent) {
   node_type *new_node = new node_type(key, value, metadata);
   if (parent == &root_) {
     parent->set_left(new_node);
@@ -273,8 +248,7 @@ ATree<K, V, M, Visitor, Accessor>::InsertInternal(const K &key, const V &value,
 }
 
 template <class K, class V, class M, class Visitor, class Accessor>
-bool ATree<K, V, M, Visitor, Accessor>::Insert(const K &key, const V &value,
-                                               const M &metadata) {
+bool ATree<K, V, M, Visitor, Accessor>::Insert(const K &key, const V &value, const M &metadata) {
   std::deque<node_type *> stack;
   auto found = FindInternal(key, &stack);
   if (found.second != nullptr && found.second->key() == key) {
@@ -291,9 +265,7 @@ bool ATree<K, V, M, Visitor, Accessor>::Insert(const K &key, const V &value,
 }
 
 template <class K, class V, class M, class Visitor, class Accessor>
-void ATree<K, V, M, Visitor, Accessor>::InsertOrUpdate(const K &key,
-                                                       const V &value,
-                                                       const M &metadata) {
+void ATree<K, V, M, Visitor, Accessor>::InsertOrUpdate(const K &key, const V &value, const M &metadata) {
   std::deque<node_type *> stack;
   auto found = FindInternal(key, &stack);
   if (found.second != nullptr && found.second->key() == key) {
@@ -314,9 +286,7 @@ void ATree<K, V, M, Visitor, Accessor>::InsertOrUpdate(const K &key,
 
 namespace internal {
 
-template <typename NodeType>
-inline void ReplaceChild(NodeType *parent, const NodeType *child,
-                         NodeType *new_node) {
+template <typename NodeType> inline void ReplaceChild(NodeType *parent, const NodeType *child, NodeType *new_node) {
   if (parent->left() == child) {
     parent->set_left(new_node);
   } else {
@@ -357,15 +327,13 @@ bool ATree<K, V, M, Visitor, Accessor>::Remove(const K &key) {
       // A successor exists but it is the child of the node being removed.
       successors.second->set_left(found.second->left());
       successors.second->set_right(found.second->right());
-      internal::ReplaceChild<node_type>(found.first, found.second,
-                                        successors.second);
+      internal::ReplaceChild<node_type>(found.first, found.second, successors.second);
     } else {
       // Otherwise, a successor exists and its parent must be dealt with.
       successors.first->set_left(successors.second->right());
       successors.second->set_left(found.second->left());
       successors.second->set_right(found.second->right());
-      internal::ReplaceChild<node_type>(found.first, found.second,
-                                        successors.second);
+      internal::ReplaceChild<node_type>(found.first, found.second, successors.second);
     }
 
     while (!stack.empty()) {
@@ -378,8 +346,7 @@ bool ATree<K, V, M, Visitor, Accessor>::Remove(const K &key) {
   }
 }
 
-template <class K, class V, class M, class Visitor, class Accessor>
-void ATree<K, V, M, Visitor, Accessor>::Clear() {
+template <class K, class V, class M, class Visitor, class Accessor> void ATree<K, V, M, Visitor, Accessor>::Clear() {
   auto old = root_.left();
   cleared_.push_back(old);
   root_.set_left(nullptr);

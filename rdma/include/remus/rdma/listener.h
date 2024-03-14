@@ -5,9 +5,9 @@
 #include <rdma/rdma_cma.h>
 #include <thread>
 
-#include "remus/logging/logging.h"
-#include "connection_utils.h"
 #include "connection.h"
+#include "connection_utils.h"
+#include "remus/logging/logging.h"
 
 namespace remus::rdma::internal {
 
@@ -22,9 +22,7 @@ class Listener {
     rdma_conn_param conn_param; // Private data to send during config
 
     /// Extract a node id from a context object
-    static inline uint32_t GetNodeId(void *ctx) {
-      return reinterpret_cast<IdContext *>(ctx)->node_id;
-    }
+    static inline uint32_t GetNodeId(void *ctx) { return reinterpret_cast<IdContext *>(ctx)->node_id; }
   };
 
   /// A functor for joining a thread on deletion
@@ -48,7 +46,7 @@ class Listener {
   std::string address_;                          // This node's IP address
   uint16_t port_;                                // This node's port
   uint32_t my_id_;                               // Node ID of this thread
-  const saver_t connection_saver; // Saves a connection to the Connection Map
+  const saver_t connection_saver;                // Saves a connection to the Connection Map
 
   /// Create a listening endpoint on RDMA and start listening on it.  Terminate
   /// the program if anything goes wrong.
@@ -70,8 +68,7 @@ class Listener {
     hints.ai_flags = RAI_PASSIVE;
     hints.ai_port_space = RDMA_PS_TCP;
     auto port_str = std::to_string(htons(port));
-    int gai_ret =
-        rdma_getaddrinfo(address.c_str(), port_str.c_str(), &hints, &resolved);
+    int gai_ret = rdma_getaddrinfo(address.c_str(), port_str.c_str(), &hints, &resolved);
     if (gai_ret != 0) {
       REMUS_FATAL("rdma_getaddrinfo(): "s + gai_strerror(gai_ret));
     }
@@ -105,9 +102,7 @@ class Listener {
     }
 
     // Record and report the node's address/port
-    address_ = std::string(inet_ntoa(
-        reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(listen_id_))
-            ->sin_addr));
+    address_ = std::string(inet_ntoa(reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(listen_id_))->sin_addr));
     port_ = rdma_get_src_port(listen_id_);
     REMUS_INFO("Listening: {}:{}", address_, port_);
   }
@@ -140,8 +135,7 @@ class Listener {
           continue;
         }
       }
-      REMUS_TRACE("({}) Got event: {} (id={})", fmt::ptr(this),
-                 rdma_event_str(event->event), fmt::ptr(event->id));
+      REMUS_TRACE("({}) Got event: {} (id={})", fmt::ptr(this), rdma_event_str(event->event), fmt::ptr(event->id));
 
       // Handle whatever event we just received
       rdma_cm_id *id = event->id;
@@ -181,8 +175,7 @@ class Listener {
 
       case RDMA_CM_EVENT_DEVICE_REMOVAL:
         // We don't expect to ever see a device removal event
-        REMUS_ERROR("event: {}, error: {}\n", rdma_event_str(event->event),
-                   event->status);
+        REMUS_ERROR("event: {}, error: {}\n", rdma_event_str(event->event), event->status);
         break;
 
       case RDMA_CM_EVENT_ADDR_ERROR:
@@ -207,11 +200,9 @@ class Listener {
     using namespace std::string_literals;
 
     // The private data is used to figure out the node that made the request
-    REMUS_ASSERT_DEBUG(event->param.conn.private_data != nullptr,
-                      "Received connect request without private data.");
+    REMUS_ASSERT_DEBUG(event->param.conn.private_data != nullptr, "Received connect request without private data.");
     uint32_t peer_id = *(uint32_t *)(event->param.conn.private_data);
-    REMUS_TRACE("[OnConnectRequest] (Node {}) Got connection request from: {}",
-               my_id_, peer_id);
+    REMUS_TRACE("[OnConnectRequest] (Node {}) Got connection request from: {}", my_id_, peer_id);
 
     if (peer_id != my_id_) {
       // Create a new QP for the connection.
@@ -239,10 +230,8 @@ class Listener {
     // Save the connection and ack it
     connection_saver(peer_id, new Connection(my_id_, peer_id, id));
 
-    REMUS_TRACE("[OnConnectRequest] (Node {}) peer={}, id={}", my_id_, peer_id,
-               fmt::ptr(id));
-    RDMA_CM_ASSERT(rdma_accept, id,
-                   peer_id == my_id_ ? nullptr : &context->conn_param);
+    REMUS_TRACE("[OnConnectRequest] (Node {}) peer={}, id={}", my_id_, peer_id, fmt::ptr(id));
+    RDMA_CM_ASSERT(rdma_accept, id, peer_id == my_id_ ? nullptr : &context->conn_param);
     rdma_ack_cm_event(event);
   }
 
@@ -264,7 +253,7 @@ public:
   /// Construct a Listener by saving its node Id and the function for saving
   /// connections
   Listener(uint32_t my_id, std::function<void(uint32_t, Connection *)> saver)
-      : my_id_(my_id), connection_saver(saver) {}
+    : my_id_(my_id), connection_saver(saver) {}
 
   /// Initialize a listening endpoint, and then park a thread on it, so the
   /// thread can receive new connection requests

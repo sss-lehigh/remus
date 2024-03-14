@@ -23,8 +23,7 @@ namespace ExperimentManager {
 ///            function to allow for things such as remote deallocation.
 /// [esl]      TODO: the code in this file is small, it could be moved to main?
 /// @return ok status
-inline void ClientStopBarrier(remus::util::tcp::SocketManager &socket_handle,
-                              int runtime_s) {
+inline void ClientStopBarrier(remus::util::tcp::SocketManager &socket_handle, int runtime_s) {
   // Sleep while clients are running if there is a set runtime.
   if (runtime_s > 0) {
     REMUS_INFO("SERVER :: Sleeping for {}", runtime_s);

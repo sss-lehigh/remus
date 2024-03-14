@@ -8,25 +8,31 @@
 
 HDS_HOST_DEVICE void error() {
 #if defined(__CUDA_ARCH__)
-__trap();
+  __trap();
 #else
-exit(1);
+  exit(1);
 #endif
 }
 
-#define ASSERT(x, y) if(!(x)) { printf("%s did not evaluate to true for i = %d\n", #x, (y)); error(); }
+#define ASSERT(x, y)                                                                                                   \
+  if (!(x)) {                                                                                                          \
+    printf("%s did not evaluate to true for i = %d\n", #x, (y));                                                       \
+    error();                                                                                                           \
+  }
 
 int main() {
 
   auto group = remus::hds::threadgroup::single_threadgroup{};
-  remus::hds::lock_linked_list<int, 2, remus::hds::locked_nodes::reg_cached_node_pointer, remus::hds::allocator::heap_allocator> ll;
+  remus::hds::lock_linked_list<int, 2, remus::hds::locked_nodes::reg_cached_node_pointer,
+                               remus::hds::allocator::heap_allocator>
+    ll;
   ASSERT(!ll.contains(1, group), 1);
 
   std::set<int> reference;
 
-  for(int i = 0; i < 100; ++i) {
+  for (int i = 0; i < 100; ++i) {
 
-    if(rand() % 2 == 0) {
+    if (rand() % 2 == 0) {
 
       int r = rand();
 
@@ -46,18 +52,16 @@ int main() {
 
       printf("\nRemoved %d\n", r);
       ll.print(group);
-
     }
 
-    if(!ll.validate(group)) {
+    if (!ll.validate(group)) {
       return 1;
     }
 
-    for(auto elm : reference) {
+    for (auto elm : reference) {
       ASSERT(ll.contains(elm, group), elm);
     }
   }
 
   return 0;
 }
-

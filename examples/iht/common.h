@@ -12,8 +12,7 @@ template <typename K, typename V> struct IHT_Op {
   int op_type;
   K key;
   V value;
-  IHT_Op(int op_type_, K key_, V value_)
-      : op_type(op_type_), key(key_), value(value_){};
+  IHT_Op(int op_type_, K key_, V value_) : op_type(op_type_), key(key_), value(value_){};
 };
 
 #define CONTAINS 0

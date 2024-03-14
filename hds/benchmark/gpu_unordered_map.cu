@@ -1,9 +1,9 @@
-#include <random>
-#include <thread>
 #include <barrier>
-#include <iostream>
 #include <chrono>
 #include <getopt.h>
+#include <iostream>
+#include <random>
+#include <thread>
 #include <unordered_set>
 
 #include <thrust/device_vector.h>
@@ -11,7 +11,7 @@
 
 #include <remus/hds/unordered_map/gpu_unordered_map.h>
 
-int test(auto& map, int read_percent, int population, int range, int ops) {
+int test(auto &map, int read_percent, int population, int range, int ops) {
 
   std::default_random_engine gen;
   std::uniform_int_distribution<long int> key_dist(1, range);
@@ -28,7 +28,8 @@ int test(auto& map, int read_percent, int population, int range, int ops) {
     thrust::device_vector<long int> insert_values(population, 1);
     thrust::device_vector<bool> insert_result(population);
 
-    map.insert(insert_keys.data().get(), insert_values.data().get(), insert_result.data().get(), insert_keys.size()).wait();
+    map.insert(insert_keys.data().get(), insert_values.data().get(), insert_result.data().get(), insert_keys.size())
+      .wait();
   }
 
   std::uniform_int_distribution<long int> op_dist(0, 99);
@@ -38,7 +39,7 @@ int test(auto& map, int read_percent, int population, int range, int ops) {
   thrust::host_vector<long int> h_remove_keys;
 
   bool last_insert = false;
-  for(int i = 0; i < ops; ++i) {
+  for (int i = 0; i < ops; ++i) {
     if (op_dist(gen) < read_percent) {
       h_get_keys.push_back(key_dist(gen));
     } else if (last_insert) {
@@ -60,12 +61,13 @@ int test(auto& map, int read_percent, int population, int range, int ops) {
 
   std::future<void> bar;
   auto start = std::chrono::high_resolution_clock::now();
-  
-  if(get_keys.size()) {
+
+  if (get_keys.size()) {
     bar = map.get(get_keys.data().get(), get_result.data().get(), get_keys.size());
   }
   if (insert_keys.size()) {
-   bar = map.insert(insert_keys.data().get(), insert_values.data().get(), insert_result.data().get(), insert_keys.size());
+    bar =
+      map.insert(insert_keys.data().get(), insert_values.data().get(), insert_result.data().get(), insert_keys.size());
   }
   if (remove_keys.size()) {
     bar = map.remove(remove_keys.data().get(), remove_result.data().get(), remove_keys.size());
@@ -78,18 +80,17 @@ int test(auto& map, int read_percent, int population, int range, int ops) {
   return 0;
 }
 
-void usage(char** argv) {
-  std::cout << "Usage: " << argv[0] 
-    << " [-p|--read_percent <percent>]"
-    << " [-r|--range <range>]" 
-    << " [--population <pop>]"
-    << " [-o|--ops <ops per thread>]"
-    << " [-s|--size <size>]"
-    << " [-v|--verbose]"
-    << " [-h|--help]" << std::endl;
+void usage(char **argv) {
+  std::cout << "Usage: " << argv[0] << " [-p|--read_percent <percent>]"
+            << " [-r|--range <range>]"
+            << " [--population <pop>]"
+            << " [-o|--ops <ops per thread>]"
+            << " [-s|--size <size>]"
+            << " [-v|--verbose]"
+            << " [-h|--help]" << std::endl;
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
 
   bool verbose = false;
   int read_percent = 95;
@@ -101,63 +102,58 @@ int main(int argc, char** argv) {
   int c;
   int index;
 
-  struct option long_options[] = {
-    {"read_percent", required_argument, 0, 'p'},
-    {"range", required_argument, 0, 'r'},
-    {"population", required_argument, 0, 0},
-    {"ops", required_argument, 0, 'o'},
-    {"size", required_argument, 0, 's'},
-    {"help", no_argument, 0, 'h'},
-    {"verbose", no_argument, 0, 'v'},
-    {nullptr, 0, 0, 0}
-  };
+  struct option long_options[] = {{"read_percent", required_argument, 0, 'p'},
+                                  {"range", required_argument, 0, 'r'},
+                                  {"population", required_argument, 0, 0},
+                                  {"ops", required_argument, 0, 'o'},
+                                  {"size", required_argument, 0, 's'},
+                                  {"help", no_argument, 0, 'h'},
+                                  {"verbose", no_argument, 0, 'v'},
+                                  {nullptr, 0, 0, 0}};
 
-  while(true) {
+  while (true) {
     c = getopt_long(argc, argv, "p:r:o:s:hv", long_options, &index);
 
-    if(c == -1)
+    if (c == -1)
       break;
-    
+
     switch (c) {
-      case 0: // long only option
-        if(std::string(long_options[index].name) == "population") {
-          population = atoi(optarg);
-        }
-        else {
-          usage(argv);
-          exit(1);
-        }
-        break;
-      case 'p':
-        read_percent = atoi(optarg);
-        break;
-      case 'r':
-        range = atoi(optarg);
-        break;
-      case 'o':
-        ops = atoi(optarg);
-        break;
-      case 's':
-        size = atoi(optarg);
-        break;
-      case 'v':
-        verbose = true;
-        break;
-      case 'h':
-        usage(argv);
-        exit(0);
-        break;
-      default:
+    case 0: // long only option
+      if (std::string(long_options[index].name) == "population") {
+        population = atoi(optarg);
+      } else {
         usage(argv);
         exit(1);
+      }
+      break;
+    case 'p':
+      read_percent = atoi(optarg);
+      break;
+    case 'r':
+      range = atoi(optarg);
+      break;
+    case 'o':
+      ops = atoi(optarg);
+      break;
+    case 's':
+      size = atoi(optarg);
+      break;
+    case 'v':
+      verbose = true;
+      break;
+    case 'h':
+      usage(argv);
+      exit(0);
+      break;
+    default:
+      usage(argv);
+      exit(1);
     }
-
   }
-  
+
   if (cudaDeviceSetLimit(cudaLimitMallocHeapSize, 1ull << 30) != cudaSuccess) {
     throw std::runtime_error("Unable to get heap size");
   }
-
 
   if (verbose) {
 
@@ -181,4 +177,3 @@ int main(int argc, char** argv) {
 
   return 0;
 }
-

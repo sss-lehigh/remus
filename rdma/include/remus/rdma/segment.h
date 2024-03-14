@@ -23,8 +23,7 @@ class Segment {
   /// The default flags we use when registering a memory region with RDMA.  In
   /// our usage scenarios, we pretty much want everything turned on.
   static constexpr int DEFAULT_ACCESS_MODE =
-      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-      IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
+    IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
 
   /// The mmap_deleter functor wraps a call to munmap.  This is used by the
   /// `rdma_unique_ptr` type, so that we can use a unique_ptr to hold raw memory
@@ -100,22 +99,18 @@ public:
     } else {
       REMUS_INFO("Using huge pages");
       raw_ = mmap_unique_ptr(reinterpret_cast<uint8_t *>(
-          mmap(nullptr, capacity_, PROT_READ | PROT_WRITE,
-               MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0)));
-      REMUS_ASSERT((void *)(std::get<1>(raw_).get()) != MAP_FAILED,
-                  "mmap failed.");
+        mmap(nullptr, capacity_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0)));
+      REMUS_ASSERT((void *)(std::get<1>(raw_).get()) != MAP_FAILED, "mmap failed.");
     }
 
     // Register the memory with RDMA
-    auto *base = reinterpret_cast<uint8_t *>(
-        std::visit([](const auto &raw) { return raw.get(); }, raw_));
-    memory_region_ =
-        ibv_mr_unique_ptr(ibv_reg_mr(pd, base, capacity_, DEFAULT_ACCESS_MODE));
+    auto *base = reinterpret_cast<uint8_t *>(std::visit([](const auto &raw) { return raw.get(); }, raw_));
+    memory_region_ = ibv_mr_unique_ptr(ibv_reg_mr(pd, base, capacity_, DEFAULT_ACCESS_MODE));
     if (memory_region_ == nullptr) {
       REMUS_FATAL("RegisterMemoryRegion :: ibv_reg_mr failed")
     }
-    REMUS_TRACE("Memory region registered: @ {} to {} (length={})",
-               fmt::ptr(base), fmt::ptr(base + capacity_), capacity_);
+    REMUS_TRACE("Memory region registered: @ {} to {} (length={})", fmt::ptr(base), fmt::ptr(base + capacity_),
+                capacity_);
   }
 
   Segment(const Segment &) = delete;

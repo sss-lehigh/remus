@@ -5,8 +5,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "remus/logging/logging.h"
 #include "connection.h"
+#include "remus/logging/logging.h"
 
 namespace remus::rdma::internal {
 
@@ -25,8 +25,7 @@ class ConnectionMap {
 
   /// a map holding all of the connections involving this machine.  Note that
   /// this includes loopback connections
-  std::unordered_map<uint32_t, std::vector<std::unique_ptr<Connection>>>
-      connections_;
+  std::unordered_map<uint32_t, std::vector<std::unique_ptr<Connection>>> connections_;
 
   /// A mutex protecting connections_
   std::mutex con_mu_;
@@ -52,7 +51,7 @@ public:
   }
 
   /// Get the number of connections in the map
-  int size(){
+  int size() {
     std::lock_guard<std::mutex> lg(con_mu_);
     return connections_.size();
   }

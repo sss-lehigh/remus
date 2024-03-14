@@ -1,5 +1,5 @@
-#include <unistd.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include <cstdio>
 #include <cstring>
@@ -13,23 +13,27 @@
 
 HDS_HOST_DEVICE void error() {
 #if defined(__CUDA_ARCH__)
-__trap();
+  __trap();
 #else
-exit(1);
+  exit(1);
 #endif
 }
 
-#define ASSERT(x, y) if(!(x)) { printf("%s did not evaluate to true for i = %d\n", #x, (y)); error(); }
+#define ASSERT(x, y)                                                                                                   \
+  if (!(x)) {                                                                                                          \
+    printf("%s did not evaluate to true for i = %d\n", #x, (y));                                                       \
+    error();                                                                                                           \
+  }
 
 std::string hostname() {
   char name[150];
-  if(gethostname(name, 150) != 0) {
-    throw std::runtime_error("Unable to get host name"); 
+  if (gethostname(name, 150) != 0) {
+    throw std::runtime_error("Unable to get host name");
   }
   return std::string(name);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
 
   REMUS_INIT_LOG();
 
@@ -44,7 +48,7 @@ int main(int argc, char** argv) {
 
   std::vector<remus::rdma::Peer> peers;
   peers.push_back(remus::rdma::Peer(0, name));
- 
+
   auto host = peers.at(0);
 
   REMUS_DEBUG("Creating pool");
@@ -55,11 +59,9 @@ int main(int argc, char** argv) {
   remus::hds::allocator::rdma_allocator alloc(ctx);
   remus::hds::locked_nodes::rdma_pointer_constructor constructor(ctx);
 
-  using ll_t = remus::hds::lock_linked_list<int, 
-                                10, 
-                                remus::hds::locked_nodes::rdma_node_pointer, 
-                                remus::hds::allocator::rdma_allocator, 
-                                remus::hds::locked_nodes::rdma_pointer_constructor>;
+  using ll_t = remus::hds::lock_linked_list<int, 10, remus::hds::locked_nodes::rdma_node_pointer,
+                                            remus::hds::allocator::rdma_allocator,
+                                            remus::hds::locked_nodes::rdma_pointer_constructor>;
 
   ll_t ll(alloc, constructor);
 
@@ -69,17 +71,17 @@ int main(int argc, char** argv) {
 
     std::set<int> reference;
 
-    for(int i = 0; i < 100; ++i) {
+    for (int i = 0; i < 100; ++i) {
 
-      if(rand() % 2 == 0) {
+      if (rand() % 2 == 0) {
 
         int r = rand();
 
         bool inserted = reference.insert(r).second;
         ASSERT(ll.insert(r, group) == inserted, r);
 
-        //printf("\nInserted %d\n", r);
-        //ll.print(remus::hds::threadgroup::single_threadgroup{});
+        // printf("\nInserted %d\n", r);
+        // ll.print(remus::hds::threadgroup::single_threadgroup{});
 
       } else {
 
@@ -89,22 +91,20 @@ int main(int argc, char** argv) {
 
         ASSERT(ll.remove(r, group) == removed, r);
 
-        //printf("\nRemoved %d\n", r);
-        //ll.print(remus::hds::threadgroup::single_threadgroup{});
-
+        // printf("\nRemoved %d\n", r);
+        // ll.print(remus::hds::threadgroup::single_threadgroup{});
       }
 
-      if(!ll.validate(group)) {
+      if (!ll.validate(group)) {
         return 1;
       }
 
-      for(auto elm : reference) {
+      for (auto elm : reference) {
         ASSERT(ll.contains(elm, group), elm);
       }
     }
 
-
-  } catch(const std::exception& e) {
+  } catch (const std::exception &e) {
     std::cout << "Failure" << std::endl;
     std::cerr << e.what() << std::endl;
   }
@@ -115,4 +115,3 @@ int main(int argc, char** argv) {
 
   return 0;
 }
-

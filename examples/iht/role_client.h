@@ -5,9 +5,9 @@
 #include <protos/experiment.pb.h>
 #include <random>
 
-#include <remus/workload/workload_driver.h>
 #include <remus/logging/logging.h>
 #include <remus/rdma/rdma.h>
+#include <remus/workload/workload_driver.h>
 
 #include "common.h"
 #include "experiment.h"
@@ -24,13 +24,10 @@ using namespace std;
 typedef RdmaIHT<int, int, CNF_ELIST_SIZE, CNF_PLIST_SIZE> IHT;
 
 // Function to run a test case (will return a success code)
-inline bool test_output(bool show_passing, optional<int> actual,
-                        optional<int> expected, string message) {
-  if (actual.has_value() != expected.has_value() &&
-      actual.value_or(0) != expected.value_or(0)) {
-    REMUS_INFO("[-] {} func():(Has Value {}=>{}) != expected:(Has Value {}=>{})",
-              message, actual.has_value(), actual.value_or(0),
-              expected.has_value(), expected.value_or(0));
+inline bool test_output(bool show_passing, optional<int> actual, optional<int> expected, string message) {
+  if (actual.has_value() != expected.has_value() && actual.value_or(0) != expected.value_or(0)) {
+    REMUS_INFO("[-] {} func():(Has Value {}=>{}) != expected:(Has Value {}=>{})", message, actual.has_value(),
+               actual.value_or(0), expected.has_value(), expected.value_or(0));
     return false;
   } else if (show_passing) {
     REMUS_INFO("[+] Test Case {} Passed!", message);
@@ -56,12 +53,9 @@ public:
   /// @param barr a barrier to synchonize local clients
   /// @param iht a pointer to an IHT
   /// @return a unique ptr
-  static unique_ptr<Client> Create(const Peer &server, remus::util::tcp::EndpointManager &ep,
-                                   BenchmarkParams &params, barrier<> *barr,
-                                   unique_ptr<IHT> iht,
-                                   shared_ptr<rdma_capability> pool) {
-    return unique_ptr<Client>(
-        new Client(server, ep, params, barr, std::move(iht), pool));
+  static unique_ptr<Client> Create(const Peer &server, remus::util::tcp::EndpointManager &ep, BenchmarkParams &params,
+                                   barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool) {
+    return unique_ptr<Client>(new Client(server, ep, params, barr, std::move(iht), pool));
   }
 
   /// @brief Run the client
@@ -71,8 +65,7 @@ public:
   /// @param frac if 0, won't populate. Otherwise, will do this fraction of the
   /// population
   /// @return the resultproto
-  static remus::util::StatusVal<remus::WorkloadDriverProto>
-  Run(unique_ptr<Client> client, int thread_id, double frac) {
+  static remus::util::StatusVal<remus::WorkloadDriverProto> Run(unique_ptr<Client> client, int thread_id, double frac) {
     // [mfs]  I was hopeful that this code was going to actually populate the
     //        data structure from *multiple nodes* simultaneously.  It should,
     //        or else all of the initial elists and plists are going to be on
@@ -83,14 +76,13 @@ public:
     int key_lb = client->params_.key_lb, key_ub = client->params_.key_ub;
     int op_count = (key_ub - key_lb) * frac;
     REMUS_INFO("CLIENT :: Data structure ({}%) is being populated ({} items "
-              "inserted) by this client",
-              frac * 100, op_count);
+               "inserted) by this client",
+               frac * 100, op_count);
     client->pool_->RegisterThread();
     // arrive at the barrier so we are populating in sync with local clients --
     // TODO: replace for remote barrier
     client->barrier_->arrive_and_wait();
-    client->iht_->populate(client->pool_, op_count, key_lb, key_ub,
-                           [=](int key) { return key; });
+    client->iht_->populate(client->pool_, op_count, key_lb, key_ub, [=](int key) { return key; });
     REMUS_DEBUG("CLIENT :: Done with populate!");
     // TODO: Sleeping for 1 second to account for difference between remote
     // client start times. Must fix this in the future to a better solution
@@ -112,14 +104,11 @@ public:
     // Create a random operation generator that is
     // - evenly distributed among the key range
     // - within the specified ratios for operations
-    uniform_int_distribution<int> op_dist =
-        uniform_int_distribution<int>(1, 100);
-    uniform_int_distribution<int> k_dist =
-        uniform_int_distribution<int>(key_lb, key_ub);
+    uniform_int_distribution<int> op_dist = uniform_int_distribution<int>(1, 100);
+    uniform_int_distribution<int> k_dist = uniform_int_distribution<int>(key_lb, key_ub);
 
     // Ensuring each node has a different seed value
-    default_random_engine gen(
-        client->params_.node_id * client->params_.thread_count + thread_id);
+    default_random_engine gen(client->params_.node_id * client->params_.thread_count + thread_id);
     int contains = client->params_.contains;
     int insert = client->params_.insert;
     function<Operation(void)> generator = [&]() {
@@ -143,8 +132,7 @@ public:
       workload_stream = make_unique<remus::EndlessStream<Operation>>(generator);
     } else {
       // Deliver a workload
-      workload_stream = make_unique<remus::FixedLengthStream<Operation>>(
-          generator, client->params_.op_count);
+      workload_stream = make_unique<remus::FixedLengthStream<Operation>>(generator, client->params_.op_count);
     }
 
     // Create and start the workload driver (also starts client and lets it
@@ -154,9 +142,8 @@ public:
     bool unlimited_stream = client->params_.unlimited_stream;
 
     // [mfs] Again, it looks like Create() is an unnecessary factory
-    auto driver = remus::WorkloadDriver<Client, Operation>::Create(
-        std::move(client), std::move(workload_stream),
-        std::chrono::milliseconds(10));
+    auto driver = remus::WorkloadDriver<Client, Operation>::Create(std::move(client), std::move(workload_stream),
+                                                                   std::chrono::milliseconds(10));
     // [mfs]  This is quite odd.  The current thread is invoking an async thread
     //        to actually do the work, which means we have lots of extra thread
     //        creation and joining.
@@ -218,21 +205,16 @@ public:
       }
       res = iht_->contains(pool_, op.key);
       if (res.has_value()) {
-        REMUS_ASSERT(res.value() == op.key,
-                    "Invalid result of contains operation {}!={}", res.value(),
-                    op.key);
+        REMUS_ASSERT(res.value() == op.key, "Invalid result of contains operation {}!={}", res.value(), op.key);
       }
       break;
     case (INSERT):
       if (count % progression == 0) {
-        REMUS_DEBUG("Running Operation {}: insert({}, {})", count, op.key,
-                   op.value);
+        REMUS_DEBUG("Running Operation {}: insert({}, {})", count, op.key, op.value);
       }
       res = iht_->insert(pool_, op.key, op.value);
       if (res.has_value()) {
-        REMUS_ASSERT(res.value() == op.key,
-                    "Invalid result of insert operation {}!={}", res.value(),
-                    op.key);
+        REMUS_ASSERT(res.value() == op.key, "Invalid result of insert operation {}!={}", res.value(), op.key);
       }
       break;
     case (REMOVE):
@@ -241,9 +223,7 @@ public:
       }
       res = iht_->remove(pool_, op.key);
       if (res.has_value()) {
-        REMUS_ASSERT(res.value() == op.key,
-                    "Invalid result of remove operation {}!={}", res.value(),
-                    op.key);
+        REMUS_ASSERT(res.value() == op.key, "Invalid result of remove operation {}!={}", res.value(), op.key);
       }
       break;
     default:
@@ -288,10 +268,9 @@ private:
   /// @param iht a pointer to an IHT
   /// @param pool the memory pool capability for the IHT
   /// @return a unique ptr
-  Client(const Peer &host, remus::util::tcp::EndpointManager &ep, BenchmarkParams &params,
-         barrier<> *barr, unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool)
-      : host_(host), endpoint_(ep), params_(params), barrier_(barr),
-        iht_(std::move(iht)), pool_(pool) {
+  Client(const Peer &host, remus::util::tcp::EndpointManager &ep, BenchmarkParams &params, barrier<> *barr,
+         unique_ptr<IHT> iht, shared_ptr<rdma_capability> pool)
+    : host_(host), endpoint_(ep), params_(params), barrier_(barr), iht_(std::move(iht)), pool_(pool) {
     if (params.unlimited_stream)
       progression = 10000;
     else

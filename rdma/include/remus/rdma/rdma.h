@@ -55,13 +55,9 @@ public:
   // connection_manager and listener_, but not the connector, and it's odd to
   // need to explicitly call init_pool.  This should be able to be merged.
   explicit rdma_capability(const Peer &self)
-      : self_(self), pool(self_),
-        connection_manager_(
-            std::make_unique<internal::ConnectionMap>(self_.id)),
-        listener_(std::make_unique<internal::Listener>(
-            self_.id, [&](uint32_t id, internal::Connection *conn) {
-              connection_manager_->put_connection(id, conn);
-            })) {}
+    : self_(self), pool(self_), connection_manager_(std::make_unique<internal::ConnectionMap>(self_.id)),
+      listener_(std::make_unique<internal::Listener>(
+        self_.id, [&](uint32_t id, internal::Connection *conn) { connection_manager_->put_connection(id, conn); })) {}
 
   ~rdma_capability() {
     // TODO: Make sure we aren't using the word "broker" anymore?
@@ -99,10 +95,8 @@ public:
     listener_->StartListeningThread(self_.address, self_.port);
 
     connector_ = std::make_unique<internal::Connector>(
-        self_.id, listener_->pd(), listener_->address(),
-        [&](uint32_t id, internal::Connection *conn) {
-          connection_manager_->put_connection(id, conn);
-        });
+      self_.id, listener_->pd(), listener_->address(),
+      [&](uint32_t id, internal::Connection *conn) { connection_manager_->put_connection(id, conn); });
 
     // Connect on the loopback first, as a sort of canary for testing IB
     //
@@ -114,9 +108,8 @@ public:
     // collisions between nodes trying to connect with each other.
     for (const auto &p : peers) {
       if (p.id != self_.id && p.id > self_.id) {
-        REMUS_DEBUG("Connecting to remote peer"s + p.address + ":" +
-                   std::to_string(p.port) + " (id = " + std::to_string(p.id) +
-                   ") from " + std::to_string(self_.id));
+        REMUS_DEBUG("Connecting to remote peer"s + p.address + ":" + std::to_string(p.port) +
+                    " (id = " + std::to_string(p.id) + ") from " + std::to_string(self_.id));
         // Connect to the remote nodes
         //
         // [mfs] I have confirmed that multiple calls to ConnectLoopback do work
@@ -126,9 +119,11 @@ public:
     REMUS_DEBUG("Finished connecting to remotes");
 
     // Spin until we have the right number of peers
-    while(true){
-      if (connection_manager_->size() == peers.size()) break;
-      if (connection_manager_->size() > peers.size()) REMUS_FATAL("Unexpected number of connections in the map");
+    while (true) {
+      if (connection_manager_->size() == peers.size())
+        break;
+      if (connection_manager_->size() > peers.size())
+        REMUS_FATAL("Unexpected number of connections in the map");
     }
 
     // Create a memory region of the requested size
@@ -172,45 +167,33 @@ public:
   }
 
   /// Allocate some memory from the local RDMA heap
-  template <typename T> rdma_ptr<T> Allocate(size_t size = 1) {
-    return pool.Allocate<T>(size);
-  }
+  template <typename T> rdma_ptr<T> Allocate(size_t size = 1) { return pool.Allocate<T>(size); }
 
   /// Return some memory to the local RDMA heap
-  template <typename T> void Deallocate(rdma_ptr<T> p, size_t size = 1) {
-    pool.Deallocate(p, size);
-  }
+  template <typename T> void Deallocate(rdma_ptr<T> p, size_t size = 1) { pool.Deallocate(p, size); }
 
   /// Write to an RDMA heap
-  template <typename T>
-  void Write(rdma_ptr<T> ptr, const T &val,
-             rdma_ptr<T> prealloc = nullptr) {
+  template <typename T> void Write(rdma_ptr<T> ptr, const T &val, rdma_ptr<T> prealloc = nullptr) {
     pool.Write(ptr, val, prealloc);
   }
 
   /// Perform a CAS on the RDMA heap
-  template <typename T>
-  T CompareAndSwap(rdma_ptr<T> ptr, uint64_t expected, uint64_t swap) {
+  template <typename T> T CompareAndSwap(rdma_ptr<T> ptr, uint64_t expected, uint64_t swap) {
     return pool.CompareAndSwap<T>(ptr, expected, swap);
   }
 
   /// Perform a CAS on the RDMA heap that loops until it succeeds
-  template <typename T>
-  T AtomicSwap(rdma_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
+  template <typename T> T AtomicSwap(rdma_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
     return pool.AtomicSwap<T>(ptr, swap, hint);
   }
 
   /// Read a variable-sized object from the RDMA heap
-  template <typename T>
-  rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size,
-                             rdma_ptr<T> prealloc = nullptr) {
+  template <typename T> rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size, rdma_ptr<T> prealloc = nullptr) {
     return pool.ExtendedRead(ptr, size, prealloc);
   }
 
   /// Read a fixed-sized object from the RDMA heap
-  template <typename T>
-  rdma_ptr<T> Read(rdma_ptr<T> ptr,
-                     rdma_ptr<T> prealloc = nullptr) {
+  template <typename T> rdma_ptr<T> Read(rdma_ptr<T> ptr, rdma_ptr<T> prealloc = nullptr) {
     return pool.Read(ptr, prealloc);
   }
 
@@ -239,9 +222,6 @@ public:
 
   /// Determine if a rdma_ptr is local to the machine
   /// Utilizies the peer inputted to rdma_capability to check the id of the ptr
-  template <class T>
-  bool is_local(rdma_ptr<T> ptr){
-    return ptr.id() == self_.id;
-  }
+  template <class T> bool is_local(rdma_ptr<T> ptr) { return ptr.id() == self_.id; }
 };
 } // namespace remus::rdma

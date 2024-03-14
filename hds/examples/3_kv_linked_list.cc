@@ -1,23 +1,27 @@
 #include <cstdio>
-#include <unordered_map>
 #include <iostream>
+#include <unordered_map>
 
 #include <remus/hds/allocator/allocator.h>
-#include <remus/hds/unordered_map/kv_linked_list/lock_linked_list.h>
-#include <remus/hds/unordered_map/kv_linked_list/lazy_linked_list.h>
-#include <remus/hds/unordered_map/kv_linked_list/locked_nodes/reg_cached_nodes.h>
-#include <remus/hds/unordered_map/kv_linked_list/lazy_nodes/reg_cached_nodes.h>
 #include <remus/hds/threadgroup/threadgroup.h>
+#include <remus/hds/unordered_map/kv_linked_list/lazy_linked_list.h>
+#include <remus/hds/unordered_map/kv_linked_list/lazy_nodes/reg_cached_nodes.h>
+#include <remus/hds/unordered_map/kv_linked_list/lock_linked_list.h>
+#include <remus/hds/unordered_map/kv_linked_list/locked_nodes/reg_cached_nodes.h>
 
 HDS_HOST_DEVICE void error() {
 #if defined(__CUDA_ARCH__)
-__trap();
+  __trap();
 #else
-exit(1);
+  exit(1);
 #endif
 }
 
-#define ASSERT(x, y) if(!(x)) { printf("%s did not evaluate to true for i = %d\n", #x, (y)); error(); }
+#define ASSERT(x, y)                                                                                                   \
+  if (!(x)) {                                                                                                          \
+    printf("%s did not evaluate to true for i = %d\n", #x, (y));                                                       \
+    error();                                                                                                           \
+  }
 
 int lazy() {
   using namespace remus::hds::kv_linked_list;
@@ -28,9 +32,9 @@ int lazy() {
 
   std::unordered_map<long, int> reference;
 
-  for(int i = 0; i < 100; ++i) {
+  for (int i = 0; i < 100; ++i) {
 
-    if(rand() % 2 == 0) {
+    if (rand() % 2 == 0) {
 
       int r = rand();
 
@@ -50,17 +54,16 @@ int lazy() {
 
       printf("\nRemoved %d\n", r);
       ll.print(group);
-
     }
 
-    if(!ll.validate(group)) {
+    if (!ll.validate(group)) {
       return 1;
     }
 
-    for(auto elm : reference) {
+    for (auto elm : reference) {
       auto res = ll.get(elm.first, group);
 
-      if(res == remus::hds::nullopt) {
+      if (res == remus::hds::nullopt) {
         std::cerr << "Got null when querying " << elm.first << std::endl;
       } else if (*res != elm.second) {
         std::cerr << "Got " << *res << " when querying " << elm.first << " but expected " << elm.second << std::endl;
@@ -83,9 +86,9 @@ int hoh() {
 
   std::unordered_map<long, int> reference;
 
-  for(int i = 0; i < 100; ++i) {
+  for (int i = 0; i < 100; ++i) {
 
-    if(rand() % 2 == 0) {
+    if (rand() % 2 == 0) {
 
       int r = rand();
 
@@ -105,17 +108,16 @@ int hoh() {
 
       printf("\nRemoved %d\n", r);
       ll.print(group);
-
     }
 
-    if(!ll.validate(group)) {
+    if (!ll.validate(group)) {
       return 1;
     }
 
-    for(auto elm : reference) {
+    for (auto elm : reference) {
       auto res = ll.get(elm.first, group);
 
-      if(res == remus::hds::nullopt) {
+      if (res == remus::hds::nullopt) {
         std::cerr << "Got null when querying " << elm.first << std::endl;
       } else if (*res != elm.second) {
         std::cerr << "Got " << *res << " when querying " << elm.first << " but expected " << elm.second << std::endl;
@@ -128,7 +130,7 @@ int hoh() {
 }
 
 int main() {
-  if(lazy() != 0) return 1;
+  if (lazy() != 0)
+    return 1;
   return hoh();
 }
-

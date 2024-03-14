@@ -1,15 +1,15 @@
-#include <random>
-#include <thread>
 #include <barrier>
-#include <iostream>
 #include <chrono>
 #include <getopt.h>
+#include <iostream>
+#include <random>
+#include <thread>
 
 #include <remus/hds/allocator/allocator.h>
+#include <remus/hds/threadgroup/threadgroup.h>
 #include <remus/hds/unordered_map/kv_linked_list/lock_linked_list.h>
 #include <remus/hds/unordered_map/kv_linked_list/locked_nodes/reg_cached_nodes.h>
 #include <remus/hds/unordered_map/unordered_map.h>
-#include <remus/hds/threadgroup/threadgroup.h>
 
 int test(auto map, int read_percent, int population, int range, int nthreads, int ops) {
 
@@ -27,34 +27,35 @@ int test(auto map, int read_percent, int population, int range, int nthreads, in
   std::vector<std::jthread> threads;
   std::barrier bar(nthreads + 1);
 
-  for(int i = 0; i < nthreads; ++i) {
-    threads.push_back(std::jthread([&map, range, read_percent, &bar, ops](int tid){
-      std::default_random_engine gen;
-      std::uniform_int_distribution<int> key_dist(1, range);
-      std::uniform_int_distribution<int> op_dist(0, 99);
-      bool last_insert = false;
-      auto group = remus::hds::threadgroup::single_threadgroup{};
+  for (int i = 0; i < nthreads; ++i) {
+    threads.push_back(std::jthread(
+      [&map, range, read_percent, &bar, ops](int tid) {
+        std::default_random_engine gen;
+        std::uniform_int_distribution<int> key_dist(1, range);
+        std::uniform_int_distribution<int> op_dist(0, 99);
+        bool last_insert = false;
+        auto group = remus::hds::threadgroup::single_threadgroup{};
 
-      bar.arrive_and_wait();
-      
-      for (int i = 0; i < ops; ++i) {
-        int key = key_dist(gen);
-        if (op_dist(gen) < read_percent) {
-          map->get(key, group);
-        } else {
-          if (last_insert) {
-            map->remove(key, group);
-            last_insert = false;
+        bar.arrive_and_wait();
+
+        for (int i = 0; i < ops; ++i) {
+          int key = key_dist(gen);
+          if (op_dist(gen) < read_percent) {
+            map->get(key, group);
           } else {
-            map->insert(key, 1, group);
-            last_insert = true;
+            if (last_insert) {
+              map->remove(key, group);
+              last_insert = false;
+            } else {
+              map->insert(key, 1, group);
+              last_insert = true;
+            }
           }
         }
-      }
 
-      bar.arrive_and_wait();
-
-    }, i));
+        bar.arrive_and_wait();
+      },
+      i));
   }
 
   bar.arrive_and_wait();
@@ -67,20 +68,19 @@ int test(auto map, int read_percent, int population, int range, int nthreads, in
   return 0;
 }
 
-void usage(char** argv) {
-  std::cout << "Usage: " << argv[0] 
-    << " [-p|--read_percent <percent>]"
-    << " [-r|--range <range>]" 
-    << " [--population <pop>]"
-    << " [-t|--thread <nthreads>]"
-    << " [-o|--ops <ops per thread>]"
-    << " [-s|--size <size>]"
-    << " [-n|--node_size <node size>]"
-    << " [-v|--verbose]"
-    << " [-h|--help]" << std::endl;
+void usage(char **argv) {
+  std::cout << "Usage: " << argv[0] << " [-p|--read_percent <percent>]"
+            << " [-r|--range <range>]"
+            << " [--population <pop>]"
+            << " [-t|--thread <nthreads>]"
+            << " [-o|--ops <ops per thread>]"
+            << " [-s|--size <size>]"
+            << " [-n|--node_size <node size>]"
+            << " [-v|--verbose]"
+            << " [-h|--help]" << std::endl;
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
 
   bool verbose = false;
   int read_percent = 95;
@@ -94,65 +94,61 @@ int main(int argc, char** argv) {
   int c;
   int index;
 
-  struct option long_options[] = {
-    {"read_percent", required_argument, 0, 'p'},
-    {"range", required_argument, 0, 'r'},
-    {"population", required_argument, 0, 0},
-    {"thread", required_argument, 0, 't'},
-    {"ops", required_argument, 0, 'o'},
-    {"size", required_argument, 0, 's'},
-    {"node_size", required_argument, 0, 'n'},
-    {"help", no_argument, 0, 'h'},
-    {"verbose", no_argument, 0, 'v'},
-    {nullptr, 0, 0, 0}
-  };
+  struct option long_options[] = {{"read_percent", required_argument, 0, 'p'},
+                                  {"range", required_argument, 0, 'r'},
+                                  {"population", required_argument, 0, 0},
+                                  {"thread", required_argument, 0, 't'},
+                                  {"ops", required_argument, 0, 'o'},
+                                  {"size", required_argument, 0, 's'},
+                                  {"node_size", required_argument, 0, 'n'},
+                                  {"help", no_argument, 0, 'h'},
+                                  {"verbose", no_argument, 0, 'v'},
+                                  {nullptr, 0, 0, 0}};
 
-  while(true) {
+  while (true) {
     c = getopt_long(argc, argv, "p:r:t:o:s:n:hv", long_options, &index);
 
-    if(c == -1)
+    if (c == -1)
       break;
-    
+
     switch (c) {
-      case 0: // long only option
-        if(std::string(long_options[index].name) == "population") {
-          population = atoi(optarg);
-        }
-        else {
-          usage(argv);
-          exit(1);
-        }
-        break;
-      case 'p':
-        read_percent = atoi(optarg);
-        break;
-      case 'r':
-        range = atoi(optarg);
-        break;
-      case 't':
-        nthreads = atoi(optarg);
-        break;
-      case 'o':
-        ops = atoi(optarg);
-        break;
-      case 's':
-        size = atoi(optarg);
-        break;
-      case 'n':
-        node_size = true;
-        break;
-      case 'v':
-        verbose = true;
-        break;
-      case 'h':
-        usage(argv);
-        exit(0);
-        break;
-      default:
+    case 0: // long only option
+      if (std::string(long_options[index].name) == "population") {
+        population = atoi(optarg);
+      } else {
         usage(argv);
         exit(1);
+      }
+      break;
+    case 'p':
+      read_percent = atoi(optarg);
+      break;
+    case 'r':
+      range = atoi(optarg);
+      break;
+    case 't':
+      nthreads = atoi(optarg);
+      break;
+    case 'o':
+      ops = atoi(optarg);
+      break;
+    case 's':
+      size = atoi(optarg);
+      break;
+    case 'n':
+      node_size = true;
+      break;
+    case 'v':
+      verbose = true;
+      break;
+    case 'h':
+      usage(argv);
+      exit(0);
+      break;
+    default:
+      usage(argv);
+      exit(1);
     }
-
   }
 
   if (verbose) {
@@ -167,42 +163,30 @@ int main(int argc, char** argv) {
 
   if (node_size == 1) {
 
-    auto map = new remus::hds::unordered_map<int, 
-                                            int, 
-                                            1, 
-                                            remus::hds::kv_linked_list::kv_lock_linked_list,
-                                            remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
-                                            remus::hds::allocator::heap_allocator>(size);
+    auto map = new remus::hds::unordered_map<int, int, 1, remus::hds::kv_linked_list::kv_lock_linked_list,
+                                             remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer,
+                                             remus::hds::allocator::heap_allocator>(size);
 
     test(map, read_percent, population, range, nthreads, ops);
   } else if (node_size == 2) {
 
-    auto map = new remus::hds::unordered_map<int, 
-                                            int, 
-                                            2, 
-                                            remus::hds::kv_linked_list::kv_lock_linked_list,
-                                            remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
-                                            remus::hds::allocator::heap_allocator>(size);
+    auto map = new remus::hds::unordered_map<int, int, 2, remus::hds::kv_linked_list::kv_lock_linked_list,
+                                             remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer,
+                                             remus::hds::allocator::heap_allocator>(size);
 
     test(map, read_percent, population, range, nthreads, ops);
   } else if (node_size == 4) {
 
-    auto map = new remus::hds::unordered_map<int, 
-                                            int, 
-                                            4, 
-                                            remus::hds::kv_linked_list::kv_lock_linked_list,
-                                            remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
-                                            remus::hds::allocator::heap_allocator>(size);
+    auto map = new remus::hds::unordered_map<int, int, 4, remus::hds::kv_linked_list::kv_lock_linked_list,
+                                             remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer,
+                                             remus::hds::allocator::heap_allocator>(size);
 
     test(map, read_percent, population, range, nthreads, ops);
   } else if (node_size == 8) {
 
-    auto map = new remus::hds::unordered_map<int, 
-                                            int, 
-                                            8, 
-                                            remus::hds::kv_linked_list::kv_lock_linked_list,
-                                            remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer, 
-                                            remus::hds::allocator::heap_allocator>(size);
+    auto map = new remus::hds::unordered_map<int, int, 8, remus::hds::kv_linked_list::kv_lock_linked_list,
+                                             remus::hds::kv_linked_list::locked_nodes::reg_cached_node_pointer,
+                                             remus::hds::allocator::heap_allocator>(size);
 
     test(map, read_percent, population, range, nthreads, ops);
   } else {
@@ -212,4 +196,3 @@ int main(int argc, char** argv) {
 
   return 0;
 }
-

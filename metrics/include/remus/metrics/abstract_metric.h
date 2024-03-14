@@ -4,8 +4,8 @@
 #include <ostream>
 #include <vector>
 
-#include <protos/metrics.pb.h>
 #include "remus/util/status.h"
+#include <protos/metrics.pb.h>
 
 namespace remus::metrics {
 

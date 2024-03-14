@@ -8,8 +8,8 @@
 
 #include "remus/util/status.h"
 
-#include "atree/atree.h"
 #include "abstract_metric.h"
+#include "atree/atree.h"
 
 namespace remus::metrics {
 
@@ -38,16 +38,13 @@ namespace remus::metrics {
 // T-Digest data structure (https://github.com/tdunning/t-digest,
 // https://github.com/derrickburns/tdigest), which uses k-means clustering to
 // efficiently compute approximate quantiles.
-template <typename T>
-class Summary : public Metric, public Accumulator<Summary<T>> {
+template <typename T> class Summary : public Metric, public Accumulator<Summary<T>> {
   static_assert(std::is_arithmetic_v<T>);
 
 public:
   explicit Summary(std::string_view id, std::string_view units, int window_size)
-      : Metric(id), units_(units), window_size_(window_size),
-        initialized_(false), min_(0.0), p50_(0.0), p90_(0.0), p95_(0.0),
-        p99_(0.0), p999_(0.0), max_(0.0), total_samples_(0), mean_(0.0),
-        squared_total_(0.0), variance_(0.0) {}
+    : Metric(id), units_(units), window_size_(window_size), initialized_(false), min_(0.0), p50_(0.0), p90_(0.0),
+      p95_(0.0), p99_(0.0), p999_(0.0), max_(0.0), total_samples_(0), mean_(0.0), squared_total_(0.0), variance_(0.0) {}
 
   double GetMin() { return GetPercentileInternal(0.0); }
   double Get50thPercentile() { return GetPercentileInternal(50.0); }
@@ -82,8 +79,7 @@ private:
   // expected number of samples greater than the target percentile.
   template <class NodeType>
   class SubtreeCountVisitor
-      : public VisitorInterface<NodeType, typename NodeType::value_type,
-                                typename NodeType::metadata_type> {
+    : public VisitorInterface<NodeType, typename NodeType::value_type, typename NodeType::metadata_type> {
   public:
     void OnInsert(NodeType *curr) override { Visit(curr); }
     void OnRemove(NodeType *curr) override { Visit(curr); }
@@ -107,8 +103,7 @@ private:
   class PercentileAccessor {
   public:
     template <typename ATreeType>
-    remus::util::StatusVal<typename ATreeType::node_type *>
-    FindNthPercentile(const ATreeType &tree, double n);
+    remus::util::StatusVal<typename ATreeType::node_type *> FindNthPercentile(const ATreeType &tree, double n);
 
     template <typename ATreeType> int GetSize(const ATreeType &tree);
   };
@@ -133,8 +128,7 @@ private:
   // E.g., Given 1000 samples and the 99th percentile, we expect that the right
   // subtree of the 99th percentile value will contain 10 nodes.
   typedef ATreeNode<T, int, int> atree_node_type;
-  ATree<T, int, int, SubtreeCountVisitor<atree_node_type>, PercentileAccessor>
-      samples_;
+  ATree<T, int, int, SubtreeCountVisitor<atree_node_type>, PercentileAccessor> samples_;
 
   // Statistics collected during the lifetime of this distribution object.
   bool initialized_;
@@ -249,8 +243,7 @@ template <typename T> double Summary<T>::GetPercentileInternal(double p) {
 template <typename T>
 template <typename ATreeType>
 remus::util::StatusVal<typename ATreeType::node_type *>
-Summary<T>::PercentileAccessor::FindNthPercentile(const ATreeType &tree,
-                                                  double percentile) {
+Summary<T>::PercentileAccessor::FindNthPercentile(const ATreeType &tree, double percentile) {
   if (percentile > 100.0 || percentile < 0.0) {
     // return FailedPrecondition ("Unexpected value for n");
     std::cerr << percentile << std::endl;
@@ -294,9 +287,7 @@ Summary<T>::PercentileAccessor::FindNthPercentile(const ATreeType &tree,
   return {remus::util::Status::Ok(), curr};
 }
 
-template <typename T>
-template <typename ATreeType>
-int Summary<T>::PercentileAccessor::GetSize(const ATreeType &tree) {
+template <typename T> template <typename ATreeType> int Summary<T>::PercentileAccessor::GetSize(const ATreeType &tree) {
   if (tree.root_.left() != nullptr) {
     return tree.root_.left()->metadata();
   } else {
@@ -304,8 +295,7 @@ int Summary<T>::PercentileAccessor::GetSize(const ATreeType &tree) {
   }
 }
 
-template <typename T>
-remus::util::Status Summary<T>::Accumulate(const remus::util::StatusVal<Summary<T>> &other) {
+template <typename T> remus::util::Status Summary<T>::Accumulate(const remus::util::StatusVal<Summary<T>> &other) {
   if (other.status.t != remus::util::Ok)
     return other.status;
 
@@ -316,24 +306,16 @@ remus::util::Status Summary<T>::Accumulate(const remus::util::StatusVal<Summary<
 
   // Compute the weighted average of the two distribution statistics.
   UpdatePercentilesAndClearSamples();
-  min_ += (d.min_ * d.total_samples_ - min_ * total_samples_) /
-          double(total_samples_ + d.total_samples_);
-  p50_ += (d.p50_ * d.total_samples_ - p50_ * total_samples_) /
-          double(total_samples_ + d.total_samples_);
-  p90_ += (d.p90_ * d.total_samples_ - p90_ * total_samples_) /
-          double(total_samples_ + d.total_samples_);
-  p95_ += (d.p95_ * d.total_samples_ - p95_ * total_samples_) /
-          double(total_samples_ + d.total_samples_);
-  p99_ += (d.p99_ * d.total_samples_ - p99_ * total_samples_) /
-          double(total_samples_ + d.total_samples_);
-  p999_ += (d.p999_ * d.total_samples_ - p999_ * total_samples_) /
-           double(total_samples_ + d.total_samples_);
-  max_ += (d.max_ * d.total_samples_ - max_ * total_samples_) /
-          double(total_samples_ + d.total_samples_);
-  mean_ += (d.mean_ * d.total_samples_ - mean_ * total_samples_) /
-           double(total_samples_ + d.total_samples_);
-  variance_ += (d.variance_ * d.total_samples_ - variance_ * total_samples_) /
-               double(total_samples_ + d.total_samples_);
+  min_ += (d.min_ * d.total_samples_ - min_ * total_samples_) / double(total_samples_ + d.total_samples_);
+  p50_ += (d.p50_ * d.total_samples_ - p50_ * total_samples_) / double(total_samples_ + d.total_samples_);
+  p90_ += (d.p90_ * d.total_samples_ - p90_ * total_samples_) / double(total_samples_ + d.total_samples_);
+  p95_ += (d.p95_ * d.total_samples_ - p95_ * total_samples_) / double(total_samples_ + d.total_samples_);
+  p99_ += (d.p99_ * d.total_samples_ - p99_ * total_samples_) / double(total_samples_ + d.total_samples_);
+  p999_ += (d.p999_ * d.total_samples_ - p999_ * total_samples_) / double(total_samples_ + d.total_samples_);
+  max_ += (d.max_ * d.total_samples_ - max_ * total_samples_) / double(total_samples_ + d.total_samples_);
+  mean_ += (d.mean_ * d.total_samples_ - mean_ * total_samples_) / double(total_samples_ + d.total_samples_);
+  variance_ +=
+    (d.variance_ * d.total_samples_ - variance_ * total_samples_) / double(total_samples_ + d.total_samples_);
   return remus::util::Status::Ok();
 }
 
@@ -375,7 +357,7 @@ template <typename T> MetricProto Summary<T>::ToProto() {
   return proto;
 }
 
-template <typename T> Metrics Summary<T>::ToMetrics(){
+template <typename T> Metrics Summary<T>::ToMetrics() {
   UpdatePercentilesAndClearSamples();
   Metrics result = Metrics(MetricType::Summary);
   result.name = name_;

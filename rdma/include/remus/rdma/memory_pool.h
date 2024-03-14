@@ -16,14 +16,14 @@
 #include <vector>
 
 #include <protos/metrics.pb.h> // TODO should be a part of matrics
-#include <protos/rdma.pb.h> // TODO should be replaced with a JSON object
+#include <protos/rdma.pb.h>    // TODO should be replaced with a JSON object
 
 #include <spdlog/fmt/fmt.h> // [mfs] Used in rdma_ptr... factor away?
 #include <vector>
 
-#include "remus/util/status.h"
 #include "remus/logging/logging.h"
 #include "remus/metrics/summary.h"
+#include "remus/util/status.h"
 
 #include "connection.h"
 #include "peer.h"
@@ -36,15 +36,10 @@
 //        assertion?
 template <typename T> struct fmt::formatter<::remus::rdma::rdma_ptr<T>> {
   typedef ::remus::rdma::rdma_ptr<T> rdma_ptr;
-  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) {
-    return ctx.end();
-  }
+  constexpr auto parse(format_parse_context &ctx) -> decltype(ctx.begin()) { return ctx.end(); }
 
-  template <typename FormatContext>
-  auto format(const rdma_ptr &input, FormatContext &ctx)
-      -> decltype(ctx.out()) {
-    return format_to(ctx.out(), "(id={}, address=0x{:x})", input.id(),
-                     input.address());
+  template <typename FormatContext> auto format(const rdma_ptr &input, FormatContext &ctx) -> decltype(ctx.out()) {
+    return format_to(ctx.out(), "(id={}, address=0x{:x})", input.id(), input.address());
   }
 };
 
@@ -70,8 +65,7 @@ class MemoryPool {
 
     static constexpr uint8_t kMinSlabClass = 3;
     static constexpr uint8_t kMaxSlabClass = 20;
-    static constexpr uint8_t kNumSlabClasses =
-        kMaxSlabClass - kMinSlabClass + 1;
+    static constexpr uint8_t kNumSlabClasses = kMaxSlabClass - kMinSlabClass + 1;
     static constexpr size_t kMaxAlignment = 1 << 8;
 
     // [mfs]  base 2 log is really cheap these days... can't we just use an
@@ -81,10 +75,8 @@ class MemoryPool {
     // https://stackoverflow.com/questions/11376288/fast-computing-of-log2-for-64-bit-integers
     static constexpr char kLogTable[256] = {
 #define LT(n) n, n, n, n, n, n, n, n, n, n, n, n, n, n, n, n
-        -1,    0,     1,     1,     2,     2,     2,     2,
-        3,     3,     3,     3,     3,     3,     3,     3,
-        LT(4), LT(5), LT(5), LT(6), LT(6), LT(6), LT(6), LT(7),
-        LT(7), LT(7), LT(7), LT(7), LT(7), LT(7), LT(7),
+      -1,    0,     1,     1,     2,     2,     2,     2,     3,     3,     3,     3,     3,     3,     3,     3,
+      LT(4), LT(5), LT(5), LT(6), LT(6), LT(6), LT(6), LT(7), LT(7), LT(7), LT(7), LT(7), LT(7), LT(7), LT(7),
     };
 
     std::unique_ptr<Segment> rdma_memory_;
@@ -92,9 +84,7 @@ class MemoryPool {
 
     // Stores addresses of freed memory for a given slab class.
     inline static thread_local std::array<uint8_t, kNumSlabClasses> alignments_;
-    inline static thread_local std::array<std::list<std::pair<size_t, void *>>,
-                                          kNumSlabClasses>
-        freelists_;
+    inline static thread_local std::array<std::list<std::pair<size_t, void *>>, kNumSlabClasses> freelists_;
 
     inline unsigned int UpperLog2(size_t x) {
       size_t r;
@@ -118,10 +108,9 @@ class MemoryPool {
       auto slabclass = UpperLog2(bytes);
       slabclass = std::max(kMinSlabClass, static_cast<uint8_t>(slabclass));
       auto slabclass_idx = slabclass - kMinSlabClass;
-      REMUS_ASSERT(slabclass_idx >= 0 && slabclass_idx < kNumSlabClasses,
-                  "Invalid allocation requested: {} bytes", bytes);
-      REMUS_ASSERT(alignment <= kMaxAlignment, "Invalid alignment: {} bytes",
-                  alignment);
+      REMUS_ASSERT(slabclass_idx >= 0 && slabclass_idx < kNumSlabClasses, "Invalid allocation requested: {} bytes",
+                   bytes);
+      REMUS_ASSERT(alignment <= kMaxAlignment, "Invalid alignment: {} bytes", alignment);
 
       if (alignments_[slabclass_idx] & alignment) {
         auto *freelist = &freelists_[slabclass_idx];
@@ -163,8 +152,7 @@ class MemoryPool {
     }
 
     // Only equal if they are the same object.
-    bool do_is_equal(const std::experimental::pmr::memory_resource &other)
-        const noexcept override {
+    bool do_is_equal(const std::experimental::pmr::memory_resource &other) const noexcept override {
       return this == &other;
     }
 
@@ -172,18 +160,16 @@ class MemoryPool {
     virtual ~rdma_memory_resource() {}
 
     explicit rdma_memory_resource(size_t bytes, ibv_pd *pd)
-        : rdma_memory_(std::make_unique<Segment>(bytes, pd)),
-          head_(rdma_memory_->raw() + bytes) {
+      : rdma_memory_(std::make_unique<Segment>(bytes, pd)), head_(rdma_memory_->raw() + bytes) {
       std::memset(alignments_.data(), 0, sizeof(alignments_));
-      REMUS_TRACE("rdma_memory_resource: {} to {} (length={})",
-                 fmt::ptr(rdma_memory_->raw()), fmt::ptr(head_.load()), bytes);
+      REMUS_TRACE("rdma_memory_resource: {} to {} (length={})", fmt::ptr(rdma_memory_->raw()), fmt::ptr(head_.load()),
+                  bytes);
     }
 
     /// [mfs] If we cached this once, we wouldn't need the call?
     ibv_mr *mr() const { return rdma_memory_->mr(); }
 
-    template <typename T>
-    [[nodiscard]] constexpr T *allocateT(std::size_t n = 1) {
+    template <typename T> [[nodiscard]] constexpr T *allocateT(std::size_t n = 1) {
       return reinterpret_cast<T *>(allocate(sizeof(T) * n, 64));
     }
 
@@ -232,27 +218,22 @@ class MemoryPool {
   static inline void cpu_relax() { asm volatile("pause\n" ::: "memory"); }
 
 public:
-  MemoryPool(const Peer &self)
-      : self_(self), rdma_per_read_("rdma_per_read", "ops", 10000) {}
+  MemoryPool(const Peer &self) : self_(self), rdma_per_read_("rdma_per_read", "ops", 10000) {}
 
   MemoryPool(const MemoryPool &) = delete;
   MemoryPool(MemoryPool &&) = delete;
 
   rdma_memory_resource *init_memory(uint32_t capacity, ibv_pd *pd) {
     // Create a memory region (mr) in the current protection domain (pd)
-    rdma_memory_ =
-        std::make_unique<rdma_memory_resource>(capacity + sizeof(uint64_t), pd);
+    rdma_memory_ = std::make_unique<rdma_memory_resource>(capacity + sizeof(uint64_t), pd);
     return rdma_memory_.get();
   }
 
-  void receive_conn(uint16_t id, Connection *conn, uint32_t rkey,
-                    uint32_t lkey) {
+  void receive_conn(uint16_t id, Connection *conn, uint32_t rkey, uint32_t lkey) {
     conn_info_.emplace(id, conn_info_t{conn, rkey, lkey});
   }
 
-  remus::metrics::MetricProto rdma_per_read_proto() {
-    return rdma_per_read_.ToProto();
-  }
+  remus::metrics::MetricProto rdma_per_read_proto() { return rdma_per_read_.ToProto(); }
   conn_info_t conn_info(uint16_t id) const { return conn_info_.at(id); }
 
   // This seems to be giving each thread a unique Id, solely so that it can have
@@ -275,22 +256,18 @@ public:
 
   /// Allocate some memory from the local RDMA heap
   template <typename T> rdma_ptr<T> Allocate(size_t size = 1) {
-    auto ret =
-        rdma_ptr<T>(self_.id, rdma_memory_->template allocateT<T>(size));
+    auto ret = rdma_ptr<T>(self_.id, rdma_memory_->template allocateT<T>(size));
     return ret;
   }
 
   /// Deallocate some memory to the local RDMA heap (must be from this node)
   template <typename T> void Deallocate(rdma_ptr<T> p, size_t size = 1) {
-    REMUS_ASSERT(p.id() == self_.id,
-                "Alloc/dealloc on remote node not implemented...");
+    REMUS_ASSERT(p.id() == self_.id, "Alloc/dealloc on remote node not implemented...");
     rdma_memory_->template deallocateT<T>(std::to_address(p), size);
   }
 
   /// Read from RDMA, store the result in prealloc (may allocate)
-  template <typename T>
-  rdma_ptr<T> Read(rdma_ptr<T> ptr,
-                     rdma_ptr<T> prealloc = nullptr) {
+  template <typename T> rdma_ptr<T> Read(rdma_ptr<T> ptr, rdma_ptr<T> prealloc = nullptr) {
     if (prealloc == nullptr)
       prealloc = Allocate<T>();
     ReadInternal(ptr, 0, sizeof(T), sizeof(T), prealloc);
@@ -300,9 +277,7 @@ public:
   /// Read from RDMA, store the result in prealloc (may allocate)
   ///
   /// This version takes a `size` argument, for variable-length objects
-  template <typename T>
-  rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size,
-                             rdma_ptr<T> prealloc = nullptr) {
+  template <typename T> rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size, rdma_ptr<T> prealloc = nullptr) {
     if (prealloc == nullptr)
       prealloc = Allocate<T>(size);
     // TODO: What happens if I decrease chunk size (sizeT * size --> sizeT)
@@ -316,8 +291,7 @@ public:
   ///
   /// TODO: Does this require bytes < sizeof(T)?
   template <typename T>
-  rdma_ptr<T> PartialRead(rdma_ptr<T> ptr, size_t offset, size_t bytes,
-                            rdma_ptr<T> prealloc = nullptr) {
+  rdma_ptr<T> PartialRead(rdma_ptr<T> ptr, size_t offset, size_t bytes, rdma_ptr<T> prealloc = nullptr) {
     if (prealloc == nullptr)
       prealloc = Allocate<T>();
     ReadInternal(ptr, offset, bytes, sizeof(T), prealloc);
@@ -325,9 +299,7 @@ public:
   }
 
   /// Write to RDMA
-  template <typename T>
-  void Write(rdma_ptr<T> ptr, const T &val,
-             rdma_ptr<T> prealloc = nullptr) {
+  template <typename T> void Write(rdma_ptr<T> ptr, const T &val, rdma_ptr<T> prealloc = nullptr) {
     auto info = conn_info_.at(ptr.id());
 
     // [esl] Getting the thread's index to determine it's owned flag
@@ -345,12 +317,10 @@ public:
     if (prealloc == nullptr) {
       auto alloc = rdma_memory_.get();
       local = alloc->template allocateT<T>();
-      REMUS_TRACE("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
-                 (uint64_t)local);
+      REMUS_TRACE("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T), (uint64_t)local);
     } else {
       local = std::to_address(prealloc);
-      REMUS_TRACE("Preallocated memory for Write: {} bytes @ 0x{:x}", sizeof(T),
-                 (uint64_t)local);
+      REMUS_TRACE("Preallocated memory for Write: {} bytes @ 0x{:x}", sizeof(T), (uint64_t)local);
     }
 
     REMUS_ASSERT((uint64_t)local != ptr.address(), "WTF");
@@ -383,8 +353,7 @@ public:
         continue;
       // Assert a good result
       REMUS_ASSERT(wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} ({})",
-                  (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)),
-                  (std::stringstream() << ptr).str());
+                   (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), (std::stringstream() << ptr).str());
       int old = reordering_counters[wc.wr_id].fetch_sub(1);
       REMUS_ASSERT(old >= 1, "Broken synchronization");
     }
@@ -404,8 +373,7 @@ public:
   ///       doesn't support a true "swap" operation.  It's still good to have,
   ///       because of the overhead of trying from scratch, but we can certainly
   ///       optimize it a bit.
-  template <typename T>
-  T AtomicSwap(rdma_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
+  template <typename T> T AtomicSwap(rdma_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
 
@@ -417,9 +385,8 @@ public:
     //        do this call (maybe be preallocating the space thread_local)
     volatile uint64_t *prev_ = alloc->template allocateT<uint64_t>();
 
-    ibv_sge sge{.addr = reinterpret_cast<uint64_t>(prev_),
-                .length = sizeof(uint64_t),
-                .lkey = rdma_memory_->mr()->lkey};
+    ibv_sge sge{
+      .addr = reinterpret_cast<uint64_t>(prev_), .length = sizeof(uint64_t), .lkey = rdma_memory_->mr()->lkey};
 
     ibv_send_wr send_wr_{};
     send_wr_.wr_id = index_as_id;
@@ -444,9 +411,8 @@ public:
         if (poll == 0 || (poll < 0 && errno == EAGAIN))
           continue;
         // Assert a good result
-        REMUS_ASSERT(
-            poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
-            (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+        REMUS_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
+                     (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
         int old = reordering_counters[wc.wr_id].fetch_sub(1);
         REMUS_ASSERT(old >= 1, "Broken synchronization");
       }
@@ -465,8 +431,7 @@ public:
   /// [mfs] If the swap value is always a uint64_t, why is this templated on T?
   ///       Or perhaps the question is "how does this work if the field to CAS
   ///       isn't the first field of the T?"
-  template <typename T>
-  T CompareAndSwap(rdma_ptr<T> ptr, uint64_t expected, uint64_t swap) {
+  template <typename T> T CompareAndSwap(rdma_ptr<T> ptr, uint64_t expected, uint64_t swap) {
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
 
@@ -481,9 +446,8 @@ public:
     // TODO: would the code be clearer if all of the ibv_* initialization
     // throughout this file used the new syntax?
     // [esl] I agree, i think its much cleaner
-    ibv_sge sge{.addr = reinterpret_cast<uint64_t>(prev_),
-                .length = sizeof(uint64_t),
-                .lkey = rdma_memory_->mr()->lkey};
+    ibv_sge sge{
+      .addr = reinterpret_cast<uint64_t>(prev_), .length = sizeof(uint64_t), .lkey = rdma_memory_->mr()->lkey};
 
     ibv_send_wr send_wr_{};
     send_wr_.wr_id = index_as_id;
@@ -508,7 +472,7 @@ public:
         continue;
       // Assert a good result
       REMUS_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {}",
-                  (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
+                   (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)));
       int old = reordering_counters[wc.wr_id].fetch_sub(1);
       REMUS_ASSERT(old >= 1, "Broken synchronization");
     }
@@ -523,8 +487,7 @@ public:
   }
 
   template <typename T> inline rdma_ptr<T> GetBaseAddress() const {
-    return GetRemotePtr<T>(
-        reinterpret_cast<const T *>(rdma_memory_->mr()->addr));
+    return GetRemotePtr<T>(reinterpret_cast<const T *>(rdma_memory_->mr()->addr));
   }
 
 private:
@@ -533,10 +496,8 @@ private:
   /// TODO: It appears that we *always* call this with bytes <= chunk_size.
   ///       Could we get rid of some of the complexity?
   template <typename T>
-  void ReadInternal(rdma_ptr<T> ptr, size_t offset, size_t bytes,
-                    size_t chunk_size, rdma_ptr<T> prealloc) {
-    const int num_chunks =
-        bytes % chunk_size ? (bytes / chunk_size) + 1 : bytes / chunk_size;
+  void ReadInternal(rdma_ptr<T> ptr, size_t offset, size_t bytes, size_t chunk_size, rdma_ptr<T> prealloc) {
+    const int num_chunks = bytes % chunk_size ? (bytes / chunk_size) + 1 : bytes / chunk_size;
     const size_t remainder = bytes % chunk_size;
     const bool is_multiple = remainder == 0;
 
@@ -582,9 +543,8 @@ private:
       if (poll == 0 || (poll < 0 && errno == EAGAIN))
         continue;
       // Assert a good result
-      REMUS_ASSERT(
-          poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
-          (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
+      REMUS_ASSERT(poll == 1 && wc.status == IBV_WC_SUCCESS, "ibv_poll_cq(): {} @ {}",
+                   (poll < 0 ? strerror(errno) : ibv_wc_status_str(wc.status)), ptr);
       int old = reordering_counters[wc.wr_id].fetch_sub(1);
       REMUS_ASSERT(old >= 1, "Broken synchronization");
     }

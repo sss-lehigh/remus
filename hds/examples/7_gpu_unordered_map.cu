@@ -1,11 +1,11 @@
 #include <cstdio>
 
 #include <remus/hds/allocator/allocator.h>
+#include <remus/hds/threadgroup/threadgroup.h>
+#include <remus/hds/unordered_map/gpu_unordered_map.h>
 #include <remus/hds/unordered_map/kv_linked_list/lock_linked_list.h>
 #include <remus/hds/unordered_map/kv_linked_list/locked_nodes/reg_cached_nodes.h>
 #include <remus/hds/unordered_map/unordered_map.h>
-#include <remus/hds/threadgroup/threadgroup.h>
-#include <remus/hds/unordered_map/gpu_unordered_map.h>
 #include <set>
 
 #include <thrust/device_vector.h>
@@ -14,35 +14,30 @@
 
 HDS_HOST_DEVICE void error() {
 #if defined(__CUDA_ARCH__)
-__trap();
+  __trap();
 #else
-exit(1);
+  exit(1);
 #endif
 }
 
-#define ASSERT(x, y) if(!(x)) { printf("%s did not evaluate to true for i = %d\n", #x, (y)); error(); }
+#define ASSERT(x, y)                                                                                                   \
+  if (!(x)) {                                                                                                          \
+    printf("%s did not evaluate to true for i = %d\n", #x, (y));                                                       \
+    error();                                                                                                           \
+  }
 
 using namespace remus::hds::kv_linked_list;
 using namespace remus::hds;
 
-using single_thread_um = unordered_map<int, 
-                                       int, 
-                                       2, 
-                                       kv_lock_linked_list,
-                                       locked_nodes::reg_cached_node_pointer, 
-                                       allocator::heap_allocator>;
+using single_thread_um =
+  unordered_map<int, int, 2, kv_lock_linked_list, locked_nodes::reg_cached_node_pointer, allocator::heap_allocator>;
 
-using wc_um = unordered_map<int, 
-                            int, 
-                            32, 
-                            kv_lock_linked_list,
-                            locked_nodes::reg_cached_node_pointer, 
-                            allocator::heap_allocator>;
+using wc_um =
+  unordered_map<int, int, 32, kv_lock_linked_list, locked_nodes::reg_cached_node_pointer, allocator::heap_allocator>;
 
+__global__ void single_thread_test(single_thread_um *map, fast_div_mod d) {
 
-__global__ void single_thread_test(single_thread_um* map, fast_div_mod d) {
-
-  map = new (map) single_thread_um(d); 
+  map = new (map) single_thread_um(d);
 
   auto group = threadgroup::single_threadgroup{};
 
@@ -52,20 +47,20 @@ __global__ void single_thread_test(single_thread_um* map, fast_div_mod d) {
     int r = i;
     ASSERT(map->insert(r, r, group), r);
   }
-  
+
   for (int i = 0; i < 100; ++i) {
     int r = i;
     ASSERT(map->remove(r, group), r);
   }
 
-  map->~single_thread_um(); 
+  map->~single_thread_um();
 }
 
-__global__ void warp_test(wc_um* map, fast_div_mod d) {
+__global__ void warp_test(wc_um *map, fast_div_mod d) {
 
   auto warp = threadgroup::warp_threadgroup{};
   if (warp.is_leader()) {
-    new (map) wc_um(d); 
+    new (map) wc_um(d);
   }
   warp.sync();
 
@@ -73,19 +68,19 @@ __global__ void warp_test(wc_um* map, fast_div_mod d) {
 
   ASSERT(map->get(1, warp) == nullopt, 1);
 
-  for(int i = 0; i < 100; ++i) {
+  for (int i = 0; i < 100; ++i) {
     int r = i;
     ASSERT(map->insert(r, r, warp), r);
   }
 
-  for(int i = 0; i < 100; ++i) {
+  for (int i = 0; i < 100; ++i) {
     int r = i;
     ASSERT(map->remove(r, warp), r);
   }
 
   warp.sync();
   if (warp.is_leader()) {
-    map->~wc_um(); 
+    map->~wc_um();
   }
 }
 
@@ -94,7 +89,7 @@ int main() {
   fast_div_mod d(100);
 
   allocator::device_allocator dev_mem;
-  single_thread_um* st_gpu_map;
+  single_thread_um *st_gpu_map;
 
   st_gpu_map = dev_mem.allocate<single_thread_um>(1);
 
@@ -102,23 +97,23 @@ int main() {
 
   auto err = cudaDeviceSynchronize();
 
-  if(err != cudaSuccess) {
+  if (err != cudaSuccess) {
     throw std::runtime_error(std::string(cudaGetErrorName(err)) + " : " + std::string(cudaGetErrorString(err)));
   }
 
   dev_mem.deallocate(st_gpu_map, 1);
 
-  wc_um* w_gpu_map;
+  wc_um *w_gpu_map;
   w_gpu_map = dev_mem.allocate<wc_um>(1);
 
   warp_test<<<1, 32>>>(w_gpu_map, d);
 
   err = cudaDeviceSynchronize();
 
-  if(err != cudaSuccess) {
+  if (err != cudaSuccess) {
     throw std::runtime_error(std::string(cudaGetErrorName(err)) + " : " + std::string(cudaGetErrorString(err)));
   }
-  
+
   dev_mem.deallocate(w_gpu_map, 1);
 
   gpu_unordered_map<int, int> gpu_map(100);
@@ -139,20 +134,19 @@ int main() {
   thrust::host_vector<bool> h_results3 = results3;
 
   int count = 0;
-  for(auto res : h_results) {
+  for (auto res : h_results) {
     ASSERT(res, count++);
   }
 
   count = 0;
-  for(auto res : h_results2) {
+  for (auto res : h_results2) {
     ASSERT(res != nullopt && *res == 1, count++);
   }
 
   count = 0;
-  for(auto res : h_results3) {
+  for (auto res : h_results3) {
     ASSERT(res, count++);
   }
 
   return 0;
 }
-

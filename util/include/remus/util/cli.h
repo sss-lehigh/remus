@@ -38,9 +38,7 @@ struct Arg {
 /// @param def_val  The default value
 ///
 /// @return An Arg for this command-line arg
-Arg STR_ARG_OPT(std::string flag, const char *desc, std::string def_val) {
-  return {flag, desc, Arg::STR, def_val};
-}
+Arg STR_ARG_OPT(std::string flag, const char *desc, std::string def_val) { return {flag, desc, Arg::STR, def_val}; }
 
 /// @brief  Construct a required command-line arg of type std::string
 ///
@@ -48,9 +46,7 @@ Arg STR_ARG_OPT(std::string flag, const char *desc, std::string def_val) {
 /// @param desc     A description (for help)
 ///
 /// @return An Arg for this command-line arg
-Arg STR_ARG(std::string flag, const char *desc) {
-  return {flag, desc, Arg::STR, std::nullopt};
-}
+Arg STR_ARG(std::string flag, const char *desc) { return {flag, desc, Arg::STR, std::nullopt}; }
 
 /// @brief  Construct an optional command-line arg that is a bool.  It will
 ///         default to false, because bool flags don't ever take an argument
@@ -60,9 +56,7 @@ Arg STR_ARG(std::string flag, const char *desc) {
 /// @param def_val  The default value
 ///
 /// @return An Arg for this command-line arg
-Arg BOOL_ARG_OPT(std::string flag, const char *desc) {
-  return {flag, desc, Arg::BOOL, false};
-}
+Arg BOOL_ARG_OPT(std::string flag, const char *desc) { return {flag, desc, Arg::BOOL, false}; }
 
 /// @brief  Construct an optional command-line arg of type int64_t
 ///
@@ -71,9 +65,7 @@ Arg BOOL_ARG_OPT(std::string flag, const char *desc) {
 /// @param def_val  The default value
 ///
 /// @return An Arg for this command-line arg
-Arg I64_ARG_OPT(std::string flag, const char *desc, int64_t def_val) {
-  return {flag, desc, Arg::I64, def_val};
-}
+Arg I64_ARG_OPT(std::string flag, const char *desc, int64_t def_val) { return {flag, desc, Arg::I64, def_val}; }
 
 /// @brief  Construct a required command-line arg of type int64_t
 ///
@@ -81,9 +73,7 @@ Arg I64_ARG_OPT(std::string flag, const char *desc, int64_t def_val) {
 /// @param desc     A description (for help)
 ///
 /// @return An Arg for this command-line arg
-Arg I64_ARG(std::string flag, const char *desc) {
-  return {flag, desc, Arg::I64, std::nullopt};
-}
+Arg I64_ARG(std::string flag, const char *desc) { return {flag, desc, Arg::I64, std::nullopt}; }
 
 /// @brief  Construct an optional command-line arg of type double
 ///
@@ -92,9 +82,7 @@ Arg I64_ARG(std::string flag, const char *desc) {
 /// @param def_val  The default value
 ///
 /// @return An Arg for this command-line arg
-Arg F64_ARG_OPT(std::string flag, const char *desc, double def_val) {
-  return {flag, desc, Arg::F64, def_val};
-}
+Arg F64_ARG_OPT(std::string flag, const char *desc, double def_val) { return {flag, desc, Arg::F64, def_val}; }
 
 /// @brief  Construct a required command-line arg of type double
 ///
@@ -102,9 +90,7 @@ Arg F64_ARG_OPT(std::string flag, const char *desc, double def_val) {
 /// @param desc     A description (for help)
 ///
 /// @return An Arg for this command-line arg
-Arg F64_ARG(std::string flag, const char *desc) {
-  return {flag, desc, Arg::F64, std::nullopt};
-}
+Arg F64_ARG(std::string flag, const char *desc) { return {flag, desc, Arg::F64, std::nullopt}; }
 
 /// @brief A collection of Args, and associated methods for working with them
 class ArgMap {
@@ -122,8 +108,7 @@ public:
   /// @param in The args to merge into the ArgMap
   ///
   /// @return A string error, or {}
-  [[nodiscard]] std::optional<std::string>
-  import_args(const std::initializer_list<Arg> &in) {
+  [[nodiscard]] std::optional<std::string> import_args(const std::initializer_list<Arg> &in) {
     if (program_name != "")
       return "Error: cannot call import_args() after parse_args()";
     for (auto c : in) {
@@ -209,8 +194,7 @@ public:
     for (auto c : args) {
       std::cout << ", ";
       if (c.second.type == Arg::BOOL)
-        std::cout << (std::get<bool>(c.second.value.value()) ? "true"
-                                                             : "false");
+        std::cout << (std::get<bool>(c.second.value.value()) ? "true" : "false");
       else if (c.second.type == Arg::I64)
         std::cout << std::get<int64_t>(c.second.value.value());
       else if (c.second.type == Arg::F64)
@@ -225,35 +209,27 @@ public:
   /// @param flag The flag to look up
   ///
   /// @return The value, as a bool
-  bool bget(std::string flag) {
-    return std::get<bool>(args.find(flag)->second.value.value());
-  }
+  bool bget(std::string flag) { return std::get<bool>(args.find(flag)->second.value.value()); }
 
   /// @brief  Get an argument's value as an int64_t
   ///
   /// @param flag The flag to look up
   ///
   /// @return The value, as an int64_t
-  int64_t iget(std::string flag) {
-    return std::get<int64_t>(args.find(flag)->second.value.value());
-  }
+  int64_t iget(std::string flag) { return std::get<int64_t>(args.find(flag)->second.value.value()); }
 
   /// @brief  Get an argument's value as a double
   ///
   /// @param flag The flag to look up
   ///
   /// @return The value, as a double
-  double fget(std::string flag) {
-    return std::get<double>(args.find(flag)->second.value.value());
-  }
+  double fget(std::string flag) { return std::get<double>(args.find(flag)->second.value.value()); }
 
   /// @brief  Get an argument's value as a string
   ///
   /// @param flag The flag to look up
   ///
   /// @return The value, as a string
-  std::string sget(std::string flag) {
-    return std::get<std::string>(args.find(flag)->second.value.value());
-  }
+  std::string sget(std::string flag) { return std::get<std::string>(args.find(flag)->second.value.value()); }
 };
 } // namespace remus::util

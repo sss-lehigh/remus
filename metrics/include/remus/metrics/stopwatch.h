@@ -11,16 +11,14 @@
 #include <streambuf>
 #include <string_view>
 
-#include "remus/logging/logging.h"
 #include "abstract_metric.h"
+#include "remus/logging/logging.h"
 
 namespace remus::metrics {
 
 // All of these are KHz
-inline static constexpr char kTscFreqKhzFilePath[] =
-    "/sys/devices/system/cpu/cpu0/tsc_freq_khz";
-inline static constexpr char kMaxFreqFilePath[] =
-    "/sys/devices/system/cpu/cpu0/cpufreq/base_frequency";
+inline static constexpr char kTscFreqKhzFilePath[] = "/sys/devices/system/cpu/cpu0/tsc_freq_khz";
+inline static constexpr char kMaxFreqFilePath[] = "/sys/devices/system/cpu/cpu0/cpufreq/base_frequency";
 inline static constexpr int kDefaultCpuFreqKhz = 2300000;
 
 class Stopwatch : public Metric {
@@ -51,10 +49,9 @@ public:
   //
   class Split {
   public:
-    Split(uint32_t tsc_freq_khz, uint64_t start)
-        : Split(tsc_freq_khz, start, RdtscpAcquire()) {}
+    Split(uint32_t tsc_freq_khz, uint64_t start) : Split(tsc_freq_khz, start, RdtscpAcquire()) {}
     Split(uint32_t tsc_freq_khz, uint64_t start, uint64_t end)
-        : tsc_freq_khz_(tsc_freq_khz), start_(start), end_(end) {}
+      : tsc_freq_khz_(tsc_freq_khz), start_(start), end_(end) {}
 
     // Default move and copy.
     Split(const Split &) = default;
@@ -63,8 +60,7 @@ public:
     // Returns the length of the split in nanoseconds.
     std::chrono::nanoseconds GetRuntimeNanoseconds() {
       // # cycles / Ghz = # cycles / (cycles / nanosecond) = nanoseconds
-      return std::chrono::nanoseconds(
-          uint64_t((end_ - start_) / KhzToGhz(tsc_freq_khz_)));
+      return std::chrono::nanoseconds(uint64_t((end_ - start_) / KhzToGhz(tsc_freq_khz_)));
     }
 
   private:
@@ -95,9 +91,9 @@ public:
         file >> tsc_freq_khz;
       } else {
         REMUS_WARN("Could not determine CPU frequency. Using compile time "
-                  "value: {} KHz "
-                  "[RESULTS MAY BE INACCURATE]",
-                  kDefaultCpuFreqKhz);
+                   "value: {} KHz "
+                   "[RESULTS MAY BE INACCURATE]",
+                   kDefaultCpuFreqKhz);
         tsc_freq_khz = kDefaultCpuFreqKhz;
       }
     }
@@ -150,8 +146,7 @@ public:
 
 private:
   Stopwatch(std::string_view name, uint64_t tsc_freq_khz)
-      : Metric(name), tsc_freq_khz_(tsc_freq_khz), start_(RdtscpAcquire()),
-        end_(0), lap_(start_) {}
+    : Metric(name), tsc_freq_khz_(tsc_freq_khz), start_(RdtscpAcquire()), end_(0), lap_(start_) {}
 
   uint64_t tsc_freq_khz_;
   uint64_t start_;
