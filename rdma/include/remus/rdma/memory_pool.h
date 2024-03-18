@@ -407,7 +407,8 @@ public:
       // Poll until we match on the condition
       ibv_wc wc;
       while (reordering_counters[index_as_id] != 0) {
-        int poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+        // int poll = ibv_poll_cq(info.conn->id()->send_cq, 1, &wc);
+        int poll = info.conn->poll_cq(1, &wc);
         if (poll == 0 || (poll < 0 && errno == EAGAIN))
           continue;
         // Assert a good result
