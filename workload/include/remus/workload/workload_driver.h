@@ -129,6 +129,23 @@ private:
   }
 };
 
+template <typename T> class PrefilledStream : public Stream<T> {
+  public:
+    PrefilledStream(std::vector<T> vals, int length) : vals_(vals), length_(length), count_(0) {}
+  private:
+    std::vector<T> vals_;
+    int length_;
+    int count_;
+    inline util::StatusVal<T> NextInternal() override { 
+      count_++;
+      if (length_ < count_) {
+        REMUS_ERROR("OUT OF OPERATIONS : INCREASED SIZE OF PREFILLED STREAM");
+        return StreamTerminatedStatus();
+      }
+      return vals_.at(count_-1);
+    }
+};
+
 /// A simple workload driver
 ///
 /// This workload driver
