@@ -29,7 +29,8 @@ To build/run your machine requires:
 * ibverbs-utils 
 * libspdlog-dev 
 * libfmt-dev
-* libnuma (if compiling NUMA support)
+* nlohmann-json3-dev
+* libnuma-dev (if compiling NUMA support)
 * CUDA 12.3 (if compiling GPU support)
 * doxygen (for building DOCS)
 * cmake (3.18 or later)
