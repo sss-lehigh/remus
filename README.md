@@ -65,3 +65,15 @@ Remus can be accessed by linking in CMake to any of these libraries:
 - `remus::protos` 
 - `remus::hds`
 
+
+## Using Dockerfile
+
+To build an image from the Dockerfile, run:
+``docker build -t myimage .``
+
+To run the container based on this image:
+
+``docker run -it --name mycontainer myimage``
+
+This will start a container based on the image built and drop you into a bash shell. 
+

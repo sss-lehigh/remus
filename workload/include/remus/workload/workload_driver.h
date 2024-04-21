@@ -140,9 +140,9 @@ template <typename T> class PrefilledStream : public Stream<T> {
       count_++;
       if (length_ < count_) {
         REMUS_ERROR("OUT OF OPERATIONS : INCREASED SIZE OF PREFILLED STREAM");
-        return StreamTerminatedStatus();
+        return {StreamTerminatedStatus(), {}};
       }
-      return vals_.at(count_-1);
+      return {util::Status::Ok(), vals_.at(count_-1)};
     }
 };
 

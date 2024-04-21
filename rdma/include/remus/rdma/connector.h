@@ -161,7 +161,7 @@ public:
           rdma_destroy_ep(id);
           rdma_destroy_event_channel(event_channel);
           if (cm_event == RDMA_CM_EVENT_REJECTED) {
-            REMUS_WARN("REMUS_CM_EVENT_REJECTED... backing off"s + std::to_string(peer_id));
+            REMUS_TRACE("REMUS_CM_EVENT_REJECTED... backing off "s + std::to_string(peer_id));
             backoff_us_ = backoff_us_ > 0 ? std::min((backoff_us_ + (100 * my_id_)) * 2, kMaxBackoffUs) : kMinBackoffUs;
             std::this_thread::sleep_for(std::chrono::microseconds(backoff_us_));
             do_inner = false;

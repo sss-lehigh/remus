@@ -230,6 +230,7 @@ public:
   }
 
   void receive_conn(uint16_t id, Connection *conn, uint32_t rkey, uint32_t lkey) {
+    REMUS_DEBUG("Adding {} to conn_info_", id);
     conn_info_.emplace(id, conn_info_t{conn, rkey, lkey});
   }
 
@@ -435,7 +436,7 @@ public:
   template <typename T> T CompareAndSwap(rdma_ptr<T> ptr, uint64_t expected, uint64_t swap) {
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
-
+    
     // [esl] Getting the thread's index to determine it's owned flag
     uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
 

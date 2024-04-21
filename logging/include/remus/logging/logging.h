@@ -96,25 +96,25 @@ inline void __remus_init_log__() {
 
 // [mfs]  This looks like it is incorrect.  LOG_LEVEL==OFF will lead to an
 //        undefined symbol, when we probably still want a call to
-//        std::terminate()?
+//        std::_Exit(1)?
 #if REMUS_LOG_LEVEL != OFF
   #define REMUS_FATAL(...)                                                                                             \
     {                                                                                                                  \
       SPDLOG_CRITICAL(__VA_ARGS__);                                                                                    \
-      std::terminate();                                                                                                \
+      std::_Exit(1);                                                                                                \
     }
 #endif
 
 #define REMUS_ASSERT(check, ...)                                                                                       \
   if (!(check)) [[unlikely]] {                                                                                         \
     SPDLOG_CRITICAL(__VA_ARGS__);                                                                                      \
-    std::terminate();                                                                                                  \
+    std::_Exit(1);                                                                                                  \
   }
 
 #define OK_OR_FAIL(status)                                                                                             \
   if (auto __s = status; !(__s.t == remus::util::Ok)) [[unlikely]] {                                                   \
     SPDLOG_CRITICAL(__s.message.value());                                                                              \
-    std::terminate();                                                                                                  \
+    std::_Exit(1);                                                                                                  \
   }
 
 #define RETURN_STATUS_ON_ERROR(status)                                                                                 \
@@ -135,7 +135,7 @@ inline void __remus_init_log__() {
   #define REMUS_ASSERT_DEBUG(func, ...)                                                                                \
     if (!(func)) [[unlikely]] {                                                                                        \
       SPDLOG_ERROR(__VA_ARGS__);                                                                                       \
-      std::terminate();                                                                                                \
+      std::_Exit(1);                                                                                                \
     }
 #else
   #define REMUS_ASSERT_DEBUG(...) ((void)0)

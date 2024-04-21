@@ -59,11 +59,7 @@ public:
       listener_(std::make_unique<internal::Listener>(
         self_.id, [&](uint32_t id, internal::Connection *conn) { connection_manager_->put_connection(id, conn); })) {}
 
-  ~rdma_capability() {
-    // TODO: Make sure we aren't using the word "broker" anymore?
-    REMUS_TRACE("Stopping listening thread...");
-    listener_->StopListeningThread();
-  }
+  ~rdma_capability() {}
 
   /// Create a block of distributed memory and connect to all the other nodes in
   /// the system, so that they can have access to that memory region.
@@ -108,30 +104,40 @@ public:
     // collisions between nodes trying to connect with each other.
     for (const auto &p : peers) {
       if (p.id != self_.id && p.id > self_.id) {
-        REMUS_DEBUG("Connecting to remote peer"s + p.address + ":" + std::to_string(p.port) +
+        REMUS_DEBUG("Connecting to remote peer "s + p.address + ":" + std::to_string(p.port) +
                     " (id = " + std::to_string(p.id) + ") from " + std::to_string(self_.id));
         // Connect to the remote nodes
         //
         // [mfs] I have confirmed that multiple calls to ConnectLoopback do work
         connector_->ConnectRemote(p.id, p.address, p.port);
+      } else {
+        REMUS_DEBUG("Other peer will connect to me "s + p.address + ":" + std::to_string(p.port) +
+                    " (id = " + std::to_string(p.id) + ") from " + std::to_string(self_.id));
       }
     }
     REMUS_DEBUG("Finished connecting to remotes");
 
     // Spin until we have the right number of peers
+    auto last_size = connection_manager_->size();
+    REMUS_DEBUG("Connection manager has {} connections looking for {}", connection_manager_->size(), peers.size());
     while (true) {
       if (connection_manager_->size() == peers.size())
         break;
       if (connection_manager_->size() > peers.size())
         REMUS_FATAL("Unexpected number of connections in the map");
+      if (connection_manager_->size() != last_size) {
+        REMUS_DEBUG("Connection manager has {} connections looking for {}", connection_manager_->size(), peers.size());
+        last_size = connection_manager_->size();
+      }
     }
 
     // Create a memory region of the requested size
     auto mem = pool.init_memory(capacity, listener_->pd());
+    REMUS_DEBUG("Inited memory");
 
     // Send the memory region to all peers
     //
-    // TODO:  This is probably not safe... we're blasting out a whole bunch of
+    //  [mfs] This is probably not safe... we're blasting out a whole bunch of
     //        Sends, then doing a whole bunch of Recvs.  The first problem is
     //        that we want to have more than one qp between each pair of nodes,
     //        so what happens if the sender and receiver disagree on which qp to
@@ -139,31 +145,43 @@ public:
     //        bounded, so what happens if we have so many nodes that we overflow
     //        our buffer?  Will sends get rejected, or will they block?  Both
     //        aren't handled by this code.
+
+    // Updated to provide an order to sending vs  recieving info about the memory region from all peers
     RemoteObjectProto rm_proto;
     rm_proto.set_rkey(mem->mr()->rkey);
     rm_proto.set_raddr(reinterpret_cast<uint64_t>(mem->mr()->addr));
     for (const auto &p : peers) {
       auto conn = connection_manager_->GetConnection(p.id);
-      auto status = conn->Send(rm_proto);
-      if (status.t != remus::util::Ok) {
-        REMUS_FATAL(status.message.value());
+      if (p.id >= self_.id) {
+        auto status = conn->Send(rm_proto);
+        if (status.t != remus::util::Ok) {
+          REMUS_FATAL(status.message.value());
+        }
+        auto got = conn->template Deliver<RemoteObjectProto>();
+        if (got.status.t != remus::util::Ok) {
+          REMUS_FATAL(got.status.message.value());
+        }
+        // [mfs] I don't understand why we use mr_->lkey?
+        REMUS_DEBUG("Adding {} to receive conn", p.id);
+        pool.receive_conn(p.id, conn, got.val.value().rkey(), mem->mr()->lkey);
+      } else {
+        auto got = conn->template Deliver<RemoteObjectProto>();
+        if (got.status.t != remus::util::Ok) {
+          REMUS_FATAL(got.status.message.value());
+        }
+        auto status = conn->Send(rm_proto);
+        if (status.t != remus::util::Ok) {
+          REMUS_FATAL(status.message.value());
+        }
+        // [mfs] I don't understand why we use mr_->lkey?
+        REMUS_DEBUG("Adding {} to receive conn", p.id);
+        pool.receive_conn(p.id, conn, got.val.value().rkey(), mem->mr()->lkey);
       }
     }
+    REMUS_INFO("RDMA init_pool Completed for Peer {}", self_.id);
 
-    // Receive all peers' memory regions and pass them to the memory_pool, so it
-    // can manage them
-    for (const auto &p : peers) {
-      auto conn = connection_manager_->GetConnection(p.id);
-      auto got = conn->template Deliver<RemoteObjectProto>();
-      if (got.status.t != remus::util::Ok) {
-        REMUS_FATAL(got.status.message.value());
-      }
-      // [mfs] I don't understand why we use mr_->lkey?
-      pool.receive_conn(p.id, conn, got.val.value().rkey(), mem->mr()->lkey);
-    }
-
-    // TODO: This message isn't informative enough
-    REMUS_INFO("Created memory pool");
+    REMUS_TRACE("Stopping listening thread...");
+    listener_->StopListeningThread();
   }
 
   /// Allocate some memory from the local RDMA heap

@@ -141,6 +141,7 @@ class Connection {
       err << "ibv_post_send(): " << strerror(errno);
       return err;
     }
+    REMUS_DEBUG("Posted send on {}", (void*) id_->qp);
 
     // Assumes that the CQ associated with the SQ is synchronous.
     //
@@ -251,6 +252,9 @@ public:
   /// Construct a connection object
   Connection(uint32_t src_id, uint32_t dst_id, rdma_cm_id *channel_id)
     : send_seg_(kCapacity, channel_id->pd), recv_seg_(kCapacity, channel_id->pd), id_(channel_id) {
+
+    REMUS_DEBUG("Using QP {} with {} {}", (void*)id_->qp, src_id, dst_id);
+
     // [mfs]  There's a secret rule here, that the send/recv are using the same
     //        pd as the channel.  Document it?
     send_next_ = send_base_ = reinterpret_cast<uint8_t *>(send_seg_.mr()->addr);
@@ -276,6 +280,7 @@ public:
 
   // TODO: rename to Recv?
   template <typename ProtoType> remus::util::StatusVal<ProtoType> Deliver() {
+    REMUS_TRACE("Trying to recv on {}", (void*) id_->qp);
     auto p = this->TryDeliver<ProtoType>();
     while (p.status.t == remus::util::Unavailable) {
       p = this->TryDeliver<ProtoType>();
