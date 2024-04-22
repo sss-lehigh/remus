@@ -229,6 +229,14 @@ public:
     return got;
   }
 
+  /// Do a blocking Recv of a non-proto from another machine
+  remus::util::StatusVal<std::vector<uint8_t>> RecvBytes(const Peer &from) {
+    // Listen for a connection
+    auto conn = connection_manager_->GetConnection(from.id);
+    auto got = conn->DeliverBytes();
+    return got;
+  }
+
   /// Connect a thread to this pool.  Registered threads can ack each other's
   /// one-sided operations.  Threads *must* be registered!
   ///
