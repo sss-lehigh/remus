@@ -7,9 +7,9 @@
 #include <exception>
 #include <limits>
 #include <netdb.h>
+#include <ranges>
 #include <rdma/rdma_cma.h>
 #include <rdma/rdma_verbs.h>
-#include <ranges>
 #include <span>
 
 #include "connection_utils.h"
@@ -40,7 +40,7 @@ class Connection {
   /// TODO: We need to think more carefully about the design.  Right now, the
   ///       public interface of Send/Recv only allows for transmitting protos.
   ///       It also seems that those protos have a fixed maximum size, which is
-  ///       determined by the sizes of pinned memory regions.  
+  ///       determined by the sizes of pinned memory regions.
   ///
   /// TODO: OTOH, we don't really use Send/Recv much, so maybe it doesn't
   ///       matter?
@@ -88,15 +88,15 @@ class Connection {
   ///       internally?
   ///
   /// TODO: Should this be fail-stop?
-  template<typename T>
+  template <typename T>
     requires std::ranges::contiguous_range<T>
-  remus::util::Status SendMessage(T&& msg) {
+  remus::util::Status SendMessage(T &&msg) {
 
     static_assert(std::ranges::sized_range<T>);
 
     auto msg_ptr = std::ranges::data(std::forward<T>(msg));
     auto msg_elements = std::ranges::size(std::forward<T>(msg)); // elements
-    auto msg_size = msg_elements * sizeof(decltype(*msg_ptr)); // bytes
+    auto msg_size = msg_elements * sizeof(decltype(*msg_ptr));   // bytes
 
     // The proto we send may not be larger than the maximum size received at
     // the peer. We assume that everyone uses the same value, so we check
@@ -104,8 +104,7 @@ class Connection {
     // remote node.
     if (msg_size >= kRecvMaxBytes) {
       remus::util::Status err = {remus::util::ResourceExhausted, ""};
-      err << "Message too large: expected<=" << kRecvMaxBytes
-          << ", actual=" << msg_size;
+      err << "Message too large: expected<=" << kRecvMaxBytes << ", actual=" << msg_size;
       return err;
     }
 
@@ -142,6 +141,7 @@ class Connection {
       err << "ibv_post_send(): " << strerror(errno);
       return err;
     }
+    REMUS_DEBUG("Posted send on {}", (void*) id_->qp);
 
     // Assumes that the CQ associated with the SQ is synchronous.
     //
@@ -198,10 +198,9 @@ class Connection {
         std::span<uint8_t> recv_span{recv_next_, wc.byte_len};
 
         remus::util::StatusVal<std::vector<uint8_t>> res = {
-            remus::util::Status::Ok(),
-            std::make_optional(std::vector<uint8_t>(recv_span.begin(), recv_span.end()))};
+          remus::util::Status::Ok(), std::make_optional(std::vector<uint8_t>(recv_span.begin(), recv_span.end()))};
 
-        ROME_TRACE("{} {}", res.val->data(), res.val->size());
+        REMUS_TRACE("{} {}", res.val->data(), res.val->size());
 
         // If the tail reached the end of the receive buffer then all posted
         // wrs have been consumed and we can post new ones.
@@ -227,41 +226,35 @@ class Connection {
   // only be called when all posted receives have corresponding completions,
   // otherwise there may be a race on memory by posted recvs.
   void PrepareRecvBuffer() {
-    ROME_ASSERT(recv_total_ % (kCapacity / kRecvMaxBytes) == 0,
-                "Unexpected number of completions from RQ");
+    REMUS_ASSERT(recv_total_ % (kCapacity / kRecvMaxBytes) == 0, "Unexpected number of completions from RQ");
     // Prepare the recv buffer for incoming messages with the assumption
     // that the maximum received message will be `max_recv_` bytes long.
-    for (auto curr = recv_base_;
-         curr <= recv_base_ + (kCapacity - kRecvMaxBytes);
-         curr += kRecvMaxBytes) {
-      RDMA_CM_ASSERT(rdma_post_recv, id_, nullptr, curr, kRecvMaxBytes,
-                     recv_seg_.mr());
+    for (auto curr = recv_base_; curr <= recv_base_ + (kCapacity - kRecvMaxBytes); curr += kRecvMaxBytes) {
+      RDMA_CM_ASSERT(rdma_post_recv, id_, nullptr, curr, kRecvMaxBytes, recv_seg_.mr());
     }
     recv_next_ = recv_base_;
   }
 
-  template <typename ProtoType> 
-  remus::util::StatusVal<ProtoType> TryDeliver() {
+  template <typename ProtoType> remus::util::StatusVal<ProtoType> TryDeliver() {
     remus::util::StatusVal<std::vector<uint8_t>> msg_or = TryDeliverMessage();
     if (msg_or.status.t == remus::util::Ok) {
       ProtoType proto;
-      proto.ParseFromArray(msg_or.val.value().data(),
-                           msg_or.val.value().size());
+      proto.ParseFromArray(msg_or.val.value().data(), msg_or.val.value().size());
       return {remus::util::Status::Ok(), proto};
     } else {
       return {msg_or.status, {}};
     }
   }
 
-  remus::util::StatusVal<std::vector<uint8_t>> TryDeliverBytes() {
-    return TryDeliverMessage();
-  }
+  remus::util::StatusVal<std::vector<uint8_t>> TryDeliverBytes() { return TryDeliverMessage(); }
 
 public:
   /// Construct a connection object
   Connection(uint32_t src_id, uint32_t dst_id, rdma_cm_id *channel_id)
-      : send_seg_(kCapacity, channel_id->pd),
-        recv_seg_(kCapacity, channel_id->pd), id_(channel_id) {
+    : send_seg_(kCapacity, channel_id->pd), recv_seg_(kCapacity, channel_id->pd), id_(channel_id) {
+
+    REMUS_DEBUG("Using QP {} with {} {}", (void*)id_->qp, src_id, dst_id);
+
     // [mfs]  There's a secret rule here, that the send/recv are using the same
     //        pd as the channel.  Document it?
     send_next_ = send_base_ = reinterpret_cast<uint8_t *>(send_seg_.mr()->addr);
@@ -272,23 +265,22 @@ public:
   Connection(const Connection &) = delete;
   Connection(Connection &&c) = delete;
 
-  template <typename ProtoType> 
-  remus::util::Status Send(const ProtoType &proto) {
+  template <typename ProtoType> remus::util::Status Send(const ProtoType &proto) {
     // two callers.  One is fail-stop.  The other is never called in IHT.  Can
     // this be fail-stop?
     std::string str = proto.SerializeAsString();
     return SendMessage(str);
   }
 
-  template <typename T> 
+  template <typename T>
     requires std::ranges::contiguous_range<T>
-  remus::util::Status Send(T&& msg) {
+  remus::util::Status Send(T &&msg) {
     return SendMessage(std::forward<T>(msg));
   }
 
   // TODO: rename to Recv?
-  template <typename ProtoType> 
-  remus::util::StatusVal<ProtoType> Deliver() {
+  template <typename ProtoType> remus::util::StatusVal<ProtoType> Deliver() {
+    REMUS_TRACE("Trying to recv on {}", (void*) id_->qp);
     auto p = this->TryDeliver<ProtoType>();
     while (p.status.t == remus::util::Unavailable) {
       p = this->TryDeliver<ProtoType>();
@@ -357,8 +349,6 @@ public:
   /// encapsulates so that id_ can be private.
   ///
   /// TODO: Can we remove this?
-  int poll_cq(int num, ibv_wc *wc) {
-    return ibv_poll_cq(id_->send_cq, num, wc);
-  }
+  int poll_cq(int num, ibv_wc *wc) { return ibv_poll_cq(id_->send_cq, num, wc); }
 };
 } // namespace remus::rdma::internal

@@ -5,9 +5,9 @@
 #include <rdma/rdma_cma.h>
 #include <thread>
 
-#include "remus/logging/logging.h"
-#include "connection_utils.h"
 #include "connection.h"
+#include "connection_utils.h"
+#include "remus/logging/logging.h"
 
 namespace remus::rdma::internal {
 
@@ -22,9 +22,7 @@ class Listener {
     rdma_conn_param conn_param; // Private data to send during config
 
     /// Extract a node id from a context object
-    static inline uint32_t GetNodeId(void *ctx) {
-      return reinterpret_cast<IdContext *>(ctx)->node_id;
-    }
+    static inline uint32_t GetNodeId(void *ctx) { return reinterpret_cast<IdContext *>(ctx)->node_id; }
   };
 
   /// A functor for joining a thread on deletion
@@ -48,7 +46,7 @@ class Listener {
   std::string address_;                          // This node's IP address
   uint16_t port_;                                // This node's port
   uint32_t my_id_;                               // Node ID of this thread
-  const saver_t connection_saver; // Saves a connection to the Connection Map
+  const saver_t connection_saver;                // Saves a connection to the Connection Map
 
   /// Create a listening endpoint on RDMA and start listening on it.  Terminate
   /// the program if anything goes wrong.
@@ -62,7 +60,7 @@ class Listener {
     // Check that devices exist before trying to set things up.
     auto devices = GetAvailableDevices();
     if (!devices.has_value()) {
-      ROME_FATAL("CreateListeningEndpoint :: no RDMA-capable devices found");
+      REMUS_FATAL("CreateListeningEndpoint :: no RDMA-capable devices found");
     }
 
     // Get the local connection information.
@@ -70,13 +68,12 @@ class Listener {
     hints.ai_flags = RAI_PASSIVE;
     hints.ai_port_space = RDMA_PS_TCP;
     auto port_str = std::to_string(htons(port));
-    int gai_ret =
-        rdma_getaddrinfo(address.c_str(), port_str.c_str(), &hints, &resolved);
+    int gai_ret = rdma_getaddrinfo(address.c_str(), port_str.c_str(), &hints, &resolved);
     if (gai_ret != 0) {
-      ROME_FATAL("rdma_getaddrinfo(): "s + gai_strerror(gai_ret));
+      REMUS_FATAL("rdma_getaddrinfo(): "s + gai_strerror(gai_ret));
     }
 
-    ROME_ASSERT(resolved != nullptr, "Did not find an appropriate RNIC");
+    REMUS_ASSERT(resolved != nullptr, "Did not find an appropriate RNIC");
 
     // Create an endpoint to receive incoming requests
     ibv_qp_init_attr init_attr = {0};
@@ -87,29 +84,27 @@ class Listener {
     auto err = rdma_create_ep(&listen_id_, resolved, nullptr, &init_attr);
     rdma_freeaddrinfo(resolved);
     if (err != 0) {
-      ROME_FATAL("rdma_create_ep(): "s + strerror(errno));
+      REMUS_FATAL("rdma_create_ep(): "s + strerror(errno));
     }
 
-    ROME_ASSERT(listen_id_->pd != nullptr, "Should initialize a protection domain");
+    REMUS_ASSERT(listen_id_->pd != nullptr, "Should initialize a protection domain");
 
     // Migrate the new endpoint to an async channel
     listen_channel_ = rdma_create_event_channel();
     if (rdma_migrate_id(listen_id_, listen_channel_) != 0) {
-      ROME_FATAL("rdma_migrate_id(): "s + strerror(errno));
+      REMUS_FATAL("rdma_migrate_id(): "s + strerror(errno));
     }
     make_nonblocking(listen_id_->channel->fd);
 
     // Start listening for incoming requests on the endpoint.
     if (rdma_listen(listen_id_, 0) != 0) {
-      ROME_FATAL("rdma_listen(): "s + strerror(errno));
+      REMUS_FATAL("rdma_listen(): "s + strerror(errno));
     }
 
     // Record and report the node's address/port
-    address_ = std::string(inet_ntoa(
-        reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(listen_id_))
-            ->sin_addr));
+    address_ = std::string(inet_ntoa(reinterpret_cast<sockaddr_in *>(rdma_get_local_addr(listen_id_))->sin_addr));
     port_ = rdma_get_src_port(listen_id_);
-    ROME_INFO("Listening: {}:{}", address_, port_);
+    REMUS_INFO("Listening: {}:{}", address_, port_);
   }
 
   /// The main loop run by the listening thread.  Polls for new events on the
@@ -130,7 +125,7 @@ class Listener {
       {
         int ret = rdma_get_cm_event(listen_channel_, &event);
         if (ret != 0 && errno != EAGAIN) {
-          ROME_FATAL("rdma_get_cm_event(): "s + strerror(errno));
+          REMUS_FATAL("rdma_get_cm_event(): "s + strerror(errno));
         }
         // On EAGAIN, yield and then try again
         //
@@ -140,8 +135,7 @@ class Listener {
           continue;
         }
       }
-      ROME_TRACE("({}) Got event: {} (id={})", fmt::ptr(this),
-                 rdma_event_str(event->event), fmt::ptr(event->id));
+      REMUS_TRACE("({}) Got event: {} (id={})", fmt::ptr(this), rdma_event_str(event->event), fmt::ptr(event->id));
 
       // Handle whatever event we just received
       rdma_cm_id *id = event->id;
@@ -181,8 +175,7 @@ class Listener {
 
       case RDMA_CM_EVENT_DEVICE_REMOVAL:
         // We don't expect to ever see a device removal event
-        ROME_ERROR("event: {}, error: {}\n", rdma_event_str(event->event),
-                   event->status);
+        REMUS_ERROR("event: {}, error: {}\n", rdma_event_str(event->event), event->status);
         break;
 
       case RDMA_CM_EVENT_ADDR_ERROR:
@@ -193,11 +186,11 @@ class Listener {
       case RDMA_CM_EVENT_CONNECT_ERROR:
         // These signals are sent to a connecting endpoint, so we should not
         // see them here. If they appear, abort.
-        ROME_FATAL("Unexpected signal: {}", rdma_event_str(event->event));
+        REMUS_FATAL("Unexpected signal: {}", rdma_event_str(event->event));
 
       default:
         // We did not design for other events, so crash if another event arrives
-        ROME_FATAL("Not implemented");
+        REMUS_FATAL("Not implemented");
       }
     }
   }
@@ -207,19 +200,17 @@ class Listener {
     using namespace std::string_literals;
 
     // The private data is used to figure out the node that made the request
-    ROME_ASSERT_DEBUG(event->param.conn.private_data != nullptr,
-                      "Received connect request without private data.");
+    REMUS_ASSERT_DEBUG(event->param.conn.private_data != nullptr, "Received connect request without private data.");
     uint32_t peer_id = *(uint32_t *)(event->param.conn.private_data);
-    ROME_TRACE("[OnConnectRequest] (Node {}) Got connection request from: {}",
-               my_id_, peer_id);
+    REMUS_TRACE("[OnConnectRequest] (Node {}) Got connection request from: {}", my_id_, peer_id);
 
     if (peer_id != my_id_) {
       // Create a new QP for the connection.
       ibv_qp_init_attr init_attr = DefaultQpInitAttr();
-      ROME_ASSERT(id->qp == nullptr, "QP already allocated...?");
+      REMUS_ASSERT(id->qp == nullptr, "QP already allocated...?");
       RDMA_CM_ASSERT(rdma_create_qp, id, pd, &init_attr);
     } else {
-      ROME_FATAL("OnConnectionRequest called for self-connection");
+      REMUS_FATAL("OnConnectionRequest called for self-connection");
     }
 
     // Prepare the necessary resources for this connection.  Includes a QP and
@@ -239,10 +230,8 @@ class Listener {
     // Save the connection and ack it
     connection_saver(peer_id, new Connection(my_id_, peer_id, id));
 
-    ROME_TRACE("[OnConnectRequest] (Node {}) peer={}, id={}", my_id_, peer_id,
-               fmt::ptr(id));
-    RDMA_CM_ASSERT(rdma_accept, id,
-                   peer_id == my_id_ ? nullptr : &context->conn_param);
+    REMUS_TRACE("[OnConnectRequest] (Node {}) peer={}, id={}", my_id_, peer_id, fmt::ptr(id));
+    RDMA_CM_ASSERT(rdma_accept, id, peer_id == my_id_ ? nullptr : &context->conn_param);
     rdma_ack_cm_event(event);
   }
 
@@ -264,14 +253,14 @@ public:
   /// Construct a Listener by saving its node Id and the function for saving
   /// connections
   Listener(uint32_t my_id, std::function<void(uint32_t, Connection *)> saver)
-      : my_id_(my_id), connection_saver(saver) {}
+    : my_id_(my_id), connection_saver(saver) {}
 
   /// Initialize a listening endpoint, and then park a thread on it, so the
   /// thread can receive new connection requests
   void StartListeningThread(const std::string &address, uint16_t port) {
     // Don't allow multiple threads at once
     if (runner_ != nullptr) {
-      ROME_FATAL("Cannot start more than one listener");
+      REMUS_FATAL("Cannot start more than one listener");
     }
 
     // Create the endpoint, park a thread on it

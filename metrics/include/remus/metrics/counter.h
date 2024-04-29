@@ -87,17 +87,13 @@ template <typename T> Counter<T> Counter<T>::operator--(int) {
   return old;
 }
 
-template <typename T> bool Counter<T>::operator==(T c) const {
-  return counter_ == c;
-}
+template <typename T> bool Counter<T>::operator==(T c) const { return counter_ == c; }
 
 template <typename T> bool Counter<T>::operator==(const Counter<T> &c) const {
   return name_ == c.name_ && operator==(c.counter_);
 }
 
-template <typename T> std::string Counter<T>::ToString() {
-  return "count: " + std::to_string(counter_) + "";
-}
+template <typename T> std::string Counter<T>::ToString() { return "count: " + std::to_string(counter_) + ""; }
 
 template <typename T> MetricProto Counter<T>::ToProto() {
   MetricProto proto;
@@ -113,13 +109,11 @@ template <typename T> Metrics Counter<T>::ToMetrics() {
   return result;
 }
 
-template <typename T>
-remus::util::Status Counter<T>::Accumulate(const remus::util::StatusVal<Counter<T>> &other) {
+template <typename T> remus::util::Status Counter<T>::Accumulate(const remus::util::StatusVal<Counter<T>> &other) {
   if (other.status.t != remus::util::Ok)
     return other.status;
   if (!(name_ == other.val.value().name_)) {
-    return {remus::util::FailedPrecondition,
-            "Counter name does not match: " + other.val.value().name_};
+    return {remus::util::FailedPrecondition, "Counter name does not match: " + other.val.value().name_};
   }
   operator+=(other.val.value().counter_);
   return remus::util::Status::Ok();

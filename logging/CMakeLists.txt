@@ -5,7 +5,7 @@ target_include_directories(logging INTERFACE
                            $<INSTALL_INTERFACE:include>)
 target_link_libraries(logging INTERFACE remus::util)
 target_link_libraries(logging INTERFACE spdlog::spdlog fmt::fmt) #Remove this bloat
-target_compile_definitions(logging INTERFACE ROME_LOG_LEVEL=${LOG_LEVEL})
+target_compile_definitions(logging INTERFACE REMUS_LOG_LEVEL=${LOG_LEVEL})
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include) 
 
 add_library(remus::logging ALIAS logging)

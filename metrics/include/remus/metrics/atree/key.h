@@ -5,15 +5,12 @@
 namespace remus {
 
 // Necessary forward declaration (used in `ATreeRequiredInfo`).
-template <class Key, class V, class M, typename value_type,
-          typename metadata_type>
-class ATreeNode;
+template <class Key, class V, class M, typename value_type, typename metadata_type> class ATreeNode;
 
 // Encapsulates the required information of a node, these are never empty-base
 // optimized. The simplest form of the `ATree` is a set containing only nodes
 // with a key and pointers to its children.
-template <class Key, class... OptionalInfo>
-class ROME_PACKED ATreeNodeRequiredInfo {
+template <class Key, class... OptionalInfo> class REMUS_PACKED ATreeNodeRequiredInfo {
   typedef ATreeNode<Key, OptionalInfo...> node_type;
 
 public:

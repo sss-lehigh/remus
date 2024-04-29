@@ -36,22 +36,17 @@ namespace remus {
 // [mfs]  I can't yet do static_assert() that the role_client.h <==>
 //        IsClientAdapter... Keep working on it?
 template <template <typename> typename ClientAdapter, typename Operation>
-concept IsClientAdapter =
-    requires(ClientAdapter<Operation> c, const Operation o, bool b) {
-      { c.Start() } -> std::same_as<util::Status>;
-      { c.Apply(o) } -> std::same_as<util::Status>;
-      { c.Stop() } -> std::same_as<util::Status>;
-      { c.Operations(b) } -> std::same_as<util::Status>;
-    };
+concept IsClientAdapter = requires(ClientAdapter<Operation> c, const Operation o, bool b) {
+                            { c.Start() } -> std::same_as<util::Status>;
+                            { c.Apply(o) } -> std::same_as<util::Status>;
+                            { c.Stop() } -> std::same_as<util::Status>;
+                            { c.Operations(b) } -> std::same_as<util::Status>;
+                          };
 
 namespace {
-inline util::Status StreamTerminatedStatus() {
-  return {util::StreamTerminated, "Stream terminated"};
-}
+inline util::Status StreamTerminatedStatus() { return {util::StreamTerminated, "Stream terminated"}; }
 
-inline bool IsStreamTerminated(const util::Status &status) {
-  return status.t == util::StreamTerminated;
-}
+inline bool IsStreamTerminated(const util::Status &status) { return status.t == util::StreamTerminated; }
 } // namespace
 
 // Represents a stream of input for benchmarking a system. The common use is
@@ -93,8 +88,7 @@ private:
 
 template <typename T> class TestStream : public Stream<T> {
 public:
-  TestStream(const std::vector<T> &input)
-      : output_(input), iter_(output_.begin()) {}
+  TestStream(const std::vector<T> &input) : output_(input), iter_(output_.begin()) {}
 
 private:
   util::StatusVal<T> NextInternal() override {
@@ -115,15 +109,12 @@ public:
 
 private:
   std::function<T(void)> generator_;
-  inline util::StatusVal<T> NextInternal() override {
-    return {util::Status::Ok(), generator_()};
-  }
+  inline util::StatusVal<T> NextInternal() override { return {util::Status::Ok(), generator_()}; }
 };
 
 template <typename T> class FixedLengthStream : public Stream<T> {
 public:
-  FixedLengthStream(std::function<T(void)> generator, int length)
-      : generator_(generator), length_(length), count_(0) {}
+  FixedLengthStream(std::function<T(void)> generator, int length) : generator_(generator), length_(length), count_(0) {}
 
 private:
   std::function<T(void)> generator_;
@@ -138,6 +129,23 @@ private:
   }
 };
 
+template <typename T> class PrefilledStream : public Stream<T> {
+  public:
+    PrefilledStream(std::vector<T> vals, int length) : vals_(vals), length_(length), count_(0) {}
+  private:
+    std::vector<T> vals_;
+    int length_;
+    int count_;
+    inline util::StatusVal<T> NextInternal() override { 
+      count_++;
+      if (length_ < count_) {
+        REMUS_ERROR("OUT OF OPERATIONS : INCREASED SIZE OF PREFILLED STREAM");
+        return {StreamTerminatedStatus(), {}};
+      }
+      return {util::Status::Ok(), vals_.at(count_-1)};
+    }
+};
+
 /// A simple workload driver
 ///
 /// This workload driver
@@ -146,8 +154,7 @@ private:
 // using a client adapter that does nothing. As the number of constituent
 // streams increases, we expect the maximum throughput to decrease but it is
 // not likely to be the limiting factor in performance.
-template <template <typename> typename ClientAdapter, typename OpType>
-class WorkloadDriver {
+template <template <typename> typename ClientAdapter, typename OpType> class WorkloadDriver {
 
   std::atomic<bool> terminated_;
   std::atomic<bool> running_;
@@ -168,14 +175,11 @@ class WorkloadDriver {
   std::future<util::Status> run_status_;
   std::unique_ptr<std::thread> run_thread_;
 
-  WorkloadDriver(std::unique_ptr<ClientAdapter<OpType>> client,
-                 std::unique_ptr<Stream<OpType>> stream,
+  WorkloadDriver(std::unique_ptr<ClientAdapter<OpType>> client, std::unique_ptr<Stream<OpType>> stream,
                  std::chrono::milliseconds qps_sampling_rate)
-      : terminated_(false), running_(false), client_(std::move(client)),
-        stream_(std::move(stream)), ops_("total_ops"), stopwatch_(nullptr),
-        prev_ops_(0), qps_sampling_rate_(qps_sampling_rate),
-        qps_summary_("sampled_qps", "ops/s", 1000), lat_sampling_rate_(10),
-        lat_summary_("sampled_lat", "ns", 1000) {}
+    : terminated_(false), running_(false), client_(std::move(client)), stream_(std::move(stream)), ops_("total_ops"),
+      stopwatch_(nullptr), prev_ops_(0), qps_sampling_rate_(qps_sampling_rate),
+      qps_summary_("sampled_qps", "ops/s", 1000), lat_sampling_rate_(10), lat_summary_("sampled_lat", "ns", 1000) {}
 
 public:
   ~WorkloadDriver() {
@@ -186,13 +190,10 @@ public:
   // Creates a new `WorkloadDriver` from the constituent client adapter and
   // stream
   static std::unique_ptr<WorkloadDriver>
-  Create(std::unique_ptr<ClientAdapter<OpType>> client,
-         std::unique_ptr<Stream<OpType>> stream,
-         std::optional<std::chrono::milliseconds> qps_sampling_rate =
-             std::nullopt) {
+  Create(std::unique_ptr<ClientAdapter<OpType>> client, std::unique_ptr<Stream<OpType>> stream,
+         std::optional<std::chrono::milliseconds> qps_sampling_rate = std::nullopt) {
     return std::unique_ptr<WorkloadDriver>(new WorkloadDriver(
-        std::move(client), std::move(stream),
-        qps_sampling_rate.value_or(std::chrono::milliseconds(0))));
+      std::move(client), std::move(stream), qps_sampling_rate.value_or(std::chrono::milliseconds(0))));
   }
 
   // Calls the client's `Start` method before starting the workload driver,
@@ -205,8 +206,7 @@ public:
       return {util::Unavailable, "Cannot restart a terminated workload driver."};
     }
 
-    auto task = std::packaged_task<util::Status()>(
-        std::bind(&WorkloadDriver::Run, this));
+    auto task = std::packaged_task<util::Status()>(std::bind(&WorkloadDriver::Run, this));
     run_status_ = task.get_future();
     run_thread_ = std::make_unique<std::thread>(std::move(task));
     while (!running_)
@@ -218,7 +218,7 @@ public:
   // Then, the client's `Stop` method is called so that any pending operations
   // can be finalized.
   util::Status Stop() {
-    ROME_INFO("Stopping Workload Driver...");
+    REMUS_INFO("Stopping Workload Driver...");
     if (terminated_) {
       return {util::Unavailable, "Workload driver was already terminated"};
     }
@@ -244,7 +244,7 @@ public:
     return ss.str();
   }
 
-  metrics::WorkloadDriverResult ToMetrics(){
+  metrics::WorkloadDriverResult ToMetrics() {
     metrics::WorkloadDriverResult result;
     result.ops = ops_.ToMetrics();
     result.runtime = stopwatch_->ToMetrics();
@@ -253,8 +253,7 @@ public:
     return result;
   }
 
-  [[deprecated("Use ToMetrics() instead")]]
-  WorkloadDriverProto ToProto() {
+  [[deprecated("Use ToMetrics() instead")]] WorkloadDriverProto ToProto() {
     WorkloadDriverProto proto;
     proto.mutable_ops()->CopyFrom(ops_.ToProto());
     proto.mutable_runtime()->CopyFrom(stopwatch_->ToProto());
@@ -281,14 +280,12 @@ private:
       }
 
       auto curr_lap = stopwatch_->GetLapSplit();
-      auto curr_lap_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-          curr_lap.GetRuntimeNanoseconds());
+      auto curr_lap_ms = std::chrono::duration_cast<std::chrono::milliseconds>(curr_lap.GetRuntimeNanoseconds());
 
       auto client_status = client_->Apply(next_op.val.value());
       if (curr_lap_ms > lat_sampling_rate_) {
-        lat_summary_
-            << (stopwatch_->GetLapSplit().GetRuntimeNanoseconds().count() -
-                curr_lap.GetRuntimeNanoseconds().count());
+        lat_summary_ << (stopwatch_->GetLapSplit().GetRuntimeNanoseconds().count() -
+                         curr_lap.GetRuntimeNanoseconds().count());
       }
 
       if (client_status.t != util::Ok) {
@@ -300,9 +297,7 @@ private:
 
       if (curr_lap_ms > qps_sampling_rate_) {
         auto curr_ops = ops_.GetCounter();
-        auto sample =
-            (curr_ops - prev_ops_) /
-            (stopwatch_->GetLap().GetRuntimeNanoseconds().count() * 1e-9);
+        auto sample = (curr_ops - prev_ops_) / (stopwatch_->GetLap().GetRuntimeNanoseconds().count() * 1e-9);
         qps_summary_ << sample;
         prev_ops_ = curr_ops;
       }

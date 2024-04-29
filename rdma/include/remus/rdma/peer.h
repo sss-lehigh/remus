@@ -20,7 +20,6 @@ struct Peer {
   /// @param id       The Id for the peer (default 0)
   /// @param address  The ip address as a string (default "")
   /// @param port     The port (default 0)
-  Peer(uint16_t id = 0, std::string address = "", uint16_t port = 0)
-      : id(id), address(address), port(port) {}
+  Peer(uint16_t id = 0, std::string address = "", uint16_t port = 0) : id(id), address(address), port(port) {}
 };
 } // namespace remus::rdma

@@ -29,7 +29,7 @@ constexpr int kMaxWr = kCapacity / kMaxRecvBytes;
 inline void make_nonblocking(int fd) {
   using namespace std::string_literals;
   if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) != 0) {
-    ROME_FATAL("fcntl():"s + strerror(errno));
+    REMUS_FATAL("fcntl():"s + strerror(errno));
   }
 }
 
@@ -39,7 +39,7 @@ inline void make_nonblocking(int fd) {
 inline void make_sync(int fd) {
   using namespace std::string_literals;
   if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_SYNC) != 0) {
-    ROME_FATAL("fcntl():"s + strerror(errno));
+    REMUS_FATAL("fcntl():"s + strerror(errno));
   }
 }
 
@@ -69,8 +69,7 @@ inline std::optional<std::vector<int>> FindActivePorts(ibv_context *context) {
 /// TODO: This function name is misleading... It is stateful, since it
 ///       *opens* devices.  This means that its return value doesn't tell the
 ///       whole story.
-inline std::optional<std::vector<std::pair<std::string, int>>>
-GetAvailableDevices() {
+inline std::optional<std::vector<std::pair<std::string, int>>> GetAvailableDevices() {
   int num_devices;
   auto **device_list = ibv_get_device_list(&num_devices);
   if (num_devices <= 0)
