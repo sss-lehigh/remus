@@ -28,8 +28,11 @@ set -e # Halt the script on any error
 # WARNING:  Order matters for the machines, because there is an implicit
 #           conversion to names like node0, node1, etc.  Be sure to follow the
 #           order in the CloudLab "List View" for your experiment.
-machines=(apt139 apt150 apt156) #apt085)
-domain=apt.emulab.net
+# machines=(apt123 apt125 apt128) #apt085)
+# domain=apt.emulab.net
+
+machines=("amd250" "amd271" "amd279" "amd252" "amd275")
+domain="utah.cloudlab.us"
 
 # The user who is going to be using ssh/scp to connect to cloudlab.  It is
 # expected that keys are already set up.
@@ -40,7 +43,7 @@ for machine in ${machines[@]}; do
 done
 
 # The executable file that needs to be sent over to cloudlab
-exefile="./example-code"
+exefile="./build/examples/something"
 exename=$(basename ${exefile})
 
 # Configuration command... we're going to make this file on the remote machines

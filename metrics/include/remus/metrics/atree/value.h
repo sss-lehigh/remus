@@ -18,7 +18,7 @@ namespace internal {
 // A wrapper for concrete value types to avoid requiring that the user define
 // the API themselves. Types can be simple types (e.g., int, double, pointers)
 // or they can be structs and classes.
-template <typename T> class ROME_PACKED Value {
+template <typename T> class REMUS_PACKED Value {
 public:
   typedef T data_type;
   explicit Value(const data_type &value) : value_(value) {}

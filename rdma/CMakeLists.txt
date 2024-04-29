@@ -18,4 +18,9 @@ add_library(remus::rdma ALIAS rdma)
 
 add_executable(loopback_test test/loopback.cc)
 target_link_libraries(loopback_test PRIVATE rdma)
+add_test(loopback_test loopback_test)
+
+add_executable(multinode_test test/multinode.cc)
+target_link_libraries(multinode_test PRIVATE rdma)
+add_test(multinode_test multinode_test)
 

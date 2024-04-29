@@ -50,8 +50,7 @@ struct message {
   /// @param second_ pack the second part of the message, defaults to 0
   /// @param third_ pack the third part of the message, defaults to 0
   /// @param fourth_ pack the fourth part of the message, defaults to 0
-  message(uint64_t first_ = 0, uint64_t second_ = 0, uint64_t third_ = 0,
-          uint64_t fourth_ = 0) {
+  message(uint64_t first_ = 0, uint64_t second_ = 0, uint64_t third_ = 0, uint64_t fourth_ = 0) {
     content.ints.first = first_;
     content.ints.second = second_;
     content.ints.third = third_;
@@ -85,7 +84,7 @@ private:
   /// @brief Throw an exception with an error message
   /// @param message the message to print
   void error(const char *message) {
-    ROME_WARN(strerror(errno));
+    REMUS_WARN(strerror(errno));
     throw std::runtime_error(message);
   }
 
@@ -134,8 +133,7 @@ public:
   bool accept_conn() {
     // Accept new connection
     int address_size = sizeof(address);
-    int client_sockfd =
-        accept(sockfd, (struct sockaddr *)&address, (socklen_t *)&address_size);
+    int client_sockfd = accept(sockfd, (struct sockaddr *)&address, (socklen_t *)&address_size);
     if (client_sockfd == -1)
       return false;
     // Record it
@@ -160,8 +158,7 @@ public:
   /// function will modify this buffer.
   void recv_from_all(message *recv_buffer) {
     for (int i = 0; i < client_sockets.size(); i++) {
-      read(client_sockets[i], recv_buffer[i].content.data,
-           TCP_MESSAGE_SIZE + 1);
+      read(client_sockets[i], recv_buffer[i].content.data, TCP_MESSAGE_SIZE + 1);
     }
   }
 
@@ -182,12 +179,10 @@ public:
       error("Cannot open socket");
     // Make sure we can re-use the socket immediately after deleting
     const int enable = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) <
-        0) {
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
       error("setsockopt failed");
     }
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(int)) <
-        0) {
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &enable, sizeof(int)) < 0) {
       error("setsockopt failed");
     }
 
@@ -237,7 +232,7 @@ private:
   /// @brief Throw an exception with an error message
   /// @param message the message to print
   void error(const char *message) {
-    ROME_WARN(strerror(errno));
+    REMUS_WARN(strerror(errno));
     throw std::runtime_error(message);
   }
 
@@ -339,4 +334,4 @@ public:
   }
 };
 // end namespace
-} // namespace tcp
+} // namespace remus::util::tcp

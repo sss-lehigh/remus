@@ -25,7 +25,7 @@ N.B. If one endpoint manager stopped communication while another endpoint manage
 using remus::rdma::MemoryPool;
 
 int main(){
-    ROME_INIT_LOG();
+    REMUS_INIT_LOG();
     MemoryPool::Peer host = MemoryPool::Peer(0, "localhost", PORT_NUM - 1);
     std::vector<std::thread> threads;
     // Create a socket manager for 4 connections
@@ -39,13 +39,13 @@ int main(){
         // Recv a message from every client
         tcp::message recv_messages[CLIENT_COUNT];
         socket_handle.recv_from_all(recv_messages);
-        ROME_INFO("Received from clients");
+        REMUS_INFO("Received from clients");
         // Once this happens, all clients have synced, so we can broadcast
 
         tcp::message ptr_message = tcp::message(30); 
         // Instead of sending 30, you could imagine a use case of broadcasting a remote_ptr
         socket_handle.send_to_all(&ptr_message);
-        ROME_INFO("Sent to clients");
+        REMUS_INFO("Sent to clients");
     }));
 
     // While the server is waiting for connections, we need to spin up clients
@@ -57,10 +57,10 @@ int main(){
             // Send the server a message
             tcp::message ptr_message = tcp::message(10); 
             endpoint.send_server(&ptr_message);
-            ROME_INFO("Synced client {} with server", index);
+            REMUS_INFO("Synced client {} with server", index);
             // Sync between the server and endpoints
             endpoint.recv_server(&ptr_message);
-            ROME_INFO("Client {} received server message", index);
+            REMUS_INFO("Client {} received server message", index);
             // ptr_message should be the server's value now...
             assert(ptr_message.get_first() == 30);
         }, i));
@@ -69,7 +69,7 @@ int main(){
     for (auto it = threads.begin(); it != threads.end(); it++){
         it->join();
     }
-    ROME_INFO("All threads done");
+    REMUS_INFO("All threads done");
     return 0;
 }
 ```
