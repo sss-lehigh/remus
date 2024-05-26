@@ -63,3 +63,4 @@ latex/
 .clangd
 compile_commands.json
 /run_experiment.sh
+/temp

@@ -230,6 +230,7 @@ public:
   }
 
   void receive_conn(uint16_t id, Connection *conn, uint32_t rkey, uint32_t lkey) {
+
     REMUS_DEBUG("Adding {} to conn_info_", id);
     conn_info_.emplace(id, conn_info_t{conn, rkey, lkey});
   }
@@ -435,10 +436,12 @@ public:
   ///       isn't the first field of the T?"
   template <typename T> T CompareAndSwap(rdma_ptr<T> ptr, uint64_t expected, uint64_t swap) {
     static_assert(sizeof(T) == 8);
+    REMUS_DEBUG("Getting conn info for {}, conn size {}", ptr.id(), conn_info_.size());
     auto info = conn_info_.at(ptr.id());
-    
+    REMUS_DEBUG("Got info");
     // [esl] Getting the thread's index to determine it's owned flag
     uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
+    REMUS_DEBUG("GOT THREAD INFO");
 
     auto alloc = rdma_memory_.get();
     // [esl] There is probably a better way to avoid allocating every time we do

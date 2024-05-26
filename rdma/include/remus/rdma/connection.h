@@ -269,6 +269,7 @@ public:
     // two callers.  One is fail-stop.  The other is never called in IHT.  Can
     // this be fail-stop?
     std::string str = proto.SerializeAsString();
+    REMUS_DEBUG("Serialized proto as string");
     return SendMessage(str);
   }
 
@@ -280,7 +281,9 @@ public:
 
   // TODO: rename to Recv?
   template <typename ProtoType> remus::util::StatusVal<ProtoType> Deliver() {
+
     REMUS_TRACE("Trying to recv on {}", (void*) id_->qp);
+
     auto p = this->TryDeliver<ProtoType>();
     while (p.status.t == remus::util::Unavailable) {
       p = this->TryDeliver<ProtoType>();

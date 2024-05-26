@@ -84,7 +84,7 @@ class Listener {
     auto err = rdma_create_ep(&listen_id_, resolved, nullptr, &init_attr);
     rdma_freeaddrinfo(resolved);
     if (err != 0) {
-      REMUS_FATAL("rdma_create_ep(): "s + strerror(errno));
+      REMUS_FATAL("rdma_create_ep(): "s + strerror(errno) + " for "s + address + ":"s + std::to_string(port));
     }
 
     REMUS_ASSERT(listen_id_->pd != nullptr, "Should initialize a protection domain");
