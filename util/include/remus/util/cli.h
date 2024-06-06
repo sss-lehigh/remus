@@ -202,6 +202,7 @@ public:
       else if (c.second.type == Arg::STR)
         std::cout << std::get<std::string>(c.second.value.value());
     }
+    std::cout << std::endl;
   }
 
   /// @brief  Get an argument's value as a boolean
