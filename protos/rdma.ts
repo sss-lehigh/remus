@@ -3,8 +3,6 @@
  * convey the necessary information for remote nodes to interact with this
  * memory, assuming that they have access to a QP that is connected to it.
  *
- * [mfs]  IHT seems to only use raddr.  Remus also uses rkey.  Do we need the
- *        rest?
  */
 export class RemoteObject {
   /** An identifier for this object. Must be unique among remote objects */

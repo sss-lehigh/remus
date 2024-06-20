@@ -6,7 +6,6 @@
 
 #include "remus/logging/logging.h"
 
-// TODO:  Should these headers be in an "internal" subfolder?
 #include "connection.h"
 #include "connection_map.h"
 #include "connector.h"
@@ -22,24 +21,6 @@ namespace remus::rdma {
 /// Broadly, this means that it has a set of connections to other machines and a
 /// set of mappings from local addresses to remote addresses.
 ///
-/// TODO: This object is not quite right yet (and it isn't renamed yet):
-///       - RegisterThread should return a thread capability object
-///       - All of the memory operations should be members of that thread
-///         capability object.
-///
-/// TODO: A major issue right now is that a process makes *multiple* rdma_nodes,
-///       because each only has one QP between nodes.  This means that there is
-///       lots of redundancy in the rdma_nodes' maps, and it also means there's
-///       another layer sitting on top of this, when the goal was for this to be
-///       the top-level object.
-///
-/// TODO: It would also be nice if the rdma_ptr infrastructure was fully
-///       encapsulated by this, rather than being an independent feature.
-///
-/// TODO: The memory access functions currently have a lot of allocation
-///       overhead, because they need a pinned region for staging data to/from
-///       RDMA.  When we have a proper thread object, we can probably fix this
-///       issue via per-thread buffers.
 class rdma_capability {
   using cm_ptr = std::unique_ptr<internal::ConnectionMap>;
   using listen_ptr = std::unique_ptr<internal::Listener>;
@@ -51,9 +32,6 @@ class rdma_capability {
   connector_ptr connector_;   // A utility for connecting to other nodes
 
 public:
-  // TODO: This needs to be redesigned.  It's odd to construct the
-  // connection_manager and listener_, but not the connector, and it's odd to
-  // need to explicitly call init_pool.  This should be able to be merged.
   explicit rdma_capability(const Peer &self)
     : self_(self), pool(self_), connection_manager_(std::make_unique<internal::ConnectionMap>(self_.id)),
       listener_(std::make_unique<internal::Listener>(
@@ -69,21 +47,6 @@ public:
   /// - It creates a memory region with `capacity` as its size.
   /// - It exchanges the region with all peers
   ///
-  /// TODO: Should there be some kind of "shutdown()" method?
-  ///
-  /// TODO: Why can't we merge this into the constructor?
-  ///
-  /// TODO: The IHT code uses this in an awkward way, due to the blocking
-  ///       behavior of the methods this calls.  We should think about how to do
-  ///       a better job.
-  ///
-  /// TODO: I feel like this should have a "connections-per-machine-pair"
-  ///       argument.
-  ///
-  /// TODO: I also feel like we shouldn't be leaving it up to the caller to make
-  ///       `peers`.  Why can't we pass in a list of node ids, and a port, and
-  ///       be done with it?  And why can't every listener use the same port,
-  ///       now that there's only one per node.
   void init_pool(uint32_t capacity, std::vector<Peer> &peers) {
     using namespace std::string_literals;
 
@@ -240,10 +203,6 @@ public:
   /// Connect a thread to this pool.  Registered threads can ack each other's
   /// one-sided operations.  Threads *must* be registered!
   ///
-  /// TODO: Registration should define the affinity between a thread and a
-  ///       Connection to each node, since there can be >1 Connection from this
-  ///       node to each other node.  Some thread safety issues are likely to
-  ///       arise, too.
   void RegisterThread() { pool.RegisterThread(); }
 
   /// Determine if a rdma_ptr is local to the machine

@@ -6,9 +6,9 @@ target_include_directories(rdma INTERFACE
 
 target_link_libraries(rdma INTERFACE remus::logging remus::util)
 
-target_link_libraries(rdma INTERFACE remus::metrics) # TODO should be opt-in/out
+target_link_libraries(rdma INTERFACE remus::metrics)
 
-target_link_libraries(rdma INTERFACE protos) # TODO Remove this bloat
+target_link_libraries(rdma INTERFACE protos)
 
 target_link_libraries(rdma INTERFACE rdma::ibverbs rdma::cm)
 

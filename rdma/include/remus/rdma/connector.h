@@ -24,7 +24,6 @@ class Connector {
 
   /// Maximum value, in us, for exponential backoff
   ///
-  /// TODO: This seems too high?
   static constexpr uint32_t kMaxBackoffUs = 5000000;
 
   /// A function type; used for saving a connection to the Connection Map
@@ -129,13 +128,12 @@ public:
           if (rdma_ack_cm_event(event) != 0) {
             REMUS_FATAL("rdma_ack_cm_event(): "s + strerror(errno));
           }
-          make_sync(event_channel->fd); // TODO: Why sync instead of nonblocking
+          make_sync(event_channel->fd); 
           make_nonblocking(id->recv_cq->channel->fd);
           make_nonblocking(id->send_cq->channel->fd);
 
           // Make, save, and return the connection
           //
-          // TODO: Does the caller ever use the return value?
           auto new_conn = new Connection(my_id_, peer_id, id);
           connection_saver(peer_id, new_conn);
           REMUS_TRACE("Connected: dev={}, addr={}, port={}", id->verbs->device->name,
@@ -184,9 +182,6 @@ public:
     }
 
     while (true) {
-      // TODO:  There is a lot of shared code between ConnectLoopback and
-      //        ConnectRemote.  We should factor it out.  Some might be common
-      //        to OnConnectRequest, too.
 
       // Compute the info for the node we're connecting to
       auto port_str = std::to_string(htons(port));
@@ -308,7 +303,6 @@ public:
 
       // Make, save, and return the Connection
       //
-      // TODO: Does the caller ever use the return value?
       auto res = new Connection(my_id_, my_id_, id);
       connection_saver(my_id_, res);
       REMUS_TRACE("Connected Loopback: dev={}, addr={}, port={}", id->verbs->device->name,

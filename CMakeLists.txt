@@ -2,36 +2,21 @@ cmake_minimum_required(VERSION 3.18)
 project(remus LANGUAGES CXX VERSION 0.0.0)
 
 # Options
-option(GPU "Compile for CUDA" OFF)
-option(KEEP "Keep ptx and cubin files" OFF)
 option(DOCS "Set to build documentation" OFF)
 option(NUMA "Set to enable numa library support" OFF)
 
 # Flags
 set(LOG_LEVEL "DEBUG" CACHE STRING "Log level options include TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, and OFF")
 set(CXX_STANDARD 20 CACHE STRING "Uses C++20 or 23")
-set(CUDA_ARCHITECTURES "70;75;80;86;89;90" CACHE STRING "CUDA architectures to compile for")
 
 #######################################################################################################################
 # Setup
 
-if(GPU)
-  enable_language(CUDA)
-  message(STATUS "Using host compiler - ${CMAKE_CUDA_HOST_COMPILER}")
-endif()
-
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 message(STATUS "Using standard ${CXX_STANDARD}")
 
 set(CMAKE_CXX_STANDARD ${CXX_STANDARD})
-set(CMAKE_CUDA_STANDARD ${CXX_STANDARD})
-set(CMAKE_CUDA_ARCHITECTURES ${CUDA_ARCHITECTURES})
-
-if(KEEP)
-  add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--keep>)
-endif()
 
 # Ensure the LOG_LEVEL is correct
 set(LOG_LEVELS "TRACE;DEBUG;INFO;WARN;ERROR;CRITICAL;OFF")
@@ -80,7 +65,7 @@ enable_testing()
 #######################################################################################################################
 ## Libraries
 
-add_subdirectory(protos) #TODO get rid of this requirement
+add_subdirectory(protos)
 
 ## remus::workload
 add_subdirectory(workload)
@@ -160,4 +145,3 @@ set(CPACK_SOURCE_IGNORE_FILES
         )
 include(CPack)
 
-#######################################################################################################################

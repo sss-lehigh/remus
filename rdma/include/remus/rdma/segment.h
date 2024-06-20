@@ -56,11 +56,6 @@ class Segment {
   ///
   /// NB: This is only implemented for Linux-based operating systems.
   ///
-  /// TODO: We call this more than once, though it always returns the same
-  ///       value.  It's not performance-critical, but still, it would be more
-  ///       efficient to cache the result.
-  ///
-  /// TODO: We don't have any systems where this returns an integer > 0?
   static int GetNumHugePages() {
     using namespace std::string_literals;
 

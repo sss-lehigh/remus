@@ -15,8 +15,6 @@
 #include "connection_utils.h"
 #include "segment.h"
 
-// TODO: Many parts of this file need better documentation
-
 namespace remus::rdma::internal {
 
 /// Connection encapsulates an RDMA communication identifier between two
@@ -37,34 +35,12 @@ class Connection {
   /// NB: The use of a unique_ptr ensures that the memory gets cleaned up when
   ///     the Message goes out of scope.
   ///
-  /// TODO: We need to think more carefully about the design.  Right now, the
-  ///       public interface of Send/Recv only allows for transmitting protos.
-  ///       It also seems that those protos have a fixed maximum size, which is
-  ///       determined by the sizes of pinned memory regions.
-  ///
-  /// TODO: OTOH, we don't really use Send/Recv much, so maybe it doesn't
-  ///       matter?
-
-  // TODO: Should these constants migrate to connection_utils.h?
 
   /// The maximum size of a message sent or received
-  ///
-  /// TODO: Should we enforce that this evenly divides kCapacity?
-  ///
-  /// TODO: Is this even necessary?  How do we know how big it should be?
-  ///       When/where/how do we nicely enforce this maximum message size?
-  ///
-  /// TODO: Make this an argument to the constructor?
   static constexpr const uint32_t kRecvMaxBytes = 1ul << 8;
 
-  /// TODO: I don't understand why this is separate from kCapacity
-  ///
-  /// TODO: Make this an argument to the constructor?
   static constexpr size_t kMemoryPoolMessengerCapacity = 1 << 12;
 
-  /// TODO: I don't understand why this is separate from kRecvMaxBytes
-  ///
-  /// TODO: Make this an argument to the constructor?
   static constexpr size_t kMemoryPoolMessageSize = 1 << 8;
 
   rdma_cm_id *id_;          // Pointer to the QP for sends/receives
@@ -80,14 +56,6 @@ class Connection {
   /// Internal method for sending a Message (byte array) over RDMA as a
   /// two-sided operation.
   ///
-  /// TODO: Should this be fail-stop?
-  ///
-  /// TODO: Why do we enforce length so late?
-  ///
-  /// TODO: Why not let the caller deal with protos, instead of using them
-  ///       internally?
-  ///
-  /// TODO: Should this be fail-stop?
   template <typename T>
     requires std::ranges::contiguous_range<T>
   remus::util::Status SendMessage(T &&msg) {
@@ -111,13 +79,12 @@ class Connection {
     // If the new message will not fit in remaining memory, then we reset
     // the head pointer to the beginning.
     //
-    // TODO: Are we sure there are no pending completions on it?
     auto tail = send_next_ + msg_size;
     auto end = send_base_ + kCapacity;
     if (tail > end) {
       send_next_ = send_base_;
     }
-    std::memcpy(send_next_, msg_ptr, msg_size); // TODO can this be subsituted with std::ranges::copy?
+    std::memcpy(send_next_, msg_ptr, msg_size); 
 
     // Copy the proto into the send buffer.
     ibv_sge sge;
@@ -145,8 +112,6 @@ class Connection {
 
     // Assumes that the CQ associated with the SQ is synchronous.
     //
-    // TODO:  This doesn't check if the *caller*'s event completed, just that
-    //        *some* event completed.  Is that OK?
     ibv_wc wc;
     int comps = rdma_get_send_comp(id_, &wc);
     while (comps < 0 && errno == EAGAIN) {
@@ -165,7 +130,6 @@ class Connection {
 
   /// Internal method for receiving a Message (byte array) over RDMA as a
   /// two-sided operation.
-  /// TODO is it possible we already know the message size we expect to serialize?
   remus::util::StatusVal<std::vector<uint8_t>> TryDeliverMessage() {
     ibv_wc wc;
     auto ret = rdma_get_recv_comp(id_, &wc);
@@ -266,9 +230,8 @@ public:
   Connection(Connection &&c) = delete;
 
   template <typename ProtoType> remus::util::Status Send(const ProtoType &proto) {
-    // two callers.  One is fail-stop.  The other is never called in IHT.  Can
-    // this be fail-stop?
     std::string str = proto.SerializeAsString();
+    REMUS_DEBUG("Serialized proto as string");
     return SendMessage(str);
   }
 
@@ -278,9 +241,10 @@ public:
     return SendMessage(std::forward<T>(msg));
   }
 
-  // TODO: rename to Recv?
   template <typename ProtoType> remus::util::StatusVal<ProtoType> Deliver() {
+
     REMUS_TRACE("Trying to recv on {}", (void*) id_->qp);
+
     auto p = this->TryDeliver<ProtoType>();
     while (p.status.t == remus::util::Unavailable) {
       p = this->TryDeliver<ProtoType>();
@@ -300,10 +264,7 @@ public:
   /// the key of the established_ map, and the caller is the ConnectionManager's
   /// my_id_ field.
   ///
-  /// TODO: Document this better  In particular, what are key and caller?  Are
-  ///       they indicating that we actually do know who is the listening side?
   ///
-  /// TODO: Could this be a destructor?
   void cleanup(uint32_t key, uint32_t caller) {
     // A loopback connection is made manually, so we do not need to deal with
     // the regular `rdma_cm` handling. Similarly, we avoid destroying the
@@ -313,7 +274,6 @@ public:
       rdma_cm_event *event;
       auto result = rdma_get_cm_event(id_->channel, &event);
       while (result == 0) {
-        // TODO: Stop using RDMA_CM_ASSERT?
         RDMA_CM_ASSERT(rdma_ack_cm_event, event);
         result = rdma_get_cm_event(id_->channel, &event);
       }
@@ -325,12 +285,6 @@ public:
     auto *context = id_->context;
     auto *channel = id_->channel;
     rdma_destroy_ep(id_);
-    // TODO:  I feel like we should be calling rdma_destroy_event_channel in the
-    //        if and in the else if, but that leads to occasional double frees.
-    //        Is there a race somewhere?  Note that the destructor used to hold
-    //        a lock while making all calls to cleanup, so maybe there's
-    //        something strange leading to the destructor getting called more
-    //        than once?
     if (context != nullptr)
       free(context);
     else if (key != caller)
@@ -339,7 +293,6 @@ public:
 
   /// Send a write request.  This encapsulates so that id_ can be private
   ///
-  /// TODO: Can we remove this?
   void send_onesided(ibv_send_wr *send_wr_) {
     ibv_send_wr *bad = nullptr;
     RDMA_CM_ASSERT(ibv_post_send, id_->qp, send_wr_, &bad);
@@ -348,7 +301,6 @@ public:
   /// Poll to see if anything new arrived on the completion queue.  This
   /// encapsulates so that id_ can be private.
   ///
-  /// TODO: Can we remove this?
   int poll_cq(int num, ibv_wc *wc) { return ibv_poll_cq(id_->send_cq, num, wc); }
 };
 } // namespace remus::rdma::internal

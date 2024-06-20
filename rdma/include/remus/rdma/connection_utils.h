@@ -35,7 +35,6 @@ inline void make_nonblocking(int fd) {
 
 /// Set the file descriptor `fd` as O_SYNC
 ///
-/// TODO: Why do we use this?
 inline void make_sync(int fd) {
   using namespace std::string_literals;
   if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_SYNC) != 0) {
@@ -66,9 +65,6 @@ inline std::optional<std::vector<int>> FindActivePorts(ibv_context *context) {
 /// Returns a vector of device name and active port pairs that are accessible
 /// on this machine, or None if no devices are found
 ///
-/// TODO: This function name is misleading... It is stateful, since it
-///       *opens* devices.  This means that its return value doesn't tell the
-///       whole story.
 inline std::optional<std::vector<std::pair<std::string, int>>> GetAvailableDevices() {
   int num_devices;
   auto **device_list = ibv_get_device_list(&num_devices);

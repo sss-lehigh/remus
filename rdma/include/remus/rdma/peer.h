@@ -15,7 +15,6 @@ struct Peer {
 
   /// Construct a Peer
   ///
-  /// TODO: We probably don't need a constructor since this is so trivial
   ///
   /// @param id       The Id for the peer (default 0)
   /// @param address  The ip address as a string (default "")

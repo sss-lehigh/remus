@@ -15,8 +15,8 @@
 #include <variant>
 #include <vector>
 
-#include <protos/metrics.pb.h> // TODO should be a part of matrics
-#include <protos/rdma.pb.h>    // TODO should be replaced with a JSON object
+#include <protos/metrics.pb.h> 
+#include <protos/rdma.pb.h>
 
 #include <spdlog/fmt/fmt.h> // [mfs] Used in rdma_ptr... factor away?
 #include <vector>
@@ -51,14 +51,10 @@ template <typename T> struct std::hash<remus::rdma::rdma_ptr<T>> {
 
 namespace remus::rdma::internal {
 
-/// TODO: Document this
 class MemoryPool {
 
   /// Specialization of a `memory_resource` that wraps RDMA accessible memory.
   ///
-  /// TODO: This is really just a freelist-based allocator without true
-  ///       recycling.  Can it be simplified?  Or could we just use a bona fide
-  ///       std::memory_resource?
   class rdma_memory_resource : public std::experimental::pmr::memory_resource {
     rdma_memory_resource(const rdma_memory_resource &) = delete;
     rdma_memory_resource &operator=(const rdma_memory_resource &) = delete;
@@ -178,9 +174,6 @@ class MemoryPool {
     }
   };
 
-  // TODO: Document this
-  //
-  // TODO: Now that we can have multiple connections, this needs a redesign
   struct conn_info_t {
     Connection *conn;
     uint32_t rkey;
@@ -202,13 +195,7 @@ class MemoryPool {
   /// a vector of semaphores, one for each thread that can send an operation.
   /// Threads will use this to recover from polling another thread's wr_id
   ///
-  /// TODO:  the size should be a run-time value
-  ///
-  /// TODO:  threads should have descriptors and not use this, as it's going to
-  ///        cause cache thrashing.
   std::array<std::atomic<int>, 20> reordering_counters;
-
-  // TODO: The rest of this file needs a lot more documentation
 
   Peer self_;
   std::unique_ptr<rdma_memory_resource> rdma_memory_;
@@ -230,6 +217,7 @@ public:
   }
 
   void receive_conn(uint16_t id, Connection *conn, uint32_t rkey, uint32_t lkey) {
+
     REMUS_DEBUG("Adding {} to conn_info_", id);
     conn_info_.emplace(id, conn_info_t{conn, rkey, lkey});
   }
@@ -247,7 +235,7 @@ public:
       REMUS_FATAL("Cannot register the same thread twice");
     }
     if (this->id_gen >= THREAD_MAX) {
-      REMUS_FATAL("Hit upper limit on THREAD_MAX. todo: fix this condition");
+      REMUS_FATAL("Hit upper limit on THREAD_MAX.");
     }
     this->thread_ids.insert(std::make_pair(mid, this->id_gen));
     this->reordering_counters[this->id_gen] = 0;
@@ -281,7 +269,6 @@ public:
   template <typename T> rdma_ptr<T> ExtendedRead(rdma_ptr<T> ptr, int size, rdma_ptr<T> prealloc = nullptr) {
     if (prealloc == nullptr)
       prealloc = Allocate<T>(size);
-    // TODO: What happens if I decrease chunk size (sizeT * size --> sizeT)
     ReadInternal(ptr, 0, sizeof(T) * size, sizeof(T) * size, prealloc);
     return prealloc;
   }
@@ -290,7 +277,6 @@ public:
   ///
   /// This version does not read the entire object
   ///
-  /// TODO: Does this require bytes < sizeof(T)?
   template <typename T>
   rdma_ptr<T> PartialRead(rdma_ptr<T> ptr, size_t offset, size_t bytes, rdma_ptr<T> prealloc = nullptr) {
     if (prealloc == nullptr)
@@ -345,7 +331,6 @@ public:
     reordering_counters[index_as_id] = 1;
     // Send the request
     info.conn->send_onesided(&send_wr_);
-    // TODO: [esl] poll for more than 1
     // Poll until we match on the condition
     ibv_wc wc;
     while (reordering_counters[index_as_id] != 0) {
@@ -370,10 +355,6 @@ public:
 
   /// Do a 64-bit swap over RDMA
   ///
-  /// TODO: This is really just a CAS with a loop if it fails, because RDMA
-  ///       doesn't support a true "swap" operation.  It's still good to have,
-  ///       because of the overhead of trying from scratch, but we can certainly
-  ///       optimize it a bit.
   template <typename T> T AtomicSwap(rdma_ptr<T> ptr, uint64_t swap, uint64_t hint = 0) {
     static_assert(sizeof(T) == 8);
     auto info = conn_info_.at(ptr.id());
@@ -435,19 +416,18 @@ public:
   ///       isn't the first field of the T?"
   template <typename T> T CompareAndSwap(rdma_ptr<T> ptr, uint64_t expected, uint64_t swap) {
     static_assert(sizeof(T) == 8);
+    REMUS_DEBUG("Getting conn info for {}, conn size {}", ptr.id(), conn_info_.size());
     auto info = conn_info_.at(ptr.id());
-    
+    REMUS_DEBUG("Got info");
     // [esl] Getting the thread's index to determine it's owned flag
     uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
+    REMUS_DEBUG("GOT THREAD INFO");
 
     auto alloc = rdma_memory_.get();
     // [esl] There is probably a better way to avoid allocating every time we do
     // this call (maybe be preallocating the space thread_local)
     volatile uint64_t *prev_ = alloc->template allocateT<uint64_t>();
 
-    // TODO: would the code be clearer if all of the ibv_* initialization
-    // throughout this file used the new syntax?
-    // [esl] I agree, i think its much cleaner
     ibv_sge sge{
       .addr = reinterpret_cast<uint64_t>(prev_), .length = sizeof(uint64_t), .lkey = rdma_memory_->mr()->lkey};
 
@@ -495,8 +475,6 @@ public:
 private:
   /// Internal method implementing common code for RDMA read
   ///
-  /// TODO: It appears that we *always* call this with bytes <= chunk_size.
-  ///       Could we get rid of some of the complexity?
   template <typename T>
   void ReadInternal(rdma_ptr<T> ptr, size_t offset, size_t bytes, size_t chunk_size, rdma_ptr<T> prealloc) {
     const int num_chunks = bytes % chunk_size ? (bytes / chunk_size) + 1 : bytes / chunk_size;
@@ -553,24 +531,11 @@ private:
 
     // Update rdma per read
     //
-    // TODO: If we're serious about being multithreaded, rdma_per_read needs to
-    // be thread-local, or else all threads will contend on this.
     rdma_per_read_lock_.lock();
     rdma_per_read_ << num_chunks;
     rdma_per_read_lock_.unlock();
   }
 
-  // [mfs]  According to [el], it is possible to post multiple requests on the
-  //        same qp, and they'll finish in order, so we definitely will want a
-  //        way to let that happen.
-  // [esl] Just to cite my sources:
-  // https://www.rdmamojo.com/2013/07/26/libibverbs-thread-safe-level/ (Thread
-  // safe) https://www.rdmamojo.com/2013/01/26/ibv_post_send/ (Ordering
-  // guarantee, for RC only)
-  //    "In RC QP, there is a PSN (Packet Serial Number) that guarantees the
-  //    order of the messages"
-  // https://www.rdmamojo.com/2013/06/01/which-queue-pair-type-to-use/ (Ordering
-  // guarantee also mentioned her)
 };
 
 } // namespace remus::rdma::internal

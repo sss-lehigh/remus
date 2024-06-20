@@ -84,7 +84,7 @@ class Listener {
     auto err = rdma_create_ep(&listen_id_, resolved, nullptr, &init_attr);
     rdma_freeaddrinfo(resolved);
     if (err != 0) {
-      REMUS_FATAL("rdma_create_ep(): "s + strerror(errno));
+      REMUS_FATAL("rdma_create_ep(): "s + strerror(errno) + " for "s + address + ":"s + std::to_string(port));
     }
 
     REMUS_ASSERT(listen_id_->pd != nullptr, "Should initialize a protection domain");
@@ -129,7 +129,6 @@ class Listener {
         }
         // On EAGAIN, yield and then try again
         //
-        // TODO: Is yielding the right thing to do?  Sleep?  Tight spin loop?
         if (ret != 0) {
           std::this_thread::yield();
           continue;
@@ -144,8 +143,6 @@ class Listener {
         // We aren't currently getting CM_EVENT_TIMEWAIT_EXIT events, but if we
         // did, we'd probably just ACK them and continue
         //
-        // TODO:  Why doesn't this code check for ACK errors, when the Connector
-        //        does?
         rdma_ack_cm_event(event);
         break;
 
@@ -158,10 +155,6 @@ class Listener {
         // Once the connection is fully established, we just ack it, and then
         // it's ready for use.
         //
-        // TODO:  Should we be updating the map?  What if another thread tries
-        //        to use it before we ack?  Are we just getting lucky with
-        //        potential timing bugs, because we set up the whole clique
-        //        before we use connections?
         rdma_ack_cm_event(event);
         break;
 
@@ -279,12 +272,10 @@ public:
 
   /// Report the listener's RDMA protection domain (PD)
   ///
-  /// TODO: Why not just return it from StartListeningThread?
   ibv_pd *pd() const { return listen_id_->pd; }
 
   /// Report the listener's address
   ///
-  /// TODO: Why not just return it from StartListeningThread?
   std::string address() { return address_; }
 };
 

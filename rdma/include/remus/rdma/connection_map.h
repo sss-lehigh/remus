@@ -14,11 +14,6 @@ namespace remus::rdma::internal {
 /// nodes in the system.  Each node is identified by its numerical id.  This
 /// includes the connections between this node and itself (via loopback).
 ///
-/// TODO: This is a multimap... it supports multiple connections between a pair
-///       of nodes.  However, it does not yet *return* any but the first
-///       connection in response to a get().  Supporting such a feature will
-///       require some significant work, because it should involve some degree
-///       of thread affinity.
 class ConnectionMap {
   /// Identifier for this ConnectionMap's node
   uint32_t my_id_;
@@ -74,8 +69,6 @@ public:
   /// be mutated, and thus no synchronization is needed.  Terminates if no
   /// connection is found.
   ///
-  /// TODO: The map is capable of holding >1 connection, but we always return
-  ///       the first one.
   Connection *GetConnection(uint32_t peer_id) {
     using namespace std::string_literals;
 

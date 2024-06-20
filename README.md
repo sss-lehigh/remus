@@ -31,20 +31,16 @@ To build/run your machine requires:
 * libfmt-dev
 * nlohmann-json3-dev
 * libnuma-dev (if compiling NUMA support)
-* CUDA 12.3 (if compiling GPU support)
 * doxygen (for building DOCS)
 * cmake (3.18 or later)
 
 Your GPU must be Volta or later.
 
 We have the following configuration options/flags:
-* GPU (ON or OFF) will compile with GPU support
-* KEEP (ON or OFF) will keep ptx and cubin files
 * DOCS (ON or OFF) will create documentation
 * NUMA (ON or OFF) will enable remus::numa
 * LOG\_LEVEL (TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL, or OFF) for logging
 * CXX\_STANDARD (20 or 23) for the C++ standard
-* CUDA\_ARCHITECTURES (semicolon seperated list of SM numbers) 
 
 ## Using Remus
 
@@ -63,16 +59,4 @@ Remus can be accessed by linking in CMake to any of these libraries:
 - `remus::rdma` 
 - `remus::util` 
 - `remus::protos` 
-
-
-## Using Dockerfile
-
-To build an image from the Dockerfile, run:
-``docker build -t myimage .``
-
-To run the container based on this image:
-
-``docker run -it --name mycontainer myimage``
-
-This will start a container based on the image built and drop you into a bash shell. 
 

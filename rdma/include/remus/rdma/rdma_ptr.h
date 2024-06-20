@@ -6,7 +6,6 @@ namespace remus::rdma {
 
 /// A "smart pointer" to memory on another machine
 ///
-/// TODO: This will need more documentation
 template <typename T> class rdma_ptr {
 public:
   using element_type = T;
