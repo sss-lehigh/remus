@@ -16,6 +16,30 @@ gcc-x86-64-linux-gnu
 g++-x86-64-linux-gnu
 build-essential
 make
+
+binutils binutils-common binutils-x86-64-linux-gnu bzip2
+catch2 cmake-data cpp cpp-11 dh-elpa-helper dirmngr dpkg-dev emacsen-common
+fakeroot fontconfig-config fonts-dejavu-core g++-11 gcc-11 gcc-11-base gnupg
+gnupg-l10n gnupg-utils googletest gpg gpg-agent gpg-wks-client
+gpg-wks-server gpgconf gpgsm ibverbs-providers libabsl20210324
+libalgorithm-diff-perl libalgorithm-diff-xs-perl libalgorithm-merge-perl
+libasan6 libassuan0 libatomic1 libbenchmark1 libbinutils libbrotli1 libbsd0
+libc-dev-bin libc-devtools libc6-dev libcc1-0 libclang-cpp14 libcrypt-dev
+libctf-nobfd0 libctf0 libcurl4 libdeflate0 libdpkg-perl libedit2 libexpat1
+libfakeroot libfile-fcntllock-perl libfmt8 libfreetype6 libgcc-11-dev
+libgdbm-compat4 libgdbm6 libgomp1 libibverbs1 libicu70 libisl23 libitm1
+libjbig0 libjpeg-turbo8 libjpeg8 libjsoncpp25 libksba8 libldap-2.5-0
+libldap-common libllvm14 liblocale-gettext-perl liblsan0 libmd0 libmpc3
+libmpfr6 libnghttp2-14 libnl-3-200 libnl-3-dev libnl-route-3-200 libnpth0
+libnsl-dev libperl5.34 libpng16-16 libprotobuf-lite23 libprotobuf23
+libprotoc23 libpsl5 libquadmath0 librdmacm1 libreadline8 librhash0 librtmp1
+libsasl2-2 libsasl2-modules libsasl2-modules-db libspdlog1 libsqlite3-0
+libssh-4 libtirpc-dev libtsan0 libubsan1 libuv1 libwebp7 libx11-data
+libxapian30 libxau6 libxcb1 libxdmcp6 libxpm4 linux-libc-dev
+lto-disabled-list manpages manpages-dev netbase openssl patch perl
+perl-modules-5.34 pinentry-curses publicsuffix readline-common rpcsvc-proto
+ucf xz-utils
+
 libstdc++-11-dev:amd64
 zlib1g-dev:amd64
 libprotobuf-dev:amd64
@@ -29,4 +53,3 @@ libarchive13:amd64
 libnl-route-3-dev:amd64
 libibverbs-dev:amd64
 librdmacm-dev:amd64
-ca-certificates
