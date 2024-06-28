@@ -4,7 +4,7 @@ target_include_directories(rdma INTERFACE
                            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                            $<INSTALL_INTERFACE:include>)
 
-target_link_libraries(rdma INTERFACE remus::logging remus::util)
+target_link_libraries(rdma INTERFACE remus::logging remus::util) 
 
 target_link_libraries(rdma INTERFACE remus::metrics) # TODO should be opt-in/out
 
@@ -24,3 +24,4 @@ add_executable(multinode_test test/multinode.cc)
 target_link_libraries(multinode_test PRIVATE rdma)
 add_test(multinode_test multinode_test)
 
+add_library(remus SHARED )

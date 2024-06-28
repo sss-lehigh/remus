@@ -18,10 +18,10 @@ int main(int argc, char** argv) {
 
   int c;
 
-  std::string nodes_str = "";
   int port_num = 8080;
-  int threads = 1;
+  std::string nodes_str = "";
   int id = 0;
+  int threads = 1;
 
   while ((c = getopt(argc, argv, "p:n:t:i:h")) != -1) {
     switch (c) {
