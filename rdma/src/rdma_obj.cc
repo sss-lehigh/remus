@@ -8,18 +8,13 @@ class RDMA_obj{
         int id;
         int num_threads;
 
+        /* Memory regions we operate on */
+        std::shared_ptr<rdma_capability> *pools;
+
     public:
         /* constructor */
         RDMA_obj(int port, const std::string &nodes_str, int id, int threads)
-        : port(port), nodes_str(nodes_str), id(id), num_threads(threads) {}
-
-        /* destructor */
-        ~RDMA_obj(){
-            REMUS_DEBUG("Deleting pools now");
-            delete[] pools;
-        }
-
-        void init(){
+        : port(port), nodes_str(nodes_str), id(id), num_threads(threads) {
             using namespace remus::rdma;
             using namespace std::string_literals;
             REMUS_INIT_LOG();
@@ -34,15 +29,16 @@ class RDMA_obj{
             }
             nodes.push_back(nodes_str);
 
+            /* Logging the nodes */
             for(auto n : nodes) {
                 REMUS_DEBUG("Have node: {}", n);
             }
 
+            /* Defining the peer memory regions */
             std::vector<Peer> peers;
-            
             int node_id = 0;
             for(auto n : nodes) {
-                for(int tid = 0; tid < threads; ++tid) {
+                for(int tid = 0; tid < threads; ++tid) { // 1:1 peer to thread, #peers = #nodes * #threads
                 Peer next(node_id, n, port_num + node_id + 1);
                 peers.push_back(next);
                 REMUS_DEBUG("Peer list {}:{}@{}", node_id, peers.at(node_id).id, peers.at(node_id).address);
@@ -73,6 +69,20 @@ class RDMA_obj{
             for (int i = 0; i < threads; i++) {
                 mempool_threads[i].join();
             }
+        }
+
+        /* destructor */
+        ~RDMA_obj(){
+            REMUS_DEBUG("Deleting pools now");
+            delete[] pools;
+        }
+
+        size_t read(){
+            
+        }
+
+        size_t write(){
+
         }
 };
 
