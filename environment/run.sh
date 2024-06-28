@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 architecture=$(uname -m)
 
 echo "Running for $architecture..."
