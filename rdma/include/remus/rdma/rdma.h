@@ -46,7 +46,6 @@ public:
   /// - It creates an all-all communication network with every peer
   /// - It creates a memory region with `capacity` as its size.
   /// - It exchanges the region with all peers
-  ///
   void init_pool(uint32_t capacity, std::vector<Peer> &peers) {
     using namespace std::string_literals;
 
