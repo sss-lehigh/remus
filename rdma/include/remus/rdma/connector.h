@@ -133,7 +133,6 @@ public:
           make_nonblocking(id->send_cq->channel->fd);
 
           // Make, save, and return the connection
-          //
           auto new_conn = new Connection(my_id_, peer_id, id);
           connection_saver(peer_id, new_conn);
           REMUS_TRACE("Connected: dev={}, addr={}, port={}", id->verbs->device->name,
@@ -182,7 +181,6 @@ public:
     }
 
     while (true) {
-
       // Compute the info for the node we're connecting to
       auto port_str = std::to_string(htons(port));
       rdma_addrinfo hints = {0}, *resolved = nullptr;
@@ -302,7 +300,6 @@ public:
       make_nonblocking(id->send_cq->channel->fd);
 
       // Make, save, and return the Connection
-      //
       auto res = new Connection(my_id_, my_id_, id);
       connection_saver(my_id_, res);
       REMUS_TRACE("Connected Loopback: dev={}, addr={}, port={}", id->verbs->device->name,

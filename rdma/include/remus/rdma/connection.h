@@ -55,7 +55,6 @@ class Connection {
 
   /// Internal method for sending a Message (byte array) over RDMA as a
   /// two-sided operation.
-  ///
   template <typename T>
     requires std::ranges::contiguous_range<T>
   remus::util::Status SendMessage(T &&msg) {
@@ -264,7 +263,6 @@ public:
   /// the key of the established_ map, and the caller is the ConnectionManager's
   /// my_id_ field.
   ///
-  ///
   void cleanup(uint32_t key, uint32_t caller) {
     // A loopback connection is made manually, so we do not need to deal with
     // the regular `rdma_cm` handling. Similarly, we avoid destroying the
@@ -292,7 +290,6 @@ public:
   }
 
   /// Send a write request.  This encapsulates so that id_ can be private
-  ///
   void send_onesided(ibv_send_wr *send_wr_) {
     ibv_send_wr *bad = nullptr;
     RDMA_CM_ASSERT(ibv_post_send, id_->qp, send_wr_, &bad);
@@ -300,7 +297,6 @@ public:
 
   /// Poll to see if anything new arrived on the completion queue.  This
   /// encapsulates so that id_ can be private.
-  ///
   int poll_cq(int num, ibv_wc *wc) { return ibv_poll_cq(id_->send_cq, num, wc); }
 };
 } // namespace remus::rdma::internal

@@ -4,7 +4,7 @@
 DEBUG=0 # 1 for debug with gdb
 SET_BASHRC=1 # set to 0 to not change bashrc remember .bashrc.old still exists
 
-user="person"
+user=""
 machines=("amd157" "amd204" "amd146" "amd145" "amd166" "amd156")
 domain="utah.cloudlab.us"
 node_list="node0,node1,node2,node3,node4,node5"

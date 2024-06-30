@@ -235,7 +235,7 @@ public:
       REMUS_FATAL("Cannot register the same thread twice");
     }
     if (this->id_gen >= THREAD_MAX) {
-      REMUS_FATAL("Hit upper limit on THREAD_MAX.");
+      REMUS_FATAL("Hit upper limit on THREAD_MAX. todo: fix this condition");
     }
     this->thread_ids.insert(std::make_pair(mid, this->id_gen));
     this->reordering_counters[this->id_gen] = 0;
@@ -536,6 +536,17 @@ private:
     rdma_per_read_lock_.unlock();
   }
 
+  // [mfs]  According to [el], it is possible to post multiple requests on the
+  //        same qp, and they'll finish in order, so we definitely will want a
+  //        way to let that happen.
+  // [esl] Just to cite my sources:
+  // https://www.rdmamojo.com/2013/07/26/libibverbs-thread-safe-level/ (Thread
+  // safe) https://www.rdmamojo.com/2013/01/26/ibv_post_send/ (Ordering
+  // guarantee, for RC only)
+  //    "In RC QP, there is a PSN (Packet Serial Number) that guarantees the
+  //    order of the messages"
+  // https://www.rdmamojo.com/2013/06/01/which-queue-pair-type-to-use/ (Ordering
+  // guarantee also mentioned her)
 };
 
 } // namespace remus::rdma::internal

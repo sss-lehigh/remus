@@ -13,7 +13,6 @@ namespace remus::rdma::internal {
 /// A map holding all of the open Connection objects between this node and all
 /// nodes in the system.  Each node is identified by its numerical id.  This
 /// includes the connections between this node and itself (via loopback).
-///
 class ConnectionMap {
   /// Identifier for this ConnectionMap's node
   uint32_t my_id_;
