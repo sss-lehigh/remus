@@ -90,14 +90,15 @@ int main(int argc, char** argv) {
         pool->init_pool(block_size, peers);
         REMUS_DEBUG("Created pool for {}:{}@{}", self_index, self.id, self.address);
         pools[mp_index] = pool;
-      },
-      i, i + id * threads));
+      }, i, i + id * threads));
   }
 
   // Let the init finish
   for (int i = 0; i < threads; i++) {
     mempool_threads[i].join();
   }
+
+  
 
   sleep(10);
   REMUS_DEBUG("Deleting pools now");

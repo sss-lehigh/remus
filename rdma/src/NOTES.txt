@@ -1,0 +1,4 @@
+Progression 
+    - Create thread mapping
+    - Figure out targeted compilation
+    - Compile & deploy on cloudlab

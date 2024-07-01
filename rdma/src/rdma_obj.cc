@@ -5,19 +5,24 @@ class RDMA_obj{
     private:
         int port;
         std::string nodes_str;
-        int id;
         int num_threads;
 
-        /* Memory regions we operate on */
-        std::shared_ptr<rdma_capability> *pools;
+        /* node id */
+        int id;
+
+        /* Memory we can operate on */
+        std::vector<rdma_capability_thread *> rdma_capabilities;
 
     public:
         /* constructor */
-        RDMA_obj(int port, const std::string &nodes_str, int id, int threads)
+        RDMA_obj(int port, const std::string &nodes_str, int threads)
         : port(port), nodes_str(nodes_str), id(id), num_threads(threads) {
             using namespace remus::rdma;
             using namespace std::string_literals;
             REMUS_INIT_LOG();
+
+            /* Grab the node id from the local environment */
+            id = stoi(std::getenv("NODE_ID"));
 
             /* Split nodes by comma */
             std::vector<std::string> nodes;
@@ -27,49 +32,56 @@ class RDMA_obj{
                 nodes.push_back(nodes_str.substr(0, offset));
                 nodes_str.erase(0, offset + 1);
             }
+            /* Vector of node strings */
             nodes.push_back(nodes_str);
 
-            /* Logging the nodes */
             for(auto n : nodes) {
                 REMUS_DEBUG("Have node: {}", n);
             }
 
-            /* Defining the peer memory regions */
             std::vector<Peer> peers;
             int node_id = 0;
+            /* #node * #threads = #peers */
+            /* One thread for every peer */
             for(auto n : nodes) {
-                for(int tid = 0; tid < threads; ++tid) { // 1:1 peer to thread, #peers = #nodes * #threads
-                Peer next(node_id, n, port_num + node_id + 1);
-                peers.push_back(next);
-                REMUS_DEBUG("Peer list {}:{}@{}", node_id, peers.at(node_id).id, peers.at(node_id).address);
-                node_id++;
+                for(int tid = 0; tid < num_threads; ++tid) {
+                    Peer next(node_id, n, port_num + node_id + 1);
+                    peers.push_back(next);
+                    REMUS_DEBUG("Peer list {}:{}@{}", node_id, peers.at(node_id).id, peers.at(node_id).address);
+                    node_id++;
                 }
             }
 
             std::vector<std::thread> mempool_threads;
-            std::shared_ptr<rdma_capability>* pools = new std::shared_ptr<rdma_capability>[threads];
+            std::shared_ptr<rdma_capability> *pools = new std::shared_ptr<rdma_capability>[num_threads];
 
-            // Create multiple memory pools to be shared (have to use threads since Init
-            // is blocking)
+            // Create multiple memory pools to be shared (have to use threads since Init is blocking)
             uint32_t block_size = 1 << 10;
-            for (int i = 0; i < threads; i++) {
+            for (int i = 0; i < num_threads; i++) {
                 mempool_threads.emplace_back(std::thread(
                 [&](int mp_index, int self_index) {
                     Peer self = peers.at(self_index);
                     REMUS_DEBUG("Creating pool for {}:{}@{}", self_index, self.id, self.address);
-                    std::shared_ptr<rdma_capability> pool = std::make_shared<rdma_capability>(self);
+                    /* Create a rdma capability with 2 sets of connections */
+                    std::shared_ptr<rdma_capability> pool = std::make_shared<rdma_capability>(peers.at(id), 2);
                     pool->init_pool(block_size, peers);
                     REMUS_DEBUG("Created pool for {}:{}@{}", self_index, self.id, self.address);
                     pools[mp_index] = pool;
                 },
-                i, i + id * threads));
+                i, i + id * num_threads));
             }
 
-            /* Allow initialization to complete */
-            for (int i = 0; i < threads; i++) {
+            // Let the init finish
+            for (int i = 0; i < num_threads; i++) {
                 mempool_threads[i].join();
             }
+            
+            /* Establish rdma capabilities */
+            for(int t = 0; t < num_threads; i++){
+                rdma_capabilities.push_back(pool[t]->RegisterThread());
+            }
         }
+           
 
         /* destructor */
         ~RDMA_obj(){
@@ -77,12 +89,19 @@ class RDMA_obj{
             delete[] pools;
         }
 
-        size_t read(){
+        void establish_pool
+
+        size_t read(uint32_t thread_id, unsigned char *bytes, size_t len){
+            rdma_capabilities[thread_id]->Allocate<unsigned char>(len);
             
         }
 
-        size_t write(){
+        size_t write(uint32_t thread_id, unsigned char *bytes, size_t len){
 
+        }
+
+        bool is_local(uint32_t thread_id){
+            return rdma_capabilities[thread_id]
         }
 };
 
