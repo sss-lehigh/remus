@@ -64,3 +64,4 @@ latex/
 compile_commands.json
 /run_experiment.sh
 /temp
+.bash_history
