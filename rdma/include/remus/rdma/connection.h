@@ -1,11 +1,8 @@
 #pragma once
 
 #include <arpa/inet.h>
-#include <atomic>
 #include <cstddef>
 #include <cstring>
-#include <exception>
-#include <limits>
 #include <netdb.h>
 #include <ranges>
 #include <rdma/rdma_cma.h>
@@ -253,7 +250,7 @@ public:
   Connection(uint32_t src_id, uint32_t dst_id, rdma_cm_id *channel_id)
     : send_seg_(kCapacity, channel_id->pd), recv_seg_(kCapacity, channel_id->pd), id_(channel_id) {
 
-    REMUS_DEBUG("Using QP {} with {} {}", (void*)id_->qp, src_id, dst_id);
+    REMUS_DEBUG("Using QP {} with src_id={} -> dst_id={}", (void*)id_->qp, src_id, dst_id);
 
     // [mfs]  There's a secret rule here, that the send/recv are using the same
     //        pd as the channel.  Document it?

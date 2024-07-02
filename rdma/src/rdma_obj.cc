@@ -1,5 +1,7 @@
 /* Manually incorporated */
-#include "rdma_obj.h"
+#include <remus/rdma/rdma_obj.h>
+using namespace remus::rdma;
+using namespace remus::util;
 
 class RDMA_obj{
     private:
@@ -17,8 +19,6 @@ class RDMA_obj{
         /* constructor */
         RDMA_obj(int port, const std::string &nodes_str, int threads)
         : port(port), nodes_str(nodes_str), id(id), num_threads(threads) {
-            using namespace remus::rdma;
-            using namespace std::string_literals;
             REMUS_INIT_LOG();
 
             /* Grab the node id from the local environment */
@@ -81,7 +81,6 @@ class RDMA_obj{
                 rdma_capabilities.push_back(pool[t]->RegisterThread());
             }
         }
-           
 
         /* destructor */
         ~RDMA_obj(){
@@ -89,19 +88,6 @@ class RDMA_obj{
             delete[] pools;
         }
 
-        void establish_pool
-
-        size_t read(uint32_t thread_id, unsigned char *bytes, size_t len){
-            rdma_capabilities[thread_id]->Allocate<unsigned char>(len);
-            
-        }
-
-        size_t write(uint32_t thread_id, unsigned char *bytes, size_t len){
-
-        }
-
-        bool is_local(uint32_t thread_id){
-            return rdma_capabilities[thread_id]
-        }
+        std::vector<rdma_capability_thread *> get_rdma_capabilities(){ return rdma_capabilities; }
 };
 

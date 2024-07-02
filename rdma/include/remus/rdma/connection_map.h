@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -53,7 +54,11 @@ public:
   /// Get the number of connections in the map
   int size() {
     std::lock_guard<std::mutex> lg(con_mu_);
-    return connections_.size();
+    int size = 0;
+    for(auto it = connections_.begin(); it != connections_.end(); it++){
+      size += connections_[it->first].size();
+    }
+    return size;
   }
 
   /// Destruct the ConnectionMap by iterating through its open connections,
@@ -69,6 +74,19 @@ public:
 
   /// Construct the ConnectionMap by assigning it its node Id
   explicit ConnectionMap(uint32_t my_id) : my_id_(my_id) {}
+
+  /// Get a map of all the Connections in `index` across all keys
+  std::unordered_map<uint32_t, Connection*> SliceConnections(int index){
+    std::unordered_map<uint32_t, Connection*> result;
+    std::lock_guard<std::mutex> lg(con_mu_);
+    for(auto it = connections_.begin(); it != connections_.end(); it++){
+      int id = it->first;
+      if (index < connections_[id].size()){
+        result[id] = connections_[id][index].get();
+      }
+    }
+    return result;
+  }
 
   /// Get a connection from the map of connections.  This assumes the map cannot
   /// be mutated, and thus no synchronization is needed.  Terminates if no

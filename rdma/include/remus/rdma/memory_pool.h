@@ -2,28 +2,21 @@
 
 #include <atomic>
 #include <cstdint>
-#include <deque>
 #include <experimental/memory_resource>
-#include <fstream>
 #include <infiniband/verbs.h>
 #include <list>
 #include <memory>
 #include <mutex>
-#include <string>
 #include <sys/mman.h>
 #include <unordered_map>
-#include <variant>
-#include <vector>
 
 #include <protos/metrics.pb.h> // TODO should be a part of matrics
 #include <protos/rdma.pb.h>    // TODO should be replaced with a JSON object
 
 #include <spdlog/fmt/fmt.h> // [mfs] Used in rdma_ptr... factor away?
-#include <vector>
 
 #include "remus/logging/logging.h"
 #include "remus/metrics/summary.h"
-#include "remus/util/status.h"
 
 #include "connection.h"
 #include "peer.h"
@@ -50,10 +43,6 @@ template <typename T> struct std::hash<remus::rdma::rdma_ptr<T>> {
 };
 
 namespace remus::rdma::internal {
-
-/// TODO: Document this
-class MemoryPool {
-
   /// Specialization of a `memory_resource` that wraps RDMA accessible memory.
   ///
   /// TODO: This is really just a freelist-based allocator without true
@@ -178,6 +167,8 @@ class MemoryPool {
     }
   };
 
+/// TODO: Document this
+class MemoryPool {
   // TODO: Document this
   //
   // TODO: Now that we can have multiple connections, this needs a redesign
@@ -211,31 +202,30 @@ class MemoryPool {
   // TODO: The rest of this file needs a lot more documentation
 
   Peer self_;
-  std::unique_ptr<rdma_memory_resource> rdma_memory_;
 
   std::unordered_map<uint16_t, conn_info_t> conn_info_;
+  
+  rdma_memory_resource* rdma_memory_;
 
   static inline void cpu_relax() { asm volatile("pause\n" ::: "memory"); }
 
 public:
-  MemoryPool(const Peer &self) : self_(self), rdma_per_read_("rdma_per_read", "ops", 10000) {}
+  MemoryPool(const Peer &self, rdma_memory_resource* rdma_mem_) : self_(self), rdma_per_read_("rdma_per_read", "ops", 10000), rdma_memory_(rdma_mem_) {}
 
   MemoryPool(const MemoryPool &) = delete;
   MemoryPool(MemoryPool &&) = delete;
 
-  rdma_memory_resource *init_memory(uint32_t capacity, ibv_pd *pd) {
-    // Create a memory region (mr) in the current protection domain (pd)
-    rdma_memory_ = std::make_unique<rdma_memory_resource>(capacity + sizeof(uint64_t), pd);
-    return rdma_memory_.get();
-  }
-
   void receive_conn(uint16_t id, Connection *conn, uint32_t rkey, uint32_t lkey) {
-
     REMUS_DEBUG("Adding {} to conn_info_", id);
     conn_info_.emplace(id, conn_info_t{conn, rkey, lkey});
   }
 
-  remus::metrics::MetricProto rdma_per_read_proto() { return rdma_per_read_.ToProto(); }
+  std::shared_ptr<remus::metrics::SummaryMetric> rdma_per_read_metrics() { 
+    auto metrics = rdma_per_read_.ToMetrics();
+    REMUS_ASSERT(metrics.has_summary(), "rdma_per_read_ is a summary metrics");
+    return metrics.try_get_summary();
+  }
+
   conn_info_t conn_info(uint16_t id) const { return conn_info_.at(id); }
 
   // This seems to be giving each thread a unique Id, solely so that it can have
@@ -317,8 +307,7 @@ public:
     //    trivially copyable?
     T *local;
     if (prealloc == nullptr) {
-      auto alloc = rdma_memory_.get();
-      local = alloc->template allocateT<T>();
+      local = rdma_memory_->template allocateT<T>();
       REMUS_TRACE("Allocated memory for Write: {} bytes @ 0x{:x}", sizeof(T), (uint64_t)local);
     } else {
       local = std::to_address(prealloc);
@@ -364,8 +353,7 @@ public:
     //        but we don't have metrics for write/swap/cas?
 
     if (prealloc == nullptr) {
-      auto alloc = rdma_memory_.get();
-      alloc->template deallocateT<T>(local);
+      rdma_memory_->template deallocateT<T>(local);
     }
   }
 
@@ -382,10 +370,9 @@ public:
     // [esl] Getting the thread's index to determine it's owned flag
     uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
 
-    auto alloc = rdma_memory_.get();
     // [esl]  There is probably a better way to avoid allocating every time we
     //        do this call (maybe be preallocating the space thread_local)
-    volatile uint64_t *prev_ = alloc->template allocateT<uint64_t>();
+    volatile uint64_t *prev_ = rdma_memory_->template allocateT<uint64_t>();
 
     ibv_sge sge{
       .addr = reinterpret_cast<uint64_t>(prev_), .length = sizeof(uint64_t), .lkey = rdma_memory_->mr()->lkey};
@@ -425,7 +412,7 @@ public:
       send_wr_.wr.atomic.compare_add = *prev_;
     };
     T ret = T(*prev_);
-    alloc->deallocateT((uint64_t *)prev_, 8);
+    rdma_memory_->deallocateT((uint64_t *)prev_, 8);
     return ret;
   }
 
@@ -443,10 +430,9 @@ public:
     uint64_t index_as_id = this->thread_ids.at(std::this_thread::get_id());
     REMUS_DEBUG("GOT THREAD INFO");
 
-    auto alloc = rdma_memory_.get();
     // [esl] There is probably a better way to avoid allocating every time we do
     // this call (maybe be preallocating the space thread_local)
-    volatile uint64_t *prev_ = alloc->template allocateT<uint64_t>();
+    volatile uint64_t *prev_ = rdma_memory_->template allocateT<uint64_t>();
 
     // TODO: would the code be clearer if all of the ibv_* initialization
     // throughout this file used the new syntax?
@@ -483,7 +469,7 @@ public:
     }
 
     T ret = T(*prev_);
-    alloc->template deallocateT<uint64_t>((uint64_t *)prev_, 8);
+    rdma_memory_->template deallocateT<uint64_t>((uint64_t *)prev_, 8);
     return ret;
   }
 
