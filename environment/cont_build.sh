@@ -40,7 +40,6 @@ if [[ "$architecture" == "arm64" ]]; then
     # We use buildx to build for arm64
     docker buildx build --no-cache --platform linux/amd64 -t remus:latest --load .
 elif [[ "$architecture" == "x86_64" ]]; then 
-    echo "IM WRKING"
     docker build --no-cache -t remus:latest .
 else
     echo "Unknown architecture $architecture."

@@ -12,6 +12,9 @@ set(LOG_LEVEL "DEBUG" CACHE STRING "Log level options include TRACE, DEBUG, INFO
 set(CXX_STANDARD 20 CACHE STRING "Uses C++20 or 23")
 set(CUDA_ARCHITECTURES "70;75;80;86;89;90" CACHE STRING "CUDA architectures to compile for")
 
+# Enable position-independent code globally
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 #######################################################################################################################
 # Setup
 
@@ -104,7 +107,7 @@ add_subdirectory(rdma)
 add_subdirectory(util)
 
 ## remus::hds
-add_subdirectory(hds)
+# add_subdirectory(hds)
 
 if(NUMA)
   add_subdirectory(numa)
@@ -127,8 +130,8 @@ if(NUMA)
   install(FILES ${PROJECT_SOURCE_DIR}/share/numa/remusConfig.cmake DESTINATION lib/cmake)
 
 else()
-
-  install(TARGETS workload logging metrics rdma util protos hds
+  # removed hds
+  install(TARGETS workload logging metrics rdma util protos 
                   EXPORT remusTargets
           LIBRARY DESTINATION lib
           ARCHIVE DESTINATION lib
@@ -172,5 +175,5 @@ include(CPack)
 #######################################################################################################################
 ## Examples
 
-add_subdirectory(examples/iht)
+# add_subdirectory(examples/iht)
 

@@ -5,11 +5,10 @@ using namespace remus::util;
 using namespace string_literals;
 
 /* constructor */
-RDMA_obj::RDMA_obj(int port, const std::string &nodes_str, int threads): port(port), nodes_str(nodes_str), id(id), num_threads(threads) {
-    REMUS_INIT_LOG();
+RDMA_obj::RDMA_obj(int port, std::string &nodes_str, int id, int threads): 
+    port(port), nodes_str(nodes_str), node_id(id), num_threads(threads) {
 
-    /* Grab the node id from the local environment */
-    id = stoi(std::getenv("NODE_ID"));
+    REMUS_INIT_LOG();
 
     /* Split nodes by comma */
     std::vector<std::string> nodes;
@@ -19,7 +18,7 @@ RDMA_obj::RDMA_obj(int port, const std::string &nodes_str, int threads): port(po
         nodes.push_back(nodes_str.substr(0, offset));
         nodes_str.erase(0, offset + 1);
     }
-    /* Vector of node strings */
+    /* Add the final node str */
     nodes.push_back(nodes_str);
 
     for(auto n : nodes) {
@@ -27,12 +26,11 @@ RDMA_obj::RDMA_obj(int port, const std::string &nodes_str, int threads): port(po
     }
 
     std::vector<Peer> peers;
-    int node_id = 0;
     /* #node * #threads = #peers */
     /* One thread for every peer */
     for(auto n : nodes) {
         for(int tid = 0; tid < num_threads; ++tid) {
-            Peer next(node_id, n, port_num + node_id + 1);
+            Peer next(node_id, n, port + node_id + 1);
             peers.push_back(next);
             REMUS_DEBUG("Peer list {}:{}@{}", node_id, peers.at(node_id).id, peers.at(node_id).address);
             node_id++;
@@ -64,8 +62,8 @@ RDMA_obj::RDMA_obj(int port, const std::string &nodes_str, int threads): port(po
     }
     
     /* Establish rdma capabilities */
-    for(int t = 0; t < num_threads; i++){
-        rdma_capabilities.push_back(pool[t]->RegisterThread());
+    for(int t = 0; t < num_threads; t++){
+        rdma_capabilities.push_back(pools[t]->RegisterThread());
     }
 }
 

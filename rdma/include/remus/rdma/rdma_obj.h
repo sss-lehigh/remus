@@ -18,7 +18,7 @@ private:
     int num_threads;
 
     /* node id */
-    int id;
+    int node_id;
 
     /* Memory we can operate on */
     std::vector<remus::rdma::rdma_capability_thread*> rdma_capabilities;
@@ -26,7 +26,7 @@ private:
 
 public:
     /* constructor */
-    RDMA_obj(int port, const std::string &nodes_str, int threads);
+    RDMA_obj(int port, std::string &nodes_str, int id, int threads);
 
     /* destructor */
     ~RDMA_obj();

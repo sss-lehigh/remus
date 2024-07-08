@@ -1,3 +1,5 @@
+# ---------------------Standard Interface---------------------
+
 add_library(rdma INTERFACE)
 target_include_directories(rdma INTERFACE
                            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -15,8 +17,13 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include)
 
 add_library(remus::rdma ALIAS rdma)
 
+# ---------------------Shared lib---------------------
+
 # Create the shared library from rdma_obj.cc
 add_library(rdma_shared SHARED ${CMAKE_CURRENT_SOURCE_DIR}/src/rdma_obj.cc)  
+
+# Set -fPIC flag
+# set_target_properties(rdma_shared PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Set include directories for the shared library
 target_include_directories(rdma_shared PUBLIC
