@@ -21,8 +21,8 @@ private:
     int node_id;
 
     /* Memory we can operate on */
-    std::vector<remus::rdma::rdma_capability_thread*> rdma_capabilities;
-    std::shared_ptr<remus::rdma::rdma_capability> *pools;
+    
+    // something to store rdma capability...
 
 public:
     /* constructor */
