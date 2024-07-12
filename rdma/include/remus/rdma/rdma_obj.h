@@ -20,9 +20,8 @@ private:
     /* node id */
     int node_id;
 
-    /* Memory we can operate on */
-    
-    // something to store rdma capability...
+    /* A subset of available QPs that enable one-sided communication */
+    rdma_capability_thread *one_sided_obj;
 
 public:
     /* constructor */
@@ -31,5 +30,4 @@ public:
     /* destructor */
     ~RDMA_obj();
 
-    std::vector<remus::rdma::rdma_capability_thread *> get_rdma_capabilities();
 };

@@ -3,6 +3,7 @@
 using namespace remus::rdma;
 using namespace remus::util;
 using namespace string_literals;
+typedef unsigned char byte;
 
 /* constructor */
 RDMA_obj::RDMA_obj(int port, std::string &nodes_str, int id, int threads): 
@@ -42,12 +43,22 @@ RDMA_obj::RDMA_obj(int port, std::string &nodes_str, int id, int threads):
 
 }
 
-size_t RDMA_obj::read(){
-    
+size_t RDMA_obj::write(rdma_ptr<uint64_t> dest; byte *stream, size_t len){
+    size_t num_bytes;
+    if (thread_obj == nullptr){ one_sided_obj = pool->RegisterThread(); }
+    rdma_ptr<byte> value = one_sided_obj->Allocate<byte>(len);
+    while(*stream){
+        *(value->x) = *stream;
+        value->x++;
+        stream++;
+        num_bytes ++;
+    }
+    one_sided_obj->Write(dest, value);
+    return num_bytes;
 }
 
-size_t RDMA_obj::write(){
-
+rdma_capability_thread *get_capability(){
+    return one_sided_obj;
 }
 
 /* destructor */
@@ -55,7 +66,5 @@ RDMA_obj::~RDMA_obj(){
     REMUS_DEBUG("Deleting pools now");
     delete[] pools;
 }
-
-std::vector<rdma_capability_thread *> RDMA_obj::get_rdma_capabilities(){ return rdma_capabilities; }
 
 
