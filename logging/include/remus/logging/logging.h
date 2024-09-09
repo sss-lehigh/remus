@@ -94,14 +94,18 @@ inline void __remus_init_log__() {
   #define REMUS_CRITICAL(...) ((void)0)
 #endif
 
-// [mfs]  This looks like it is incorrect.  LOG_LEVEL==OFF will lead to an
-//        undefined symbol, when we probably still want a call to
-//        std::_Exit(1)?
 #if REMUS_LOG_LEVEL != OFF
   #define REMUS_FATAL(...)                                                                                             \
     {                                                                                                                  \
       SPDLOG_CRITICAL(__VA_ARGS__);                                                                                    \
-      std::_Exit(1);                                                                                                \
+      std::_Exit(1);                                                                                                   \
+    }
+#endif
+
+#if REMUS_LOG_LEVEL == OFF
+  #define REMUS_FATAL(...)                                                                                             \
+    {                                                                                                                  \
+      std::_Exit(1);                                                                                                   \
     }
 #endif
 
