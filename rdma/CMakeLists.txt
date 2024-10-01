@@ -20,6 +20,10 @@ add_executable(loopback_test test/loopback.cc)
 target_link_libraries(loopback_test PRIVATE rdma)
 add_test(loopback_test loopback_test)
 
+add_executable(allocator_test test/allocator.cc)
+target_link_libraries(allocator_test PRIVATE rdma)
+add_test(allocator_test allocator_test)
+
 add_executable(multinode_test test/multinode.cc)
 target_link_libraries(multinode_test PRIVATE rdma)
 add_test(multinode_test multinode_test)

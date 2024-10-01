@@ -100,6 +100,11 @@ public:
 
     // Register the memory with RDMA
     auto *base = reinterpret_cast<uint8_t *>(std::visit([](const auto &raw) { return raw.get(); }, raw_));
+    if (pd == nullptr){
+      REMUS_WARN("protection domain is a nullptr");
+      memory_region_ = ibv_mr_unique_ptr(nullptr);
+      return;
+    }
     memory_region_ = ibv_mr_unique_ptr(ibv_reg_mr(pd, base, capacity_, DEFAULT_ACCESS_MODE));
     if (memory_region_ == nullptr) {
       REMUS_FATAL("RegisterMemoryRegion :: ibv_reg_mr failed")

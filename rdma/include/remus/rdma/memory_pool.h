@@ -55,6 +55,7 @@ class MemoryPool {
 
   /// Specialization of a `memory_resource` that wraps RDMA accessible memory.
   ///
+  public:
   class rdma_memory_resource : public std::experimental::pmr::memory_resource {
     rdma_memory_resource(const rdma_memory_resource &) = delete;
     rdma_memory_resource &operator=(const rdma_memory_resource &) = delete;
@@ -162,6 +163,13 @@ class MemoryPool {
                   bytes);
     }
 
+    /// create an rdma_memory_resource just for testing
+    explicit rdma_memory_resource(size_t bytes)
+      : rdma_memory_(std::make_unique<Segment>(bytes, nullptr)), head_(rdma_memory_->raw() + bytes) {
+      std::memset(alignments_.data(), 0, sizeof(alignments_));
+      REMUS_INFO("rdma_memory_resource: {} to {} (length={})", fmt::ptr(rdma_memory_->raw()), fmt::ptr(head_.load()), bytes);
+    }
+
     /// [mfs] If we cached this once, we wouldn't need the call?
     ibv_mr *mr() const { return rdma_memory_->mr(); }
 
@@ -173,6 +181,7 @@ class MemoryPool {
       deallocate(reinterpret_cast<T *>(p), sizeof(T) * n, 64);
     }
   };
+  private:
 
   struct conn_info_t {
     Connection *conn;
