@@ -1,5 +1,11 @@
 #pragma once
 
+/* [abc] It is worth noting that if this header is included (probably with #include <remus/util/cli.h>) it can only 
+        be included ONCE since the functions are not inline and this is a header. If it is inluded by multiple source
+        files in your experiement, you will get a multiple definitions error. Functions defined in a header file should
+        really be inline to avoid this OR we agree that this is included only once programmatically.  
+*/
+
 #include <cstdint>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -7,6 +13,7 @@
 #include <string>
 
 #include "remus/logging/logging.h"
+
 
 using namespace std;
 using namespace nlohmann;
