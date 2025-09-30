@@ -4,6 +4,8 @@ Remus is a collection of useful utilities for research-oriented programming.
 This is the ethos of this project, to accumulate helpful tools that can serve as the basis for development.
 
 Remus Supports:
+<!-- TODO: OLD -->
+
 * Workload driver library (see `remus/workload`) for experimental evaluation
 * Logging utilities (see `remus/logging`)
 * Measurements library (see `remus/metrics`)
@@ -12,7 +14,7 @@ Remus Supports:
 * NUMA (see `remus/numa`)
 
 ## Building
-
+<!-- TODO: OLD -->
 We have tested the following configurations:
 
 |OS           |  Compiler            |
@@ -48,30 +50,19 @@ We have the following configuration options/flags:
 
 ## Using Remus
 
-`tools/install.sh` is a script to install Remus to `/opt/remus` on your machine.
+<!-- [abc] Make sure that the GLIBCXX standards are compatible between your build environment and the cloudlab env. -->
 
-After installing you can include remus in any CMake project by setting:
-`-DCMAKE_PREFIX_PATH=/opt/remus/lib/cmake -DCMAKE_MODULE_PATH=/opt/remus/lib/cmake`
-when running cmake.
+1. Launch experiment on RDMA-capable Cloudlab cluster
+    - Deploy on Ubuntu 24.04 for native gcc-13 support. 
+2. Edit `cloudlab_common.sh` 
+    - Fill out machines, domain, user, and your cloudlab sshkey path.
+3. `bash cloudlab_install_deps.sh`
+    - This will install the dependencies on the remote machines
+4. `bash cloudlab_rebuild.sh` 
+    - Sends over the pre-compiled binary to the remote machines
+    - Configuration for the multi-screen setup
+    - run `screen -c run.screenrc` to launch the experiment 
+    - run `screen -c dev.screenrc` to log in to all machines
 
-Then in your CMakeLists.txt you can write `find_package(remus REQUIRED)`.
-
-Remus can be accessed by linking in CMake to any of these libraries: 
-- `remus::workload` 
-- `remus::logging`
-- `remus::metrics` 
-- `remus::rdma` 
-- `remus::util` 
-- `remus::protos` 
-
-## Using Dockerfile
-
-To build an image from the Dockerfile, run:
-``docker build -t myimage .``
-
-To run the container based on this image:
-
-``docker run -it --name mycontainer myimage``
-
-This will start a container based on the image built and drop you into a bash shell. 
-
+**build.sh** can also be used to compile the binary locally. 
+Here, you can configure the log level (DEBUG or RELEASE).

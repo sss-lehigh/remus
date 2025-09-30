@@ -1,0 +1,18 @@
+# This template shows how to provide the program name and command-line arguments
+# that are needed to run a single experiment on CloudLab.  By default, the
+# ./local folder is not version controlled.  You may want to copy this file to
+# ./local/cloudlab_common.sh, and then edit it
+
+# The executable file that needs to be sent over to cloudlab
+#
+# WARNING:  This needs to be a path name relative to the root of the remus
+#           folder
+#
+# EXAMPLE:  exefile="build/rdma/multinode_test"
+exefile=[INPUT]
+
+# The arguments that are common to all of the invocations of `exefile` for the
+# experiment.  This should not include `--node-id`, since that varies by node
+#
+# EXAMPLE: experiment_args="--seg-size 29 --segs-per-mn 2 --first-cn-id 2 --last-cn-id 3 --first-mn-id 0 --last-mn-id 1 --qp-lanes 2 --qp-sched-pol RR --mn-port 33330 --cn-threads 2 --cn-ops-per-thread 4 --cn-thread-bufsz 20 --alloc-pol GLOBAL-RR"
+experiment_args=[INPUT]

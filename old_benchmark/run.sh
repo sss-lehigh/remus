@@ -1,0 +1,2 @@
+exefile="build/benchmark/ds_launch"
+experiment_args="--seg-size 26 --segs-per-mn 1 --first-cn-id 0 --last-cn-id 7 --first-mn-id 0 --last-mn-id 7 --qp-lanes 1 --qp-sched-pol RAND --mn-port 33330 --cn-threads 16 --cn-ops-per-thread 1 --cn-thread-bufsz 15 --alloc-pol LOCAL-MOD --exp-name ds_workload --time-mode 1 --run-time 5 --num-ops 1000 --prefill 50 --insert 50 --remove 50 --key-lb 1 --key-ub 1024"

@@ -1,30 +1,22 @@
-
+# Build the RDMA library
 add_library(rdma INTERFACE)
 target_include_directories(rdma INTERFACE
                            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                            $<INSTALL_INTERFACE:include>)
-
-target_link_libraries(rdma INTERFACE remus::logging remus::util)
-
-target_link_libraries(rdma INTERFACE remus::metrics)
-
-target_link_libraries(rdma INTERFACE protos)
-
 target_link_libraries(rdma INTERFACE rdma::ibverbs rdma::cm)
-
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION include) 
-
+target_compile_definitions(rdma INTERFACE REMUS_LOG_LEVEL=${LOG_LEVEL})
 add_library(remus::rdma ALIAS rdma)
 
-add_executable(loopback_test test/loopback.cc)
-target_link_libraries(loopback_test PRIVATE rdma)
-add_test(loopback_test loopback_test)
+# Build the example programs (more like "functionality tests")
 
-add_executable(allocator_test test/allocator.cc)
-target_link_libraries(allocator_test PRIVATE rdma)
-add_test(allocator_test allocator_test)
+add_executable(root_test test/root.cc)
+target_link_libraries(root_test PRIVATE rdma)
 
-add_executable(multinode_test test/multinode.cc)
-target_link_libraries(multinode_test PRIVATE rdma)
-add_test(multinode_test multinode_test)
+add_executable(read_test test/read.cc)
+target_link_libraries(read_test PRIVATE rdma)
 
+add_executable(write_test test/write.cc)
+target_link_libraries(write_test PRIVATE rdma)
+
+add_executable(helloworld_test test/helloworld.cc)
+target_link_libraries(helloworld_test PRIVATE rdma)
