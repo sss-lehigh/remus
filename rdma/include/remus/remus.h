@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Atomic.h"
 #include "cfg.h"
 #include "cli.h"
 #include "compute_node.h"
@@ -12,8 +11,5 @@
 #include "qp_sched_pol.h"
 #include "rdma_ops.h"
 #include "rdma_ptr.h"
-#include "ring.h"
 #include "segment.h"
-#include "simple_async_compute_thread.h"
-#include "simple_async_result.h"
 #include "util.h"

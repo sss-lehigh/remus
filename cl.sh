@@ -142,7 +142,6 @@ function cl_run_no_interactive() {
     screen -c $tmp_screen; rm $tmp_screen
 }
 
-# Load a binary into gdb on the CloudLab machines
 function cl_debug() {
     exename=$(basename ${exefile})          # The exe to send to CloudLab
     last_valid_index=$((${#machines[@]}-1)) # The 0-indexed number of nodes
@@ -195,7 +194,7 @@ elif [[ "$cmd" == "run" && "$count" -eq 3 ]]; then
     load_cfg $cfg
     load_cfg $opt
     cl_run
-elif [[ "$cmd" == "run-debug" && "$count" -eq 3 ]]; then
+elif [[ "$cmd" == "build-debug" && "$count" -eq 3 ]]; then
     load_cfg $cfg
     load_cfg $opt
     cl_build

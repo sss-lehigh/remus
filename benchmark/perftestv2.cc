@@ -1,76 +1,69 @@
-#include <chrono>
-#include <fstream>
-#include <memory>
-#include <string>
 #include <unistd.h>
-#include <unordered_map>
+
+#include <memory>
 #include <vector>
 
 // [mfs] Should remus expose a single include for all public functionality?
+
 #include <remus/cfg.h>
 #include <remus/cli.h>
 #include <remus/compute_node.h>
-#include <remus/compute_thread.h>
+#include <remus/ext_compute_thread.h>
+#include <remus/ext_mem_node.h>
 #include <remus/logging.h>
-#include <remus/mem_node.h>
 #include <remus/util.h>
+
+#include <chrono>
+#include <fstream>
+#include <string>
+#include <unordered_map>
 
 #include "cloudlab.h"
 #include "exp_cfg.h"
 
-enum Operation { Write, Read, CAS, FAA };
-
-std::unordered_map<Operation, std::string> op_name = {
-    {Operation::Write, "Write"},
-    {Operation::Read, "Read"},
-    {Operation::CAS, "CAS"},
-    {Operation::FAA, "FAA"}};
-
 void metrics(std::string exp_name, uint64_t nnodes, uint64_t nthreads,
              uint64_t ops_per_thread, std::chrono::microseconds duration,
              std::string exp_op, uint64_t zero_copy) {
-  // Use std::ios::out instead of std::ios::app to overwrite
-  std::ofstream file("metrics.txt", std::ios::out);
+  std::ofstream file("metrics.txt",
+                     std::ios::out);  // Use std::ios::out instead of
+                                      // std::ios::app to overwrite
   file << "Experiment: " << exp_name << std::endl;
-  // TODO: `TYPE_SIZE` is a rather magical thing.  Document it better?
   file << "TypeSize: " << TYPE_SIZE << std::endl;
   file << "OpType: " << exp_op << std::endl;
   file << "ZeroCopy: " << zero_copy << std::endl;
   file << "Nodes: " << nnodes << std::endl;
   file << "Threads: " << nthreads << std::endl;
 
-  // Calculate total operations
+  // Calculate metrics
   uint64_t total_ops = ops_per_thread * nthreads * nnodes;
+  uint64_t total_bytes = total_ops * TYPE_SIZE;
+  double usec = static_cast<double>(duration.count()); 
+  double seconds = usec / 1e6; // convert to seconds
+  // Calculate throughput 
+  double ops_per_s = static_cast<double>(total_ops) / seconds; 
+  file << "Throughput(ops/sec): " << ops_per_s << std::endl;
+  // Calculate bandwidth
+  double mb_per_s = static_cast<double>(total_bytes) / 1e6 / seconds;
+  file << "Bandwidth(MB/sec): " << mb_per_s << std::endl;
+  // Calculate latency
+  double s_per_op = 1.0 / ops_per_s;
+  double latency_us = s_per_op * 1e6; // convert to microseconds
+  file << "Latency(us): " << latency_us << std::endl;
 
-  // Throughput: ops/sec = (total_ops * 1,000,000) / duration_in_microseconds
-  file << "Throughput(ops/sec): " << (total_ops * 1000000) / duration.count()
-       << std::endl;
-
-  // Bandwidth: MB/sec = (total_ops * bytes_per_op) / (duration_in_microseconds
-  // * 1,000,000) * 1,000,000 / (1024*1024) Simplified: (total_ops * TYPE_SIZE)
-  // / duration.count() / (1024*1024) But since we want MB/sec directly:
-  file << "Bandwidth(MB/sec): "
-       << (static_cast<double>(total_ops) * TYPE_SIZE) /
-              (duration.count() * 1.048576)
-       << std::endl;
-
-  // Latency: microseconds per operation = duration_in_microseconds / ops
-  if (exp_op == op_name[Operation::Write]) {
-    file << "Latency(us): "
-         << static_cast<double>(duration.count()) / ops_per_thread / 2
-         << std::endl;
-  } else {
-    file << "Latency(us): "
-         << static_cast<double>(duration.count()) / ops_per_thread << std::endl;
-  }
-};
+}
 
 union alignas(64) Type {
   uint8_t padding[TYPE_SIZE];
   uint64_t value;
 };
 
+enum Operation { Write, Read, CAS, FAA };
 int main(int argc, char **argv) {
+  std::unordered_map<Operation, std::string> op_name = {
+      {Operation::Write, "Write"},
+      {Operation::Read, "Read"},
+      {Operation::CAS, "CAS"},
+      {Operation::FAA, "FAA"}};
   // Configure logging
   remus::INIT();
 
@@ -80,6 +73,8 @@ int main(int argc, char **argv) {
   args->import(EXP_ARGS);
   args->parse(argc, argv);
   args->report_config();
+
+  bool skip_barrier = (args->sget(EXP_NAME) == "perftest");
 
   // Extract the args we need in EVERY node
   uint64_t id = args->uget(remus::NODE_ID);
@@ -111,7 +106,7 @@ int main(int argc, char **argv) {
   }
 
   // Information needed if this machine will operate as a memory node
-  std::unique_ptr<remus::MemoryNode> memory_node;
+  std::unique_ptr<remus::ExtMemoryNode> memory_node;
 
   // Information needed if this machine will operate as a compute node
   std::shared_ptr<remus::ComputeNode> compute_node;
@@ -119,7 +114,7 @@ int main(int argc, char **argv) {
   // Memory Node configuration must come first!
   if (id >= m0 && id <= mn) {
     // Make the pools, await connections
-    memory_node.reset(new remus::MemoryNode(self, args));
+    memory_node.reset(new remus::ExtMemoryNode(self, args));
   }
 
   // Configure this to be a Compute Node?
@@ -142,8 +137,9 @@ int main(int argc, char **argv) {
   if (memory_node) {
     memory_node->init_done();
   }
-
   Type typeval;
+  typeval.value = 0; // Initialize the type value to zero
+  
   // At this point, everything is configured!  If this is a compute node, make
   // some threads and have them use RDMA
   if (id >= c0 && id <= cn) {
@@ -154,16 +150,11 @@ int main(int argc, char **argv) {
 
     std::vector<std::thread> worker_threads;
     for (uint64_t i = 0; i < cn_threads; ++i) {
-
       worker_threads.push_back(std::thread(
-
-          // [mfs] The two code paths look very similar.  Can we merge more, so
-          // the example is shorter?
-
           [&](int i) {
             // Create thread context
-            auto t =
-                std::make_unique<remus::ComputeThread>(id, compute_node, args);
+            auto t = std::make_unique<remus::EXTComputeThread>(id, compute_node,
+                                                               args);
             Type *type = t->local_allocate<Type>();
             if (id == c0 && i == 0) {
               auto ptr = t->allocate<Type>();
@@ -171,9 +162,9 @@ int main(int argc, char **argv) {
               // Wait for all threads on all nodes to have thread contexts.
               // Implicitly, passing the barrier means all Compute and Memory
               // nodes are done with configuration
-              if (args->sget(EXP_NAME) != "perftest") {
+              if (!skip_barrier)
                 t->arrive_control_barrier(barrier_thread_count);
-              }
+              
               auto start = std::chrono::high_resolution_clock::now();
               // Perform the operations
               for (uint64_t j = 0; j < ops; j++) {
@@ -199,20 +190,22 @@ int main(int argc, char **argv) {
                   REMUS_FATAL("Invalid operation: {}", exp_op_str);
                 }
               }
-              // Don't exit until everyone finishes the experiment
-              if (args->sget(EXP_NAME) != "perftest") {
-                t->arrive_control_barrier(barrier_thread_count);
-              }
+              // End timing immediately after the operations
               auto end = std::chrono::high_resolution_clock::now();
+              // Don't exit until everyone finishes the experiment
+              if (!skip_barrier)
+                t->arrive_control_barrier(barrier_thread_count);
 
               auto duration =
                   std::chrono::duration_cast<std::chrono::microseconds>(end -
                                                                         start);
+              // Log the metrics
               metrics(args->sget(EXP_NAME), cn - c0 + 1, cn_threads, ops,
                       duration, op_name[exp_op], zero_copy);
             } else {
               // wait until the root is set
-              t->arrive_control_barrier(barrier_thread_count);
+              if(!skip_barrier)
+                t->arrive_control_barrier(barrier_thread_count);
               auto ptr = t->get_root<Type>();
               for (uint64_t j = 0; j < ops; j++) {
                 if (exp_op == Operation::Write) {
@@ -237,21 +230,16 @@ int main(int argc, char **argv) {
                   REMUS_FATAL("Invalid operation: {}", exp_op_str);
                 }
               }
-              // dont't exit until everyone finishes the experiment
-              if (args->sget(EXP_NAME) != "perftest") {
+              if(!skip_barrier)
                 t->arrive_control_barrier(barrier_thread_count);
-              }
             }
             REMUS_INFO("All threads finished!");
-            t->arrive_control_barrier(barrier_thread_count);
           },
           i));
     }
     for (auto &t : worker_threads) {
       t.join();
     }
-
-    // TODO: Should we have some kind of memory_node->shutdown() here?
   }
   return 0;
 }

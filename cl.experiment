@@ -14,5 +14,5 @@ exefile=[INPUT]
 # The arguments that are common to all of the invocations of `exefile` for the
 # experiment.  This should not include `--node-id`, since that varies by node
 #
-# EXAMPLE: experiment_args="--seg-size 29 --segs-per-mn 2 --first-cn-id 2 --last-cn-id 3 --first-mn-id 0 --last-mn-id 1 --qp-lanes 2 --qp-sched-pol RR --mn-port 33330 --cn-threads 2 --cn-ops-per-thread 4 --cn-thread-bufsz 20 --alloc-pol GLOBAL-RR"
+# EXAMPLE: experiment_args="--seg-size 29 --segs-per-mn 2 --first-cn-id 2 --last-cn-id 3 --first-mn-id 0 --last-mn-id 1 --qp-lane-width 2 --qp-sched-pol RR --mn-port 33330 --cn-threads 2 --cn-thread-msgs 4 --cn-thread-bufsz 20 --alloc-pol GLOBAL-RR"
 experiment_args=[INPUT]

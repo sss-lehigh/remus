@@ -1,8 +1,9 @@
 #pragma once
 
 #include <format>
+#include <iostream> // [mfs] We shouldn't need this
 
-// TODO:  This has a lot of functionality that we might not need.  I can't tell
+// [mfs]  This has a lot of functionality that we might not need.  I can't tell
 //        if it is anticipatory implementation, or stuff that I just don't see
 //        because I'm in a private repo.  In addition:
 // 1. Some documentation and cleanup is in order
@@ -11,17 +12,11 @@
 // 3. Consider renaming to rptr<>?
 namespace remus {
 
-/// @brief A "smart pointer" to memory on another machine
-/// @tparam T The type of the object that this pointer points to
-/// @details
-/// The rdma_ptr onject encapsulates information relavant to RDMA communication
-/// in a regular pointer. In the high 16 bits, it stores the id of the remote
-/// machine, and in the low 48 bits, it stores the raw address of the object on
-/// that machine. By combining these two pieces of information, we provide a
-/// useful abstraction for subsequent RDMA operations.
-template <typename T>
-class rdma_ptr {
- public:
+/// A "smart pointer" to memory on another machine
+///
+/// [mfs] This needs more/better commenting
+template <typename T> class rdma_ptr {
+public:
   using element_type = T;
   using pointer = T *;
   using reference = T &;
@@ -114,8 +109,7 @@ class rdma_ptr {
   // Conversion operators
   explicit operator uint64_t() const { return raw_; }
 
-  template <typename U>
-  explicit operator rdma_ptr<U>() const {
+  template <typename U> explicit operator rdma_ptr<U>() const {
     return rdma_ptr<U>(raw_);
   }
 
@@ -157,7 +151,7 @@ class rdma_ptr {
     return p1.raw() < p2.raw();
   }
 
- private:
+private:
   static inline constexpr uint64_t bitsof(const uint32_t &bytes) {
     return bytes * 8;
   }
@@ -184,7 +178,7 @@ bool operator==(const volatile rdma_ptr<U> &p1,
   return p1.raw_ == p2.raw_;
 }
 
-}  // namespace remus
+} // namespace remus
 
 /// Make a nice log message for an rdma_ptr<T>
 template <typename T>
@@ -193,8 +187,7 @@ inline std::string format_rdma_ptr(const remus::rdma_ptr<T> &input) {
 }
 
 /// Turn an rdma_ptr into a number, so we can use it as a key in a hash table
-template <typename T>
-struct std::hash<remus::rdma_ptr<T>> {
+template <typename T> struct std::hash<remus::rdma_ptr<T>> {
   std::size_t operator()(const remus::rdma_ptr<T> &ptr) const {
     return std::hash<uint64_t>()(static_cast<uint64_t>(ptr));
   }

@@ -15,7 +15,7 @@
 #include "logging.h"
 #include "util.h"
 
-// TODO: This is functional, but:
+// [mfs] This is functional, but:
 // 1. Should we be restricting sizes more?  Is 2^20 a reasonable minimum?
 // 2. Review documentation and destructors
 namespace remus::internal {
@@ -31,11 +31,11 @@ namespace remus::internal {
 ///     passing the result to mmap, you must not do any allocs, thread
 ///     creations, or mmaps that could lead to another call to sbrk or mmap.
 ///
-/// TODO: Right now, we're calling this on each mmap.  We could scan for a
+/// [mfs] Right now, we're calling this on each mmap.  We could scan for a
 ///       bigger contiguous region to avoid that overhead, but it's probably not
 ///       worth it.
 ///
-/// TODO: Right now, we're using roundup(), which has a risk of overflow.
+/// [mfs] Right now, we're using roundup(), which has a risk of overflow.
 ///       Eventually look into something a bit more robust.
 ///
 /// @param min_addr The smallest address that we're willing to use.  It is
@@ -70,33 +70,26 @@ inline std::optional<uintptr_t> find_mmap_location(uintptr_t min_addr,
   // we pull in each line, then use scanf to get l-u, we have all the info we
   // need to know that a given region is mapped.  Everything else is available
   FILE *fp;
-  if ((fp = fopen("/proc/self/maps", "r")) == NULL) {
+  if ((fp = fopen("/proc/self/maps", "r")) == NULL)
     return {};
-  }
   char line[2048];
   while (fgets(line, 2048, fp) != NULL) {
     uintptr_t l = 0, u = 0; // Lower and upper bounds of the ranges in the file
     if (sscanf(line, "%lx-%lx", &l, &u) == 2) {
-      if ((addr + len) <= l) {
+      if ((addr + len) <= l)
         break; // addr is likely to work!
-      }
-      if (addr < u) {
+      if (addr < u)
         addr = roundup(u, len); // Move past u, to next multiple of len
-      }
     }
   }
   fclose(fp);
 
   // Check for overflow: If we would run off the edge of the address map, fail
-  if ((addr + len) < addr) {
+  if ((addr + len) < addr)
     return {};
-  }
   return addr;
 }
 
-
-/// @brief A Segment object to represent a slab of RDMA memory
-/// @details
 /// A contiguous region of remotely accessible memory.  Size is always a power
 /// of 2, and it's always aligned to its size.  The interface is really just
 /// "raw pointer".  If you want something more complex (e.g., an allocator
@@ -124,7 +117,7 @@ class Segment {
   ///
   /// NB: This only works on Linux
   ///
-  /// TODO: When the unit of allocation does not match the huge page size, this
+  /// [mfs] When the unit of allocation does not match the huge page size, this
   ///       may not be valid.  The r320s on CloudLab don't have huge page
   ///       support turned on, so it isn't really an issue for now, but
   ///       eventually this is something we should work on.
@@ -171,9 +164,6 @@ public:
 
   /// Register this Segment with a Protection Domain, so that the RNIC can use
   /// this memory region
-  ///
-  /// @param pd
-  /// @return
   [[nodiscard]]
   ibv_mr_ptr registerWithPd(ibv_pd *pd) {
     if (pd == nullptr) {
@@ -185,8 +175,7 @@ public:
                             : DEFAULT_ACCESS_MODE;
     auto ptr = ibv_reg_mr(pd, raw_, capacity_, flags);
     if (ptr == nullptr) {
-      REMUS_FATAL("RegisterMemoryRegion :: ibv_reg_mr failed: {}",
-                  strerror(errno))
+      REMUS_FATAL("RegisterMemoryRegion :: ibv_reg_mr failed: {}", strerror(errno))
     }
     REMUS_INFO("  Registered region 0x{:x} (length=0x{:x}) ({} pages)",
                (uintptr_t)(raw_), capacity_, from_huge_ ? "2MB" : "4KB");

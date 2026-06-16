@@ -11,23 +11,14 @@
 #include "util.h"
 
 namespace remus::internal {
-
-/// @brief A policy for allocating Segments from MemoryNodes
-/// @details
 /// MnAllocPolicy encapsulates the state and decision making process regarding
 /// how to pick a Segment to use to satisfy an allocation request
 class MnAllocPolicy {
-  // TODO: why class+public?  Make it a struct?
 public:
   /// An enum for tracking which policy was configured at start-up time
-  ///
-  /// TODO: Document each point?
   enum Policy { NONE, GLOBAL_MOD, GLOBAL_RR, RAND, LOCAL_RR, LOCAL_MOD };
 
   /// Convert a string (such as what would be in an ArgMap) into a Policy
-  ///
-  /// @param policy
-  /// @return
   static Policy to_policy(std::string policy) {
     if (policy == "RAND") {
       return RAND;
@@ -59,14 +50,14 @@ public:
   /// @param args The arguments to the program
   MnAllocPolicy(std::shared_ptr<remus::ArgMap> args)
       : policy_(NONE), num_segs_(args->uget(SEGS_PER_MN)),
-        // TODO: This assumes MemoryNode Ids start at 0
+        // [mfs] This assumes MemoryNode Ids start at 0
         num_mns_(args->uget(LAST_MN_ID) + 1), total_segs_(num_segs_ * num_mns_),
         last_mn_(0), last_seg_(0) {}
 
   /// Change the policy that will be used for picking a QP
   ///
   /// @param policy     The desired policy
-  /// @param args       The command-line arguments to the program
+  /// @param args      The command-line arguments to the program
   /// @param thread_id  The unique, zero-based identifier for this thread
   void set_policy(Policy policy, std::shared_ptr<ArgMap> args,
                   uint64_t thread_id) {
@@ -85,8 +76,10 @@ public:
       last_seg_ = seg_uid % num_segs_;
     } else if (policy_ == GLOBAL_RR) {
       // Randomize starting point
-      last_mn_ = prng_.rand() % num_mns_;
-      last_seg_ = prng_.rand() % num_segs_;
+      // last_mn_ = prng_.rand() % num_mns_;
+      // last_seg_ = prng_.rand() % num_segs_;
+      last_mn_ = 0;
+      last_seg_ = 0;
     } else if (policy_ == LOCAL_MOD) {
       REMUS_ASSERT(c0 == m0 && cn == mn,
                    "LOCAL_MOD requires every node to be Compute and Memory");
@@ -116,11 +109,17 @@ public:
     if (policy_ == GLOBAL_MOD || policy_ == LOCAL_MOD || policy_ == NONE) {
       // Don't change last_mn_ or last_seg_
     } else if (policy_ == GLOBAL_RR) {
-      // Go to next seg, if that causes overflow, go to next MemoryNode
-      last_seg_ = (++last_seg_) % num_segs_;
-      if (last_seg_ == 0) {
-        last_mn_ = (++last_mn_) % num_mns_;
+      // Rotate through NODES first, then segments
+      // ensures sequential allocations go to different nodes
+      uint32_t ret_mn = last_mn_;      // Save current
+      uint32_t ret_seg = last_seg_;
+      
+      last_mn_ = (last_mn_ + 1) % num_mns_;  // Increment for NEXT call
+      if (last_mn_ == 0) {
+        last_seg_ = (last_seg_ + 1) % num_segs_;
       }
+      
+      return {ret_mn, ret_seg};  // Return what we saved
     } else if (policy_ == LOCAL_RR) {
       // Don't change MemoryNodes on overflow, just start back at 0
       last_seg_ = (++last_seg_) % num_segs_;

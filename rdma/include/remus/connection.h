@@ -16,23 +16,18 @@
 #include "util.h"
 
 namespace remus::internal {
- 
-
-/// @brief A connection object for RDMA communication.
-/// @details
 /// Connection encapsulates an RDMA communication identifier (rdma_cm_id*)
 /// between two endpoints.  When a ComputeNode connects to a remote MemoryNode,
 /// both machines will create a new Connection.  When a ComputeNode connects to
 /// a local MemoryNode, we'll get a Connection object on the ComputeNode side,
 /// but not on the MemoryNode side.  Once made, Connections are oblivious to the
 /// side where they were made.
-/// 
+///
 /// It is necessary to have a Connection between two machines before one-sided
 /// operations can be issued between those machines.  A side effect is that the
 /// connection allows two-sided operations between those machines.  This is
 /// realized in our design by a Connection only having public methods to send,
 /// receive, post one-sided requests, and poll for completions.
- 
 class Connection {
   rdma_cm_id *id_;         // Pointer to the QP for sends/receives
   const bool is_loopback_; // Track if this is a Loopback (self) connection
@@ -40,13 +35,7 @@ class Connection {
   /// Internal method for sending a Message (byte array) over RDMA as a
   /// two-sided operation.
   ///
-  /// TODO: Move to rdma_ops.h?
-  ///
-  /// @tparam T TODO
-  /// @param msg TODO
-  /// @param seg TODO
-  /// @param mr TODO
-  /// @return TODO
+  /// [mfs] Move to rdma_ops.h?
   template <typename T>
     requires std::ranges::contiguous_range<T>
   remus::Status SendMessage(T &&msg, Segment &seg, ibv_mr *mr) {
@@ -73,9 +62,7 @@ class Connection {
     sge.length = msg_size;
     sge.lkey = mr->lkey;
 
-    // TODO: Could we use rdma_post_send() instead of ibv_post_send()?
-    //
-    // TODO: Document this bit of code a bit better?
+    // [mfs] Could we use rdma_post_send() instead of ibv_post_send()?
     ibv_send_wr wr;
     std::memset(&wr, 0, sizeof(wr));
     wr.send_flags = IBV_SEND_SIGNALED;
@@ -85,23 +72,21 @@ class Connection {
     wr.wr_id = 1; // NB: Unique IDs aren't needed for synchronous sends
     ibv_send_wr *bad_wr;
     if (ibv_post_send(id_->qp, &wr, &bad_wr) != 0) {
-      // TODO: Should this be fatal?
+      // [mfs] Should this be fatal?
       remus::Status err = {remus::InternalError, ""};
       err << "ibv_post_send(): " << strerror(errno);
       return err;
     }
 
     // NB: This assumes that the CQ associated with the SQ is synchronous.
-    //
-    // TODO: Document this
     ibv_wc wc;
     int comps = rdma_get_send_comp(id_, &wc);
     while (comps < 0 && errno == EAGAIN) {
       comps = rdma_get_send_comp(id_, &wc);
     }
-    // TODO: Are these errors recoverable, or should we panic?
+    // [mfs] Are these errors recoverable, or should we panic?
     if (comps < 0) {
-      // TODO: Is operator << really better than just using std::format here?
+      // [mfs] Is operator << really better than just using std::format here?
       remus::Status e = {remus::InternalError, {}};
       return e << "rdma_get_send_comp: {}" << strerror(errno);
     } else if (wc.status != IBV_WC_SUCCESS) {
@@ -114,10 +99,7 @@ class Connection {
   /// Internal method for receiving a Message (byte array) over RDMA as a
   /// two-sided operation.
   ///
-  /// TODO: Move to rdma_ops.h?
-  ///
-  /// @param seg TODO
-  /// @return TODO
+  /// [mfs] Move to rdma_ops.h?
   remus::StatusVal<std::vector<uint8_t>> TryDeliverMessage(Segment &seg) {
     ibv_wc wc;
     auto ret = rdma_get_recv_comp(id_, &wc);
@@ -148,13 +130,7 @@ class Connection {
     }
   }
 
-  /// TODO
-  ///
-  /// TODO: Move to rdma_ops.h?
-  ///
-  /// @tparam T TODO
-  /// @param seg TODO
-  /// @return TODO
+  /// [mfs] Move to rdma_ops.h?
   template <typename T>
   remus::StatusVal<std::vector<T>> TryDeliverVec(Segment &seg) {
     remus::StatusVal<std::vector<uint8_t>> msg_or = TryDeliverMessage(seg);
@@ -169,39 +145,21 @@ class Connection {
 
 public:
   /// Construct a connection object
-  ///
-  /// @param src_id
-  /// @param dst_id
-  /// @param channel_id
   Connection(uint32_t src_id, uint32_t dst_id, rdma_cm_id *channel_id)
       : id_(channel_id), is_loopback_(src_id == dst_id) {}
 
   Connection(const Connection &) = delete;
   Connection(Connection &&c) = delete;
 
-  /// TODO
-  ///
-  /// TODO: This should become SendVec, and then it should be simplified
+  /// [mfs] This should become SendVec, and then it should be simplified
   ///       accordingly?
-  ///
-  /// @tparam T  TODO
-  /// @param msg TODO
-  /// @param seg TODO
-  /// @param mr TODO
-  /// @return TODO
   template <typename T>
     requires std::ranges::contiguous_range<T>
   remus::Status Send(T &&msg, Segment &seg, ibv_mr *mr) {
     return SendMessage(std::forward<T>(msg), seg, mr);
   }
 
-  /// TODO
-  ///
-  /// TODO: Rename to receive_vec?
-  ///
-  /// @tparam T TODO
-  /// @param seg TODO
-  /// @return TODO
+  /// [mfs] Rename to receive_vec?
   template <typename T>
   remus::StatusVal<std::vector<T>> DeliverVec(Segment &seg) {
     auto p = this->TryDeliverVec<T>(seg);
@@ -211,7 +169,6 @@ public:
     return p;
   }
 
-  /// TODO
   ~Connection() {
     // A loopback connection is made manually, so we do not need to deal with
     // the regular `rdma_cm` handling. Similarly, we avoid destroying the event
@@ -242,19 +199,13 @@ public:
   ///
   /// NB: These are issued by compute_thread, which means there's a trust
   ///     issue regarding the send_wr, and also regarding using the right PD.
-  ///
-  /// @param send_wr_ TODO
-  void send_onesided(ibv_send_wr *send_wr) {
+  void send_onesided(ibv_send_wr *send_wr_) {
     ibv_send_wr *bad = nullptr;
-    RDMA_CM_ASSERT(ibv_post_send, id_->qp, send_wr, &bad);
+    RDMA_CM_ASSERT(ibv_post_send, id_->qp, send_wr_, &bad);
   }
 
   /// Poll to see if anything new arrived on the completion queue.  This
   /// encapsulates so that id_ can be private.
-  ///
-  /// @param num
-  /// @param wc
-  /// @return
   int poll_cq(int num, ibv_wc *wc) {
     return ibv_poll_cq(id_->send_cq, num, wc);
   }

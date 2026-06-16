@@ -11,23 +11,14 @@
 #include "util.h"
 
 namespace remus::internal {
-
-/// @brief A policy for scheduling QPs (Queue Pairs) to interact with MemoryNodes
-/// @details
 /// QpSchedPolicy encapsulates the state and decision making process regarding
-/// how to pick a QP to use in order to interact with a MemoryNode.
+/// how to pick a QP to use in order to interact with a MemoryNode
 class QpSchedPolicy {
-  // TODO: Why class+public instead of struct?
 public:
   /// An enum for tracking which policy was configured at start-up time
-  ///
-  /// TODO: Document each option
   enum Policy { NONE, MOD, RR, RAND, ONE_TO_ONE };
 
   /// Convert a string (such as what would be in an ArgMap) into a Policy
-  ///
-  /// @param policy TODO
-  /// @return
   static Policy to_policy(std::string policy) {
     if (policy == "MOD") {
       return MOD;
@@ -87,9 +78,6 @@ public:
 
   /// Use the previously selected QP_SCHED_POL to decide on the index for the
   /// next Connection to use.
-  ///
-  /// @param mn TODO
-  /// @return TODO
   uint32_t get_lane_idx(uint32_t mn) {
     if (policy_ == RR) {
       return (per_mn_[mn] = (++per_mn_[mn]) % num_lanes_);

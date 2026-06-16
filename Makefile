@@ -1,17 +1,11 @@
-all: release debug
-
-release:
+include MakefileBenchmark
+all:
 	@CXX=clang++-18 cmake -B build -DCMAKE_BUILD_TYPE=Release
-	@cmake --build build -j
+	@cmake --build build -j8 # -v
 
 clean:
 	@rm -rf build
-	@rm -rf build_debug
 	@rm -rf run.screenrc
 	@rm -rf dev.screenrc
 
-debug:
-	@CXX=clang++-18 cmake -B build_debug -DCMAKE_BUILD_TYPE=Debug
-	@cmake --build build_debug -j
-
-.PHONY: all clean release debug
+.PHONY: all clean benchmark

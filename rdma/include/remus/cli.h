@@ -12,12 +12,10 @@
 
 namespace remus {
 
-/// @brief A struct to classify command-line arguments
-/// @details
-/// A tuple that describes a command-line argument and its value. Supported 
+/// A tuple that describes a command-line argument and its value. Supported
 /// types are uint64_t, double, bool, and std::string. Note that only one flag
 /// per option is supported, and it must begin with '-'.  Note, too, that a
-/// command-line argument is optional if a default value is provided.
+/// command-line argument is optional iff a default value is provided.
 struct Arg {
   /// A variant holding the four supported types of arg values
   using value_t = std::variant<uint64_t, double, std::string, bool>;
@@ -39,8 +37,7 @@ struct Arg {
 /// @param def_val  The default value
 ///
 /// @return An Arg for this command-line arg
-inline Arg STR_ARG_OPT(std::string flag, std::string desc,
-                       std::string def_val) {
+Arg STR_ARG_OPT(std::string flag, std::string desc, std::string def_val) {
   return {flag, desc, Arg::STR, def_val, {}};
 }
 
@@ -50,7 +47,7 @@ inline Arg STR_ARG_OPT(std::string flag, std::string desc,
 /// @param desc     A description (for help)
 ///
 /// @return An Arg for this command-line arg
-inline Arg STR_ARG(std::string flag, std ::string desc) {
+Arg STR_ARG(std::string flag, std ::string desc) {
   return {flag, desc, Arg::STR, {}, {}};
 }
 
@@ -63,8 +60,8 @@ inline Arg STR_ARG(std::string flag, std ::string desc) {
 /// @param options  The valid options
 ///
 /// @return An Arg for this command-line arg
-inline Arg ENUM_ARG_OPT(std::string flag, std::string desc, std::string def_val,
-                        std::vector<std::string> options) {
+Arg ENUM_ARG_OPT(std::string flag, std::string desc, std::string def_val,
+                 std::vector<std::string> options) {
   return {flag, desc, Arg::STR, def_val, options};
 }
 
@@ -76,8 +73,8 @@ inline Arg ENUM_ARG_OPT(std::string flag, std::string desc, std::string def_val,
 /// @param options  The valid options
 ///
 /// @return An Arg for this command-line arg
-inline Arg ENUM_ARG(std::string flag, std ::string desc,
-                    std::vector<std::string> options) {
+Arg ENUM_ARG(std::string flag, std ::string desc,
+             std::vector<std::string> options) {
   return {flag, desc, Arg::STR, std::nullopt, options};
 }
 
@@ -89,7 +86,7 @@ inline Arg ENUM_ARG(std::string flag, std ::string desc,
 /// @param def_val  The default value
 ///
 /// @return An Arg for this command-line arg
-inline Arg BOOL_ARG_OPT(std::string flag, std ::string desc) {
+Arg BOOL_ARG_OPT(std::string flag, std ::string desc) {
   return {flag, desc, Arg::BOOL, false, {}};
 }
 
@@ -100,7 +97,7 @@ inline Arg BOOL_ARG_OPT(std::string flag, std ::string desc) {
 /// @param def_val  The default value
 ///
 /// @return An Arg for this command-line arg
-inline Arg U64_ARG_OPT(std::string flag, std ::string desc, uint64_t def_val) {
+Arg U64_ARG_OPT(std::string flag, std ::string desc, uint64_t def_val) {
   return {flag, desc, Arg::U64, def_val, {}};
 }
 
@@ -110,7 +107,7 @@ inline Arg U64_ARG_OPT(std::string flag, std ::string desc, uint64_t def_val) {
 /// @param desc     A description (for help)
 ///
 /// @return An Arg for this command-line arg
-inline Arg U64_ARG(std::string flag, std::string desc) {
+Arg U64_ARG(std::string flag, std::string desc) {
   return {flag, desc, Arg::U64, {}, {}};
 }
 
@@ -121,7 +118,7 @@ inline Arg U64_ARG(std::string flag, std::string desc) {
 /// @param def_val  The default value
 ///
 /// @return An Arg for this command-line arg
-inline Arg F64_ARG_OPT(std::string flag, std::string desc, double def_val) {
+Arg F64_ARG_OPT(std::string flag, std::string desc, double def_val) {
   return {flag, desc, Arg::F64, def_val, {}};
 }
 
@@ -131,21 +128,19 @@ inline Arg F64_ARG_OPT(std::string flag, std::string desc, double def_val) {
 /// @param desc     A description (for help)
 ///
 /// @return An Arg for this command-line arg
-inline Arg F64_ARG(std::string flag, std ::string desc) {
+Arg F64_ARG(std::string flag, std ::string desc) {
   return {flag, desc, Arg::F64, {}, {}};
 }
 
-/// @brief A collection of Args, and associated methods for working with them
-/// @details 
 /// A collection of Args, and associated methods for working with them. Note
 /// that ArgMap is trivially constructed, but you probably want to use
-/// `import_args` once (or more times) to populate it.
+/// import_args once (or more times) to populate it.
 class ArgMap {
   /// A mapping from Arg.flag to an Arg, representing all supported args
   std::map<std::string, Arg> args;
 
   /// The name of the program being run.  This also serves as a flag to indicate
-  /// that parse has been run.
+  /// that parse_args has been run.
   std::string program_name = "";
 
 public:
@@ -155,16 +150,14 @@ public:
   /// @param in The args to merge into the ArgMap
   void import(const std::initializer_list<Arg> &in) {
     using namespace std;
-    if (program_name != "") {
-      throw runtime_error("Error: cannot call import_args() after parse()");
-    }
+    if (program_name != "")
+      throw runtime_error(
+          "Error: cannot call import_args() after parse_args()");
     for (auto c : in) {
-      if ((c.flag.length() < 2) || (*c.flag.begin() != '-')) {
+      if ((c.flag.length() < 2) || (*c.flag.begin() != '-'))
         throw runtime_error(format("Error: invalid flag `{}`", c.flag));
-      }
-      if (args.find(c.flag) != args.end()) {
+      if (args.find(c.flag) != args.end())
         throw runtime_error(format("Error: duplicate flag `{}`", c.flag));
-      }
       args.insert({c.flag, c});
     }
   }
@@ -178,10 +171,9 @@ public:
   /// @param argv The array of command-line args
   void parse(int argc, char **argv) {
     using namespace std;
-    // Ensure this wasn't called more than once
-    if (program_name != "") {
-      throw runtime_error("Error: parse() should only be called once!");
-    }
+    // NB:  Disable future calls to parse_args() and import_args()
+    if (program_name != "")
+      throw runtime_error("Error: parse_args() should only be called once!");
     program_name = basename(argv[0]);
 
     int curr = 1;
@@ -213,17 +205,16 @@ public:
       }
 
       // Now we can parse the value and advance
-      if (arg->second.type == Arg::U64) {
+      if (arg->second.type == Arg::U64)
         arg->second.value = stoull(next);
-      } else if (arg->second.type == Arg::F64) {
+      else if (arg->second.type == Arg::F64)
         arg->second.value = stod(next);
-      } else if (arg->second.type == Arg::STR) {
+      else if (arg->second.type == Arg::STR) {
         arg->second.value = next;
         if (arg->second.options.size() > 0) {
           bool match = false;
-          for (auto i : arg->second.options) {
+          for (auto i : arg->second.options)
             match = match || (i == next);
-          }
           if (!match) {
             usage();
             throw runtime_error(
@@ -231,17 +222,15 @@ public:
           }
         }
       }
-      // TODO: I don't see where we handle Bool args?
       curr += 2;
     }
 
     // Verify that no required args were skipped
-    for (auto a : args) {
+    for (auto a : args)
       if (!a.second.value) {
         usage();
         throw runtime_error(format("Error: `{}` is required", a.second.flag));
       }
-    }
   }
 
   /// Print a usage message

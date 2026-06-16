@@ -9,36 +9,24 @@
 #include <string_view>
 
 namespace remus {
-
-/// @brief An enum to track the type of status
-///
-/// TODO: This doesn't need so much engineering.  Why isn't a Variant good
+/// [mfs] This doesn't need so much engineering.  Why isn't a Variant good
 ///       enough?  Does the type of error really matter?
 enum StatusType {
-  Ok,             // TODO
-  InternalError,  // TODO
-  Unavailable,    // TODO
-  Aborted,        // TODO
+  Ok,
+  InternalError,
+  Unavailable,
+  Aborted,
 };
 
-/// @brief A status object that can be used to track the status of an operation
-///
-/// TODO: I'm wondering why this can't just be a variant... it's either OK or
+/// [mfs] I'm wondering why this can't just be a variant... it's either OK or
 /// Some(string)...
 struct Status {
-  StatusType t;                        // TODO
-  std::optional<std::string> message;  // TODO
+  StatusType t;
+  std::optional<std::string> message;
 
-  /// @brief Create a Status object with the given type and message
-  /// @return A Status object with the given type and message
   static Status Ok() { return {StatusType::Ok, {}}; }
 
-  /// @brief Define the operator << for Status
-  /// @tparam T The type of the object to append to the message
-  /// @param t The object itself to append to the message
-  /// @return A Status object with the appended message
-  template <typename T>
-  Status operator<<(T t) {
+  template <typename T> Status operator<<(T t) {
     std::string curr = message ? message.value() : "";
     std::stringstream s;
     s << curr;
@@ -48,16 +36,14 @@ struct Status {
   }
 };
 
-/// @brief A simple struct that contains the status with its value
-/// @tparam T The type of the value
-///
-/// TODO: We might be able to get by with a std::variant.
-template <class T>
-struct StatusVal {
-  Status status;         // TODO
-  std::optional<T> val;  // TODO
+/// [mfs] I'm not convinced we need this in the workload folder.  It is also
+///       used in the RDMA code, where we might be able to get by with a
+///       std::variant.
+template <class T> struct StatusVal {
+  Status status;
+  std::optional<T> val;
 };
-}  // namespace remus
+} // namespace remus
 
 namespace remus {
 #define RELEASE 0
@@ -102,7 +88,7 @@ inline void print_fatal(std::string_view msg) {
 
 /// Print a debug message only if REMUS_DEBUG_MSGS is defined
 #if REMUS_LOG_LEVEL == DEBUG
-#define REMUS_DEBUG(...) \
+#define REMUS_DEBUG(...)                                                       \
   remus::print_debug(std::format(__VA_ARGS__), __FILE__, __LINE__)
 #else
 #define REMUS_DEBUG(...)
@@ -112,36 +98,35 @@ inline void print_fatal(std::string_view msg) {
 #define REMUS_INFO(...) remus::print_info(std::format(__VA_ARGS__))
 
 /// Terminate with a message on a fatal error
-#define REMUS_FATAL(...)                          \
-  {                                               \
-    remus::print_fatal(std::format(__VA_ARGS__)); \
-    std::_Exit(1);                                \
+#define REMUS_FATAL(...)                                                       \
+  {                                                                            \
+    remus::print_fatal(std::format(__VA_ARGS__));                              \
+    std::_Exit(1);                                                             \
   }
 
 /// Assert, and print a fatal message if it fails
 ///
-/// TODO: ASSERT doesn't print a line number or file number.  We should add that
+/// [mfs] ASSERT doesn't print a line number or file number.  We should add that
 ///       (see DEBUG).
-#define REMUS_ASSERT(check, ...)                  \
-  if (!(check)) [[unlikely]] {                    \
-    remus::print_fatal(std::format(__VA_ARGS__)); \
-    std::_Exit(1);                                \
+#define REMUS_ASSERT(check, ...)                                               \
+  if (!(check)) [[unlikely]] {                                                 \
+    remus::print_fatal(std::format(__VA_ARGS__));                              \
+    std::_Exit(1);                                                             \
   }
 
 /// Terminate if status is not OK
-#define OK_OR_FAIL(status)                                          \
-  if (auto __s = status; (__s.t != remus::util::Ok)) [[unlikely]] { \
-    REMUS_FATAL("{}", __s.message.value());                         \
+#define OK_OR_FAIL(status)                                                     \
+  if (auto __s = status; (__s.t != remus::util::Ok)) [[unlikely]] {            \
+    REMUS_FATAL("{}", __s.message.value());                                    \
   }
 
 /// Fail if func does not return 0
-#define RDMA_CM_ASSERT(func, ...)                                     \
-  {                                                                   \
-    int ret = func(__VA_ARGS__);                                      \
-    REMUS_ASSERT(ret == 0, "{}{}{}", #func, "(): ", strerror(errno)); \
+#define RDMA_CM_ASSERT(func, ...)                                              \
+  {                                                                            \
+    int ret = func(__VA_ARGS__);                                               \
+    REMUS_ASSERT(ret == 0, "{}{}{}", #func, "(): ", strerror(errno));          \
   }
 
-/// TODO
 inline void INIT() {
 #if REMUS_LOG_LEVEL == DEBUG
   std::printf("REMUS::DEBUG is true\n");
@@ -149,4 +134,4 @@ inline void INIT() {
   std::printf("REMUS::DEBUG is false\n");
 #endif
 }
-}  // namespace remus
+} // namespace remus

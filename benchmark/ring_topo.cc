@@ -1,4 +1,5 @@
 #include <memory>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -12,7 +13,7 @@
 #include <remus/cfg.h>
 #include <remus/cli.h>
 #include <remus/compute_node.h>
-#include <remus/compute_thread.h>
+#include <remus/ext_compute_thread.h>
 #include <remus/logging.h>
 #include <remus/mem_node.h>
 #include <remus/util.h>
@@ -21,15 +22,16 @@
 
 void metrics(std::string exp_name, uint64_t nnodes, uint64_t nthreads,
              uint64_t ops_per_thread, std::chrono::microseconds duration,
-             std::string exp_op, uint64_t zero_copy, uint64_t elements,
+             double read_ratio, double write_ratio, uint64_t peer_id, uint64_t elements,
              uint64_t overlap) {
   std::ofstream file(
       "metrics.txt",
       std::ios::out); // Use std::ios::out instead of std::ios::app to overwrite
   file << "Experiment: " << exp_name << std::endl;
   file << "TypeSize: " << TYPE_SIZE << std::endl;
-  file << "OpType: " << exp_op << std::endl;
-  file << "ZeroCopy: " << zero_copy << std::endl;
+  file << "Reads: " << read_ratio << std::endl;
+  file << "Writes: " << write_ratio << std::endl;
+  file << "RingPeer: " << peer_id << std::endl;
   file << "Elements: " << elements << std::endl;
   file << "Overlap: " << overlap << std::endl;
   file << "Nodes: " << nnodes << std::endl;
@@ -62,9 +64,7 @@ enum Operation { Write, Read, CAS, FAA };
 int main(int argc, char **argv) {
   std::unordered_map<Operation, std::string> op_name = {
       {Operation::Write, "Write"},
-      {Operation::Read, "Read"},
-      {Operation::CAS, "CAS"},
-      {Operation::FAA, "FAA"}};
+      {Operation::Read, "Read"}};
   // Configure logging
   remus::INIT();
 
@@ -83,22 +83,17 @@ int main(int argc, char **argv) {
   uint64_t cn = args->uget(remus::LAST_CN_ID);
   uint64_t sn = args->uget(remus::SEGS_PER_MN);
   uint64_t ops = args->uget(OPS);
-  auto exp_op_str = args->sget(EXP_OP);
-  Operation exp_op;
-  auto zero_copy = args->uget(ZERO_COPY);
   auto overlap = args->uget(OVERLAP);
-  if (exp_op_str == "Read") {
-    exp_op = Operation::Read;
-  } else if (exp_op_str == "Write") {
-    exp_op = Operation::Write;
-  } else if (exp_op_str == "CAS") {
-    exp_op = Operation::CAS;
-  } else if (exp_op_str == "FAA") {
-    exp_op = Operation::FAA;
-  } else {
-    REMUS_FATAL("Invalid operation: {}", exp_op_str);
+  uint64_t read_p = args->uget(READ_P);
+  double read_ratio = read_p/100.0;
+  double write_ratio = 1 - read_ratio;
+  
+  if (read_ratio + write_ratio != 1){
+    REMUS_FATAL("Read and Write ratio must add up to 100");
     exit(1);
   }
+  auto n_cns = cn - c0 + 1;
+  auto n_mns = mn - m0 + 1;
   // prepare network information about this machine and about the memory nodes
   remus::MachineInfo self(id, id_to_dns_name(id));
   std::vector<remus::MachineInfo> memnodes;
@@ -139,25 +134,27 @@ int main(int argc, char **argv) {
     memory_node->init_done();
   }
 
-  std::vector<std::shared_ptr<remus::ComputeThread>> compute_threads;
+  std::vector<std::shared_ptr<remus::EXTComputeThread>> compute_threads;
+  // Declare array to hold elements such that everyone can access it
   remus::rdma_ptr<Type> *elements =
       new remus::rdma_ptr<Type>[args->uget(ELEMENTS)];
-  auto elements_per_slab = args->uget(ELEMENTS) / sn / (mn - m0 + 1);
+  auto elements_per_slab = args->uget(ELEMENTS) / sn / (n_mns);
 
   if (id >= c0 && id <= cn) {
     for (uint64_t i = 0; i < args->uget(remus::CN_THREADS); ++i) {
       compute_threads.push_back(
-          std::make_shared<remus::ComputeThread>(id, compute_node, args));
+          std::make_shared<remus::EXTComputeThread>(id, compute_node, args));
     }
     // allocate memory elements
     if (id == c0) {
       // Allocate memory for the elements start array - one entry per slab
       // across all memory nodes
       auto elements_start = compute_threads[0]->allocate<remus::rdma_ptr<Type>>(
-          sn * (mn - m0 + 1));
+          sn * (n_mns));
+
 
       // Allocate elements for all slabs except the last one
-      for (uint64_t i = 0; i < sn * (mn - m0 + 1) - 1; i++) {
+      for (uint64_t i = 0; i < sn * (n_mns) - 1; i++) {
         // Allocate a chunk of elements for this slab
         auto elements_start_i =
             compute_threads[0]->allocate<Type>(elements_per_slab);
@@ -165,8 +162,6 @@ int main(int argc, char **argv) {
         // Set up pointers to each individual orec in this chunk
         for (uint64_t j = 0; j < elements_per_slab; ++j) {
           elements[i * elements_per_slab + j] = elements_start_i + j;
-          // REMUS_INFO("Orecs[{}]: {}", i * orec_per_slab + j,
-          // (uintptr_t)orecs[i * orec_per_slab + j]);
         }
 
         // Store the base pointer of this chunk in the orecs_start array
@@ -174,99 +169,94 @@ int main(int argc, char **argv) {
       }
       // Handle the last slab which may have a different number of orecs
       uint64_t allocated_elements =
-          elements_per_slab * (sn * (mn - m0 + 1) - 1);
+          elements_per_slab * (sn * (n_mns) - 1);
       uint64_t remaining_elements = args->uget(ELEMENTS) - allocated_elements;
       // Allocate the remaining orecs
       auto elements_start_last =
           compute_threads[0]->allocate<Type>(remaining_elements);
-
       // Set up pointers to each individual orec in the last chunk
       for (uint64_t j = 0; j < remaining_elements; ++j) {
         elements[allocated_elements + j] = elements_start_last + j;
         // REMUS_INFO("Orecs[{}]: {}", allocated_orecs + j,
         // (uintptr_t)orecs[allocated_orecs + j]);
       }
-
+      REMUS_DEBUG("Allocated elements on all slabs");
       // Store the base pointer of the last chunk in the orecs_start array
-      compute_threads[0]->Write(elements_start + (sn * (mn - m0 + 1) - 1),
+      compute_threads[0]->Write(elements_start + (sn * (n_mns) - 1),
                                 elements_start_last);
       // Set the root of the compute thread to the first element
       compute_threads[0]->set_root(elements_start);
-      compute_threads[0]->arrive_control_barrier(cn - c0 + 1);
-      compute_threads[0]->arrive_control_barrier(cn - c0 + 1);
+      compute_threads[0]->arrive_control_barrier(n_cns);
+      compute_threads[0]->arrive_control_barrier(n_cns);
     } else {
-      compute_threads[0]->arrive_control_barrier(cn - c0 + 1);
+      compute_threads[0]->arrive_control_barrier(n_cns);
       auto elements_start =
           compute_threads[0]->get_root<remus::rdma_ptr<Type>>();
-      for (uint64_t i = 0; i < sn * (mn - m0 + 1) - 1; i++) {
+      for (uint64_t i = 0; i < sn * (n_mns) - 1; i++) {
         auto elements_start_i = compute_threads[0]->Read(elements_start + i);
         for (uint64_t j = 0; j < elements_per_slab; ++j) {
           elements[i * elements_per_slab + j] = elements_start_i + j;
         }
       }
       uint64_t allocated_elements =
-          elements_per_slab * (sn * (mn - m0 + 1) - 1);
+          elements_per_slab * (sn * (n_mns) - 1);
       uint64_t remaining_elements = args->uget(ELEMENTS) - allocated_elements;
       auto elements_start_last =
-          compute_threads[0]->Read(elements_start + (sn * (mn - m0 + 1) - 1));
+          compute_threads[0]->Read(elements_start + (sn * (n_mns) - 1));
       for (uint64_t j = 0; j < remaining_elements; ++j) {
         elements[allocated_elements + j] = elements_start_last + j;
       }
-      compute_threads[0]->arrive_control_barrier(cn - c0 + 1);
+      compute_threads[0]->arrive_control_barrier(n_cns);
     }
     // Threads at this node
     const uint64_t cn_threads = args->uget(remus::CN_THREADS);
     // Total threads in the experiment (all must reach the barriers)
-    const uint64_t barrier_thread_count = (cn - c0 + 1) * cn_threads;
+    const uint64_t barrier_thread_count = (n_cns) * cn_threads;
 
     //
     // start worker threads
     //
     std::vector<std::thread> worker_threads;
-    Type typeval;
     for (uint64_t i = 0; i < cn_threads; ++i) {
 
-      worker_threads.push_back(std::thread(
-
-          [&](int i) {
+      worker_threads.push_back(std::thread([&](int i) {
             using std::uniform_int_distribution;
+            auto my_peer_node = (id + 1) % n_mns;
+            auto elems_per_node = args->uget(ELEMENTS) / n_mns;
+            //Generate a key that is within the range of my designated peer node to emulate a ring topology. 
             uniform_int_distribution<size_t> index_dist(
-                0, args->uget(ELEMENTS) - 1);
+                0 + (elems_per_node * my_peer_node), 0 + (elems_per_node * my_peer_node) + elems_per_node - 1);
+            std::uniform_real_distribution<> op_dist(0.0, 1.0);
             std::mt19937 gen(std::random_device{}());
             // Create thread context
 
-            Type *type = compute_threads[i]->local_allocate<Type>();
+            Type *landing = compute_threads[i]->local_allocate<Type>();
             remus::rdma_ptr<Type> *ptrs = new remus::rdma_ptr<Type>[ops];
+            Operation *exp_ops = new Operation[ops];
+            // Create an array of ptrs which represents the workload 
             for (uint64_t j = 0; j < ops; j++) {
+              double rand = op_dist(gen);
+              if (rand < read_ratio) {
+                exp_ops[j] = Operation::Read;
+              } else {
+                exp_ops[j] = Operation::Write;
+              }
               ptrs[j] = elements[index_dist(gen)];
             }
             // wait until the prepare phase is done
             compute_threads[i]->arrive_control_barrier(barrier_thread_count);
-            auto start = std::chrono::high_resolution_clock::now();
+
+            //* Experiment Starts Here *// 
             if (id == c0 && i == 0) {
+              auto start = std::chrono::high_resolution_clock::now();
               for (uint64_t j = 0; j < ops; j++) {
                 auto ptr = ptrs[j];
+                auto exp_op = exp_ops[j];
                 if (exp_op == Operation::Write) {
-                  if(zero_copy) {
-                    compute_threads[i]->Write(ptr, type);
-                  } else {
-                    compute_threads[i]->Write(ptr, typeval);
-                  }
+                  compute_threads[i]->Write(ptr, landing);
                 } else if (exp_op == Operation::Read) {
-                  if(zero_copy) {
-                    compute_threads[i]->Read(ptr, type);
-                  } else {
-                    compute_threads[i]->Read(ptr);
-                  }
-                } else if (exp_op == Operation::CAS) {
-                  compute_threads[i]->CompareAndSwap(remus::rdma_ptr<uint64_t>((uintptr_t)ptr),
-                                    typeval.value, typeval.value + 1);
-                } else if (exp_op == Operation::FAA) {
-                  compute_threads[i]->FetchAndAdd(remus::rdma_ptr<uint64_t>((uintptr_t)ptr),
-                                 typeval.value);
-                } else {
-                  REMUS_FATAL("Invalid operation: {}", exp_op_str);
-                }
+                  compute_threads[i]->Read(ptr, landing);
+                } 
               }
               // dont't exit until everyone finishes the experiment
               compute_threads[i]->arrive_control_barrier(barrier_thread_count);
@@ -274,32 +264,17 @@ int main(int argc, char **argv) {
               auto duration =
                   std::chrono::duration_cast<std::chrono::microseconds>(end -
                                                                         start);
-              metrics(args->sget(EXP_NAME), cn + 1, cn_threads, ops, duration,
-                      op_name[exp_op], zero_copy, args->uget(ELEMENTS),
+              metrics(args->sget(EXP_NAME), n_cns, cn_threads, ops, duration,
+                      read_ratio, write_ratio, my_peer_node, args->uget(ELEMENTS),
                       overlap);
             } else {
               for (uint64_t j = 0; j < ops; j++) {
                 auto ptr = ptrs[j];
+                auto exp_op = exp_ops[j];
                 if (exp_op == Operation::Write) {
-                  if(zero_copy) {
-                    compute_threads[i]->Write(ptr, type);
-                  } else {
-                    compute_threads[i]->Write(ptr, typeval);
-                  }
+                  compute_threads[i]->Write(ptr, landing);
                 } else if (exp_op == Operation::Read) {
-                  if(zero_copy) {
-                    compute_threads[i]->Read(ptr, type);
-                  } else {
-                    compute_threads[i]->Read(ptr);
-                  }
-                } else if (exp_op == Operation::CAS) {
-                  compute_threads[i]->CompareAndSwap(remus::rdma_ptr<uint64_t>((uintptr_t)ptr),
-                                    typeval.value, typeval.value + 1);
-                } else if (exp_op == Operation::FAA) {
-                  compute_threads[i]->FetchAndAdd(remus::rdma_ptr<uint64_t>((uintptr_t)ptr),
-                                 typeval.value);
-                } else {
-                  REMUS_FATAL("Invalid operation: {}", exp_op_str);
+                  compute_threads[i]->Read(ptr, landing);
                 }
               }
               // dont't exit until everyone finishes the experiment
@@ -311,10 +286,7 @@ int main(int argc, char **argv) {
     for (auto &t : worker_threads) {
       t.join();
     }
-    REMUS_INFO("All threads finished!");
   }
-
-  // Since ComputeNode is a smart pointer, it will destruct as main exits.
 
   return 0;
 }

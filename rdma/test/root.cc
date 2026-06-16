@@ -94,60 +94,82 @@ int main(int argc, char **argv) {
   // pointers to ComputeThread?
 
   std::vector<std::shared_ptr<remus::ComputeThread>> compute_threads;
-
+  uint64_t total_threads = (cn - c0 + 1) * args->uget(remus::CN_THREADS);
   if (id >= c0 && id <= cn) {
     for (uint64_t i = 0; i < args->uget(remus::CN_THREADS); ++i) {
       compute_threads.push_back(
           std::make_shared<remus::ComputeThread>(id, compute_node, args));
     }
     if (id == c0) {
-      compute_threads[0]->set_root(remus::rdma_ptr<uint64_t>((uint64_t)0));
-      REMUS_INFO("pass basic write test");
-      compute_threads[0]->get_root<uint64_t>();
-      REMUS_INFO("pass get read test");
-      compute_threads[0]->cas_root(remus::rdma_ptr<uint64_t>((uint64_t)0), remus::rdma_ptr<uint64_t>((uint64_t)1));
-      REMUS_INFO("pass cas test");
-      compute_threads[0]->faa_root<uint64_t>(1);
-      REMUS_INFO("pass faa test");
       auto ptr = compute_threads[0]->allocate<Counter>();
-      REMUS_INFO("pass allocate test");
       compute_threads[0]->Write<uint64_t>(
-          remus::rdma_ptr<uint64_t>(ptr.raw() + offsetof(Counter, value)), (uint64_t)0);
-      compute_threads[0]->Write<bool>(
-          remus::rdma_ptr<bool>(ptr.raw() + offsetof(Counter, locked)),
+          remus::rdma_ptr<uint64_t>(ptr.raw() + offsetof(Counter, value)), 0);
+      compute_threads[0]->Write<uint64_t>(
+          remus::rdma_ptr<uint64_t>(ptr.raw() + offsetof(Counter, locked)),
           false);
       compute_threads[0]->set_root(ptr);
-      REMUS_INFO("pass init root test");
     }
     std::vector<std::thread> worker_threads;
-    uint64_t total_threads = (cn - c0 + 1) * args->uget(remus::CN_THREADS);
     for (auto &t : compute_threads) {
       worker_threads.push_back(std::thread([t, total_threads]() {
         t->arrive_control_barrier(total_threads);
-        REMUS_INFO("pass arrive_control_barrier test");
+        REMUS_INFO("thread {} arrive_control_barrierd at barrier",
+                   (uint64_t)t.get());
         auto root = t->get_root<Counter>();
-        while (t->CompareAndSwap(remus::rdma_ptr<bool>(
+        while (t->CompareAndSwap(remus::rdma_ptr<uint64_t>(
                                      root.raw() + offsetof(Counter, locked)),
                                  false, true) != false)
           ;
-        REMUS_INFO("pass cas bool test");
         t->Write<uint64_t>(
             remus::rdma_ptr<uint64_t>(root.raw() + offsetof(Counter, value)),
             t->Read<uint64_t>(remus::rdma_ptr<uint64_t>(
                 root.raw() + offsetof(Counter, value))) +
                 1);
-        t->Write<bool>(
-            remus::rdma_ptr<bool>(root.raw() + offsetof(Counter, locked)),
+        t->Write<uint64_t>(
+            remus::rdma_ptr<uint64_t>(root.raw() + offsetof(Counter, locked)),
             false);
         t->arrive_control_barrier(total_threads);
         REMUS_INFO("thread {} arrive_control_barrierd at barrier again",
                    (uint64_t)t.get());
-        
-    }));
+      }));
     }
     for (auto &t : worker_threads) {
       t.join();
     }
-    REMUS_INFO("pass root test");
+    if (id == c0) {
+      auto root = compute_threads[0]->get_root<Counter>();
+      auto read_value = compute_threads[0]->Read<uint64_t>(
+          remus::rdma_ptr<uint64_t>(root.raw() + offsetof(Counter, value)));
+      REMUS_ASSERT(read_value == total_threads,
+                   "Counter value is not equal to total threads");
+      REMUS_INFO("Counter value = {} is equal to total threads = {}",
+                 read_value, total_threads);
+    }
   }
+
+  // [mfs] ComputeNode needs to know about the MemoryNode::ControlBlock type
+
+  // [mfs] We should hit a barrier here.  That would test FAA/CAS, Read, and
+  // Write
+  //
+  // Instead, forge a pointer to the first slab in each memory node, and update
+  // their control channel:
+
+  // [mfs] We probably want to do some aggregation of stats from all the compute
+  // nodes here
+
+  // [mfs] We probably want to read controlblocks to get stats from memory nodes
+  // here too
+
+  if (id == c0) {
+    REMUS_INFO("Experiment Complete!");
+    compute_node->send_shutdown();
+    REMUS_INFO("Environment Cleaned Up!");
+  }
+
+  if (memory_node) {
+    memory_node->await_shutdown();
+    REMUS_INFO("Memory Node Shutdown!");
+  }
+  return 0;
 }
